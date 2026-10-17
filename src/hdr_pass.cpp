@@ -29,6 +29,8 @@
 
 #include "hdr_pass.h"
 
+#include "colour_grade.h"
+
 #include "display3d_render_graph.h"
 #include "display3d_render_internal.h"
 
@@ -106,7 +108,11 @@ void recordTonemap(const gfx_api::RenderPassContext& passCtx)
 	gfx_api::constant_buffer_type<SHADER_TONEMAP> constants {};
 	display3d_fillPassReadUvScaleClamp(passCtx, 0, constants.uvScaleClamp);
 	constants.params = glm::vec4(gfx_api::context::get().bloomIntensity(), kExposure, kShoulderKnee, kBloomLevels);
-	display3d_drawFullscreenTriangle<gfx_api::TonemapPSO>(constants, scene, bloom);
+	gfx_api::texture* gradeLut = colour_grade::currentLut();
+	const float gradeStrength = gradeLut != nullptr ? colour_grade::currentStrength() : 0.f;
+	constants.grade = glm::vec4(gradeStrength, static_cast<float>(colour_grade::kLutSize), 0.f, 0.f);
+	// The shader skips the LUT at strength 0; a texture must still be bound
+	display3d_drawFullscreenTriangle<gfx_api::TonemapPSO>(constants, scene, bloom, gradeLut != nullptr ? static_cast<gfx_api::abstract_texture*>(gradeLut) : bloom);
 }
 
 } // namespace hdr_pass

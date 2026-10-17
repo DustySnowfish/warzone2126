@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"name": "Rockies",
+	"strength": 1.0,
+	"exposure": 0.0,
+	"temperature": -0.16,
+	"tint": -0.02,
+	"contrast": 1.08,
+	"saturation": 0.95,
+	"lift": [0.0, 0.0, 0.015],
+	"gamma": [1.0, 1.0, 1.0],
+	"gain": [0.98, 1.0, 1.03]
+}

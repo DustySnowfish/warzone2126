@@ -804,6 +804,26 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("gfx.colourGrading", N_("Colour Grading"), N_("Each map type has its own colour look (warm desert, cold mountains, grey city). Needs HDR Lighting."));
+		auto valueChanger = OptionsDropdown<int>::make(
+			[]() {
+				OptionChoices<int> result;
+				result.choices = {
+					{ _("Off"), "", 0 },
+					{ _("Subtle"), "", 50 },
+					{ _("Full"), "", 100 },
+				};
+				result.setCurrentIdxForValue(war_getColourGrading());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setColourGrading(newValue);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("gfx.vsync", N_("Vertical Sync"), "");
 		auto valueChanger = OptionsDropdown<gfx_api::context::swap_interval_mode>::make(
 			[]() {

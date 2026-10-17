@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"name": "Urban",
+	"strength": 1.0,
+	"exposure": 0.0,
+	"temperature": -0.10,
+	"tint": 0.0,
+	"contrast": 1.10,
+	"saturation": 0.85,
+	"lift": [0.0, 0.01, 0.02],
+	"gamma": [1.0, 1.0, 1.0],
+	"gain": [1.0, 1.0, 1.0]
+}

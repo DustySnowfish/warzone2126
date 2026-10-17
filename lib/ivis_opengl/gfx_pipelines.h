@@ -1086,6 +1086,7 @@ namespace gfx_api
 	{
 		glm::vec4 uvScaleClamp;
 		glm::vec4 params; // x = bloom intensity, y = exposure, z = shoulder knee, w = bloom levels summed
+		glm::vec4 grade;  // x = colour grade strength (0 = off), y = LUT size (cells per axis)
 	};
 
 #define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
@@ -1116,7 +1117,8 @@ namespace gfx_api
 	using TonemapPSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TONEMAP),
 	std::tuple<
 		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>,
-		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>
+		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>,
+		texture_description<2, sampler_type::bilinear, kSampler_gradeLut, pixel_format_target::texture_2d>
 	>, SHADER_TONEMAP>;
 
 #undef WZ2126_FULLSCREEN_PSO_PREFIX

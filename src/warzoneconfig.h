@@ -268,6 +268,8 @@ bool war_getHdr();
 void war_setHdr(bool enabled);
 int war_getBloomIntensity(); // percent, 0 disables bloom
 void war_setBloomIntensity(int percent);
+int war_getColourGrading(); // percent strength of the per-map colour grade (needs HDR)
+void war_setColourGrading(int percent);
 
 bool war_getPointLightPerPixelLighting();
 void war_setPointLightPerPixelLighting(bool perPixelEnabled);

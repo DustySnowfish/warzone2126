@@ -882,6 +882,7 @@ namespace gfx_api
 	inline constexpr char kSampler_coarserTexture[] = "coarserTexture";
 	inline constexpr char kSampler_levelTexture[] = "levelTexture";
 	inline constexpr char kSampler_bloomTexture[] = "bloomTexture";
+	inline constexpr char kSampler_gradeLut[] = "gradeLut";
 	inline constexpr char kSampler_ssaoTexture[] = "ssaoTexture";
 	inline constexpr char kSampler_prepassNormals[] = "prepassNormals";
 	inline constexpr char kSampler_prepassDepth[] = "prepassDepth";

@@ -1,0 +1,13 @@
+{
+	"version": 1,
+	"name": "Arizona",
+	"strength": 1.0,
+	"exposure": 0.0,
+	"temperature": 0.12,
+	"tint": 0.0,
+	"contrast": 1.12,
+	"saturation": 1.06,
+	"lift": [0.0, 0.005, 0.02],
+	"gamma": [1.0, 1.0, 1.0],
+	"gain": [1.02, 1.0, 0.97]
+}

@@ -91,6 +91,7 @@
 #include "warzoneconfig.h"
 #include "ssao.h"
 #include "ssr.h"
+#include "colour_grade.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1605,6 +1606,7 @@ void shutdown3DView_FullReset()
 
 	ssao::shutdown();
 	ssr::shutdown();
+	colour_grade::shutdown();
 	range_rings::shutdown();
 
 	setLightingManager(nullptr);

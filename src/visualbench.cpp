@@ -23,6 +23,7 @@
  */
 
 #include "visualbench.h"
+#include "colour_grade.h"
 
 #include "lib/framework/frame.h"
 #include "lib/framework/physfs_ext.h"
@@ -282,6 +283,8 @@ void writeResults()
 	out["vsync"] = !disableVsync;
 	out["hdr"] = gfx_api::context::get().hdrActive();
 	out["bloomIntensity"] = gfx_api::context::get().bloomIntensity();
+	out["colourGrade"] = colour_grade::currentName();
+	out["colourGradeStrength"] = colour_grade::currentStrength();
 	out["revealMap"] = revealMap;
 
 	std::vector<double> all;

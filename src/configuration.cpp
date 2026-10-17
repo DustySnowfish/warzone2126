@@ -804,6 +804,7 @@ bool loadConfig()
 	war_setUpscalingSharpness(iniGetInteger("upscalingSharpness", war_getUpscalingSharpness()).value());
 	war_setHdr(iniGetBool("hdr", war_getHdr()).value());
 	war_setBloomIntensity(iniGetInteger("bloomIntensity", war_getBloomIntensity()).value());
+	war_setColourGrading(iniGetInteger("colourGrading", war_getColourGrading()).value());
 	{
 		std::string smaaValue = iniGetString("smaa", "off").value();
 		if (smaaValue == "low")
@@ -1133,6 +1134,7 @@ bool saveConfig()
 	iniSetInteger("upscalingSharpness", war_getUpscalingSharpness());
 	iniSetBool("hdr", war_getHdr());
 	iniSetInteger("bloomIntensity", war_getBloomIntensity());
+	iniSetInteger("colourGrading", war_getColourGrading());
 	switch (war_getSmaaMode())
 	{
 		case SMAA_MODE::OFF: iniSetString("smaa", "off"); break;
