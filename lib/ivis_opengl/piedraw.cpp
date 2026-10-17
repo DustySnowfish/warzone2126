@@ -1714,7 +1714,8 @@ static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const g
 
 	gfx_api::Draw3DShapeInstancedPerMeshUniforms meshUniforms {
 		tcmask ? 1 : 0, normalmap != nullptr, specularmap != nullptr, shape->buffers[VBO_TANGENT] != nullptr,
-		shieldEffect ? 1 : 0, static_cast<int>(fogOutput)
+		shieldEffect ? 1 : 0, static_cast<int>(fogOutput),
+		((shape->flags & iV_IMD_PBR) && specularmap != nullptr) ? ((shape->flags & iV_IMD_PBR_NO_AO) ? 2 : 1) : 0
 	};
 
 	gfx_api::buffer* pTangentBuffer = (shape->buffers[VBO_TANGENT] != nullptr) ? shape->buffers[VBO_TANGENT] : getZeroedVertexBuffer(shape->vertexCount * 4 * sizeof(gfx_api::gfxFloat));

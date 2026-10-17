@@ -1341,6 +1341,13 @@ static bool imdResolveLevelTextureFiles(const iIMDShape& s, size_t tilesetIdx, I
 	return true;
 }
 
+// PBR (glTF) models keep an RGB ORM texture (occlusion, roughness, metallic) in the
+// specular slot, so it must not be reduced to a single channel like a specular map.
+static gfx_api::texture_type imdSpecularSlotTextureType(const iIMDShape& s)
+{
+	return (s.flags & iV_IMD_PBR) ? gfx_api::texture_type::normal_map : gfx_api::texture_type::specular_map;
+}
+
 static void imdAssignLoadedLevelTexturePages(iIMDShapeTextures& output, size_t texpage, const optional<size_t>& tcmaskpage, const optional<size_t>& normalpage, const optional<size_t>& specpage)
 {
 	output.texpage = texpage;
@@ -1381,7 +1388,7 @@ static bool _imd_load_level_textures(const iIMDShape& s, size_t tilesetIdx, iIMD
 	if (resolved.specularFile.has_value())
 	{
 		debug(LOG_TEXTURE, "Loading specular map %s for %s", resolved.specularFile->c_str(), filename.toUtf8().c_str());
-		specpage = iV_GetTexture(resolved.specularFile->c_str(), gfx_api::texture_type::specular_map);
+		specpage = iV_GetTexture(resolved.specularFile->c_str(), imdSpecularSlotTextureType(s));
 		ASSERT_OR_RETURN(false, specpage.has_value(), "%s could not load tex page %s", filename.toUtf8().c_str(), resolved.specularFile->c_str());
 	}
 
@@ -1428,7 +1435,7 @@ LoadingTask<> imdLoadLevelTexturesTask(
 	if (resolved.specularFile.has_value())
 	{
 		debug(LOG_TEXTURE, "Loading specular map %s for %s", resolved.specularFile->c_str(), filename.toUtf8().c_str());
-		const auto specpageResult = co_await iV_GetTextureTask(controller, resolved.specularFile->c_str(), gfx_api::texture_type::specular_map);
+		const auto specpageResult = co_await iV_GetTextureTask(controller, resolved.specularFile->c_str(), imdSpecularSlotTextureType(s));
 		CORO_ASSERT_OR_RETURN(load_fail(), specpageResult.has_value() && specpageResult->has_value(), "%s could not load tex page %s", filename.toUtf8().c_str(), resolved.specularFile->c_str());
 		specpage = specpageResult.value();
 	}

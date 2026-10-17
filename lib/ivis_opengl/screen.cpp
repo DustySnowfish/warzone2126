@@ -65,6 +65,7 @@ bool wz_texture_compression = true;
 static bool		bBackDrop = false;
 static char		screendump_filename[PATH_MAX];
 static bool		screendump_required = false;
+static bool		screendump_quiet = false;
 
 static GFX *backdropGfx = nullptr;
 static bool backdropIsMapPreview = false;
@@ -472,6 +473,7 @@ public:
 	WzString fileName;
 	std::unique_ptr<iV_Image> image;
 	onDeleteFunc onDelete;
+	bool quiet = false; // no console messages (used by the visual benchmark)
 
 	ScreenshotSaveRequest(const WzString & fileName, std::unique_ptr<iV_Image>&& image, const onDeleteFunc & onDelete)
 	: fileName(fileName)
@@ -505,7 +507,7 @@ static int saveScreenshotThreadFunc(void * saveRequest)
 			}
 		);
 	}
-	else
+	else if (!pSaveRequest->quiet)
 	{
 		// display message to user about screenshot
 		// this must be dispatched back to the main thread
@@ -544,6 +546,8 @@ void screenDoDumpToDiskIfRequired()
 	WzString fileName = screendump_filename;
 	debug(LOG_3D, "Saving screenshot %s", fileName.toUtf8().c_str());
 	screendump_required = false;
+	const bool quiet = screendump_quiet;
+	screendump_quiet = false;
 
 	bool bSentRequest = gfx_api::context::get().getScreenshot([=](std::unique_ptr<iV_Image> image)
 	{
@@ -554,8 +558,11 @@ void screenDoDumpToDiskIfRequired()
 		}
 
 		// Dispatch encoding and saving screenshot to a background thread (since this is fairly costly)
-		snprintf(ConsoleString, sizeof(ConsoleString), "Saving screenshot %s ...", fileName.toUtf8().c_str());
-		addConsoleMessage(ConsoleString, LEFT_JUSTIFY, INFO_MESSAGE);
+		if (!quiet)
+		{
+			snprintf(ConsoleString, sizeof(ConsoleString), "Saving screenshot %s ...", fileName.toUtf8().c_str());
+			addConsoleMessage(ConsoleString, LEFT_JUSTIFY, INFO_MESSAGE);
+		}
 		ScreenshotSaveRequest * pSaveRequest =
 			new ScreenshotSaveRequest(
 				fileName,
@@ -568,6 +575,7 @@ void screenDoDumpToDiskIfRequired()
 					}
 				}
 			);
+		pSaveRequest->quiet = quiet;
 		WZ_THREAD * pSaveThread = wzThreadCreate(saveScreenshotThreadFunc, pSaveRequest);
 		if (pSaveThread == nullptr)
 		{
@@ -614,10 +622,11 @@ void screenDumpToDisk(const char *path, const char *level)
 	screendump_required = true;
 }
 
-void screenDumpToDiskNamed(const char *fileName)
+void screenDumpToDiskNamed(const char *fileName, bool quiet)
 {
 	sstrcpy(screendump_filename, fileName);
 	screendump_required = true;
+	screendump_quiet = quiet;
 }
 
 void screen_FlipIfBackDropTransition()

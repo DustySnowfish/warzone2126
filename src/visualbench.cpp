@@ -447,7 +447,7 @@ void visualBenchFrame()
 				char name[64];
 				snprintf(name, sizeof(name), "%02zu_%s.png", shotIndex + 1, shot.name.c_str());
 				results.back().screenshot = name;
-				screenDumpToDiskNamed((outDir + name).c_str());
+				screenDumpToDiskNamed((outDir + name).c_str(), true);
 				captureFrames = 0;
 				enterPhase(Phase::Capture);
 			}

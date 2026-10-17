@@ -52,6 +52,8 @@ struct iIMDShapeTextures;
 #define iV_IMD_PITCH_TO_CAMERA 0x00000020
 #define iV_IMD_NOSTRETCH       0x00001000
 #define iV_IMD_TCMASK          0x00010000
+#define iV_IMD_PBR             0x00100000 // Warzone 2126: physically based material (glTF), ORM texture in the specular slot
+#define iV_IMD_PBR_NO_AO       0x00200000 // Warzone 2126: the PBR texture has no occlusion in R (metal/roughness only)
 
 // polygon flags	b0..b7: col, b24..b31: anim index
 

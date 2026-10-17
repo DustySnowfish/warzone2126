@@ -1265,7 +1265,10 @@ namespace gfx_api
 		int hasTangents;
 		int shieldEffect;
 		int fogOutput;
+		int pbrMaterial; // Warzone 2126: 0 classic, 1 PBR with ORM texture, 2 PBR without occlusion (metal/roughness texture only)
+		int meshPad0 = 0; // keeps the block a multiple of 16 bytes (std140)
 	};
+	static_assert(sizeof(Draw3DShapeInstancedPerMeshUniforms) % 16 == 0, "meshuniforms must be a multiple of 16 bytes");
 
 	template<>
 	struct uniform_block_name<Draw3DShapeInstancedGlobalUniforms>

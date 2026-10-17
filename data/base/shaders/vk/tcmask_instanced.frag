@@ -35,6 +35,7 @@ layout(location = 0) out vec4 FragColor;
 #include "light.glsl"
 #include "tangentspace.glsl"
 #include "distance_fog.glsl"
+#include "pbr.glsl"
 
 float random(vec2 uv)
 {
@@ -78,64 +79,82 @@ void main()
 	}
 	N = normalize(N);
 
-	// Сalculate and combine final lightning
-	vec4 light = sceneColor;
-	vec3 L = normalize(lightDir);
-	float diffuseFactor = lambertTerm(N, L); //diffuse light
-	float visibility = getShadowVisibility(posModelSpace, posViewSpace, diffuseFactor, 0.0002f);
-	diffuseFactor = min(diffuseFactor, visibility*diffuseFactor);
-	visibility = mix(visibility, 1.0, min(float(specularmap), 1.0)); // check to exclude double multiply for hq models
-	vec4 lightmap_vec4 = texture(lightmap_tex, uvLightmap.xy, 0.f);
-	float distanceAboveTerrain = uvLightmap.z;
-	float lightmapFactor = 1.0f - (clamp(distanceAboveTerrain, 0.f, 300.f) / 300.f);
-
-	float specularMapValue = 0.f;
-	if (diffuseFactor > 0.0)
-	{
-		float vanillaFactor = 0.0; // Classic models shouldn't use diffuse light
-
-		if (specularmap != 0)
-		{
-			specularMapValue = texture(TextureSpecular, texCoord, WZ_MIP_LOAD_BIAS).r;
-			vec4 specularFromMap = vec4(specularMapValue, specularMapValue, specularMapValue, 1.0);
-
-			// Gaussian specular term computation
-			vec3 H = normalize(halfVec);
-			float exponent = acos(dot(H, N)) / 0.33; //0.33 is shininess
-			float gaussianTerm = exp(-(exponent * exponent));
-
-			light += specular * gaussianTerm * diffuseFactor * specularFromMap;
-
-			vanillaFactor = 1.0; // Neutralize factor for spec map
-		}
-
-		light += diffuse * diffuseFactor * diffuseMap * vanillaFactor;
-	}
-
-	vec4 ambientLight = vec4(blendAddEffectLighting(ambient.rgb, ((lightmap_vec4.rgb * lightmapFactor) / 3.f)), ambient.a) * diffuseMap;
-	// ambient light maxed for classic models to keep results similar to original
-	light += ambientLight * (1.0 + (1.0 - float(specularmap))) * visibility;
-
-	if (WZ_POINT_LIGHT_ENABLED == 1)
-	{
-		vec2 clipSpaceCoord = gl_FragCoord.xy / vec2(viewportWidth, viewportHeight);
-		light += iterateOverAllPointLights(clipSpaceCoord, posModelSpace, N, normalize(normal), normalize(halfVec - lightDir), diffuseMap, specularMapValue);
-	}
-
-	light.a = 1.0f;
-
 	vec4 fragColour;
-	if (tcmask != 0)
+	if (pbrMaterial != 0)
 	{
-		// Get mask for team colors from texture
-		float maskAlpha = texture(TextureTcmask, texCoord, WZ_MIP_LOAD_BIAS).r;
-
-		// Apply color using grain merge with tcmask
-		fragColour = (light + (teamcolour - 0.5) * maskAlpha) * colour;
+		// Warzone 2126 PBR path (glTF models): ORM texture in the specular slot
+		vec3 orm = texture(TextureSpecular, texCoord, WZ_MIP_LOAD_BIAS).rgb;
+		if (pbrMaterial == 2) { orm.r = 1.0; } // no occlusion in this texture
+		float teamMask = (tcmask != 0) ? texture(TextureTcmask, texCoord, WZ_MIP_LOAD_BIAS).r : 0.0;
+		vec3 baseSRGB = wzPBRBaseColour(diffuseMap.rgb, teamMask, teamcolour.rgb);
+		vec3 pbrColour = wzLinearToSRGB(wzShadePBR(baseSRGB, orm, N));
+		if (WZ_POINT_LIGHT_ENABLED == 1)
+		{
+			vec2 clipSpaceCoordPBR = gl_FragCoord.xy / vec2(float(viewportWidth), float(viewportHeight));
+			pbrColour += iterateOverAllPointLights(clipSpaceCoordPBR, posModelSpace, N, normalize(normal), normalize(halfVec - lightDir), vec4(baseSRGB, 1.0), 1.0 - orm.g).rgb;
+		}
+		fragColour = vec4(pbrColour, 1.0) * colour;
 	}
 	else
 	{
-		fragColour = light * colour;
+		// Сalculate and combine final lightning
+		vec4 light = sceneColor;
+		vec3 L = normalize(lightDir);
+		float diffuseFactor = lambertTerm(N, L); //diffuse light
+		float visibility = getShadowVisibility(posModelSpace, posViewSpace, diffuseFactor, 0.0002f);
+		diffuseFactor = min(diffuseFactor, visibility*diffuseFactor);
+		visibility = mix(visibility, 1.0, min(float(specularmap), 1.0)); // check to exclude double multiply for hq models
+		vec4 lightmap_vec4 = texture(lightmap_tex, uvLightmap.xy, 0.f);
+		float distanceAboveTerrain = uvLightmap.z;
+		float lightmapFactor = 1.0f - (clamp(distanceAboveTerrain, 0.f, 300.f) / 300.f);
+
+		float specularMapValue = 0.f;
+		if (diffuseFactor > 0.0)
+		{
+			float vanillaFactor = 0.0; // Classic models shouldn't use diffuse light
+
+			if (specularmap != 0)
+			{
+				specularMapValue = texture(TextureSpecular, texCoord, WZ_MIP_LOAD_BIAS).r;
+				vec4 specularFromMap = vec4(specularMapValue, specularMapValue, specularMapValue, 1.0);
+
+				// Gaussian specular term computation
+				vec3 H = normalize(halfVec);
+				float exponent = acos(dot(H, N)) / 0.33; //0.33 is shininess
+				float gaussianTerm = exp(-(exponent * exponent));
+
+				light += specular * gaussianTerm * diffuseFactor * specularFromMap;
+
+				vanillaFactor = 1.0; // Neutralize factor for spec map
+			}
+
+			light += diffuse * diffuseFactor * diffuseMap * vanillaFactor;
+		}
+
+		vec4 ambientLight = vec4(blendAddEffectLighting(ambient.rgb, ((lightmap_vec4.rgb * lightmapFactor) / 3.f)), ambient.a) * diffuseMap;
+		// ambient light maxed for classic models to keep results similar to original
+		light += ambientLight * (1.0 + (1.0 - float(specularmap))) * visibility;
+
+		if (WZ_POINT_LIGHT_ENABLED == 1)
+		{
+			vec2 clipSpaceCoord = gl_FragCoord.xy / vec2(viewportWidth, viewportHeight);
+			light += iterateOverAllPointLights(clipSpaceCoord, posModelSpace, N, normalize(normal), normalize(halfVec - lightDir), diffuseMap, specularMapValue);
+		}
+
+		light.a = 1.0f;
+
+		if (tcmask != 0)
+		{
+			// Get mask for team colors from texture
+			float maskAlpha = texture(TextureTcmask, texCoord, WZ_MIP_LOAD_BIAS).r;
+
+			// Apply color using grain merge with tcmask
+			fragColour = (light + (teamcolour - 0.5) * maskAlpha) * colour;
+		}
+		else
+		{
+			fragColour = light * colour;
+		}
 	}
 
 	if (ecmEffect)

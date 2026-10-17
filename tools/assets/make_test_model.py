@@ -13,10 +13,13 @@ colour so orientation and mirroring are easy to check in game:
     top                      : white, with a team-colour stripe
     bottom                   : dark grey
 
+Materials (ORM texture, for the PBR shader): front polished metal, sides brushed
+metal, top painted, back rough.
+
 Also writes a turret connector empty, conn_turret_1, on top of the hull.
 
 Usage: make_test_model.py OUT_DIR NAME [length width height]
-Writes OUT_DIR/NAME.glb, NAME_basecolor.png, NAME_tc.png. Requires Pillow.
+Writes OUT_DIR/NAME.glb, NAME_basecolor.png, NAME_orm.png, NAME_tc.png. Requires Pillow.
 """
 
 import json
@@ -34,6 +37,15 @@ CELLS = {
     'right': (3, 0, (40, 70, 200)),
     'top': (0, 1, (235, 235, 235)),
     'bottom': (1, 1, (50, 50, 50)),
+}
+# Per-side material for the PBR test: (occlusion, roughness, metallic)
+ORM = {
+    'front': (1.0, 0.15, 1.0),   # polished metal
+    'back': (1.0, 0.85, 0.0),    # rough concrete-like
+    'left': (1.0, 0.35, 1.0),    # brushed metal
+    'right': (1.0, 0.35, 1.0),
+    'top': (1.0, 0.55, 0.0),     # painted
+    'bottom': (0.6, 0.9, 0.0),
 }
 ATLAS = 512
 CELL = ATLAS // 4
@@ -119,6 +131,13 @@ def write_textures(out_dir, name):
     dt.rectangle(stripe, fill=255)
     img.save(os.path.join(out_dir, name + '_basecolor.png'))
     tc.save(os.path.join(out_dir, name + '_tc.png'))
+    orm = Image.new('RGB', (ATLAS, ATLAS), (255, 255, 0))
+    do = ImageDraw.Draw(orm)
+    for key, (cx, cy, _) in CELLS.items():
+        o, r, m = ORM[key]
+        box = (cx * CELL, cy * CELL, (cx + 1) * CELL - 1, (cy + 1) * CELL - 1)
+        do.rectangle(box, fill=(int(o * 255), int(r * 255), int(m * 255)))
+    orm.save(os.path.join(out_dir, name + '_orm.png'))
 
 
 def write_glb(out_dir, name, pos, nrm, uv, idx, top):
@@ -154,11 +173,12 @@ def write_glb(out_dir, name, pos, nrm, uv, idx, top):
             'indices': 3, 'material': 0}]}],
         'materials': [{
             'name': name,
-            'pbrMetallicRoughness': {'baseColorTexture': {'index': 0}, 'metallicFactor': 0.0, 'roughnessFactor': 0.8},
+            'pbrMetallicRoughness': {'baseColorTexture': {'index': 0}, 'metallicRoughnessTexture': {'index': 1}},
+            'occlusionTexture': {'index': 1},
             'extras': {'wz_tcmask': name + '_tc.png'},
         }],
-        'textures': [{'source': 0}],
-        'images': [{'uri': name + '_basecolor.png'}],
+        'textures': [{'source': 0}, {'source': 1}],
+        'images': [{'uri': name + '_basecolor.png'}, {'uri': name + '_orm.png'}],
         'buffers': [{'byteLength': len(binary)}],
         'bufferViews': views,
         'accessors': [

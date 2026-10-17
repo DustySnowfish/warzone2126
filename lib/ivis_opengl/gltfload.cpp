@@ -454,6 +454,11 @@ optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::
 		return nullopt;
 	}
 	const std::string normalMap = resolveImagePath(modelDir, mesh.material->normal_texture);
+	const std::string ormMap = resolveImagePath(modelDir, mesh.material->pbr_metallic_roughness.metallic_roughness_texture);
+	if (ormMap.empty())
+	{
+		debug(LOG_WARNING, "%s: no metallic-roughness (ORM) texture; using classic shading", modelPath.c_str());
+	}
 
 	std::string tcMask;
 	if (mesh.material->extras.data)
@@ -469,7 +474,18 @@ optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::
 	std::string pie;
 	pie.reserve(mesh.positions.size() * 40 + numPolys * 140);
 	pie += "PIE 4\n";
-	pie += tcMask.empty() ? "TYPE 200\n" : "TYPE 10200\n";
+	unsigned int typeFlags = 0x200;            // iV_IMD_TEX
+	if (!tcMask.empty()) { typeFlags |= 0x10000; }   // iV_IMD_TCMASK
+	if (!ormMap.empty()) { typeFlags |= 0x100000; }  // iV_IMD_PBR
+	// glTF allows occlusion in a separate texture. The engine reads it from the R channel of the
+	// metal/roughness texture, so only trust R when the occlusion texture is that same image.
+	const cgltf_texture *mrTex = mesh.material->pbr_metallic_roughness.metallic_roughness_texture.texture;
+	const cgltf_texture *aoTex = mesh.material->occlusion_texture.texture;
+	const bool ormHasOcclusion = mrTex && aoTex && (aoTex == mrTex || (aoTex->image && aoTex->image == mrTex->image));
+	if (!ormMap.empty() && !ormHasOcclusion) { typeFlags |= 0x200000; }  // iV_IMD_PBR_NO_AO
+	char typeLine[32];
+	snprintf(typeLine, sizeof(typeLine), "TYPE %x\n", typeFlags);
+	pie += typeLine;
 	pie += "TEXTURE 0 " + baseColor + "\n";
 	if (!tcMask.empty())
 	{
@@ -478,6 +494,10 @@ optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::
 	if (!normalMap.empty())
 	{
 		pie += "NORMALMAP 0 " + normalMap + "\n";
+	}
+	if (!ormMap.empty())
+	{
+		pie += "SPECULARMAP 0 " + ormMap + "\n";
 	}
 	pie += "LEVELS 1\nLEVEL 1\n";
 	pie += "POINTS " + std::to_string(mesh.positions.size()) + "\n";
@@ -500,9 +520,16 @@ optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::
 	{
 		const uint32_t a = mesh.indices[t * 3], b = mesh.indices[t * 3 + 1], c = mesh.indices[t * 3 + 2];
 		pie += "\t200 3 " + std::to_string(a) + " " + std::to_string(b) + " " + std::to_string(c);
+		// Model textures are sampled with clamp-to-edge, but glTF exporters often place
+		// UVs in a repeated tile (for example v in 1..2). Shift each triangle back into
+		// the 0..1 tile; this is exact for any triangle that does not straddle a tile edge.
+		const float minU = std::min({mesh.uvs[a].first, mesh.uvs[b].first, mesh.uvs[c].first});
+		const float minV = std::min({mesh.uvs[a].second, mesh.uvs[b].second, mesh.uvs[c].second});
+		const float shiftU = std::floor(minU + 1e-4f);
+		const float shiftV = std::floor(minV + 1e-4f);
 		for (uint32_t idx : {a, b, c})
 		{
-			pie += " " + fmtFloat(mesh.uvs[idx].first) + " " + fmtFloat(mesh.uvs[idx].second);
+			pie += " " + fmtFloat(mesh.uvs[idx].first - shiftU) + " " + fmtFloat(mesh.uvs[idx].second - shiftV);
 		}
 		pie += "\n";
 	}
