@@ -280,6 +280,8 @@ void writeResults()
 	out["seed"] = seed;
 	out["warmupGameSeconds"] = warmupGameMs / 1000;
 	out["vsync"] = !disableVsync;
+	out["hdr"] = gfx_api::context::get().hdrActive();
+	out["bloomIntensity"] = gfx_api::context::get().bloomIntensity();
 	out["revealMap"] = revealMap;
 
 	std::vector<double> all;

@@ -91,7 +91,8 @@ namespace gfx_api
 	texture_description<2, sampler_type::anisotropic, kSampler_TextureNormal>, // normal map
 	texture_description<3, sampler_type::anisotropic, kSampler_TextureSpecular>, // specular map
 	texture_description<4, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>,  // depth / shadow map
-	texture_description<5, sampler_type::bilinear, kSampler_lightmap_tex> // lightmap
+	texture_description<5, sampler_type::bilinear, kSampler_lightmap_tex>, // lightmap
+	texture_description<6, sampler_type::anisotropic, kSampler_TextureEmissive> // emissive map (Warzone 2126 glTF models)
 	>, shader>;
 
 	using Draw3DShapeOpaque_Instanced = Draw3DShapeInstanced<REND_OPAQUE, SHADER_COMPONENT_INSTANCED, DEPTH_CMP_LEQ_WRT_ON>;
@@ -1061,6 +1062,64 @@ namespace gfx_api
 		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>, // scene
 		texture_description<1, sampler_type::nearest_clamped, kSampler_prepassDepth, pixel_format_target::texture_2d> // prepassDepth
 	>, SHADER_SCENE_FOG>;
+
+
+	// Warzone 2126 HDR: bloom chain and tonemap
+	template<>
+	struct constant_buffer_type<SHADER_BLOOM_PREFILTER>
+	{
+		glm::vec4 uvScaleClamp;
+		glm::vec4 params; // x = threshold (linear), y = knee
+	};
+	template<>
+	struct constant_buffer_type<SHADER_BLOOM_DOWNSAMPLE>
+	{
+		glm::vec4 params; // unused
+	};
+	template<>
+	struct constant_buffer_type<SHADER_BLOOM_UPSAMPLE>
+	{
+		glm::vec4 params; // x = filter radius in coarser-level texels
+	};
+	template<>
+	struct constant_buffer_type<SHADER_TONEMAP>
+	{
+		glm::vec4 uvScaleClamp;
+		glm::vec4 params; // x = bloom intensity, y = exposure, z = shoulder knee, w = bloom levels summed
+	};
+
+#define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
+	gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16, \
+	std::tuple<constant_buffer_type<SHADER>>, \
+	std::tuple< \
+		vertex_buffer_description<2 * sizeof(gfxFloat), gfx_api::vertex_attribute_input_rate::vertex, \
+			vertex_attribute_description<position, gfx_api::vertex_attribute_type::float2, 0> \
+		> \
+	>
+
+	using BloomPrefilterPSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_BLOOM_PREFILTER),
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>
+	>, SHADER_BLOOM_PREFILTER>;
+
+	using BloomDownsamplePSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_BLOOM_DOWNSAMPLE),
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_sourceTexture, pixel_format_target::texture_2d>
+	>, SHADER_BLOOM_DOWNSAMPLE>;
+
+	using BloomUpsamplePSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_BLOOM_UPSAMPLE),
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_coarserTexture, pixel_format_target::texture_2d>,
+		texture_description<1, sampler_type::bilinear, kSampler_levelTexture, pixel_format_target::texture_2d>
+	>, SHADER_BLOOM_UPSAMPLE>;
+
+	using TonemapPSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TONEMAP),
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>,
+		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>
+	>, SHADER_TONEMAP>;
+
+#undef WZ2126_FULLSCREEN_PSO_PREFIX
 
 	template<>
 	struct constant_buffer_type<SHADER_RANGE_RING_SDF>

@@ -776,6 +776,7 @@ struct VkRoot final : gfx_api::context
 	vk::Format depthBufferFormat = vk::Format::eUndefined;
 	vk::Format depthStencilAttachmentFormat = vk::Format::eUndefined;
 	vk::Format sceneColorVkFormat = vk::Format::eUndefined;
+	vk::Format hdrColorVkFormat = vk::Format::eUndefined; // Warzone 2126 HDR (half-float), eUndefined when unsupported
 	uint32_t depthMapSize = 4096;
 
 	// GPU frame timing
@@ -938,6 +939,8 @@ public:
 	virtual bool setSceneRenderScale(uint32_t scalePercent) override;
 	virtual bool setSceneUpscalingMode(gfx_api::context::scene_upscaling_mode mode) override;
 	virtual bool setSmaaEnabled(bool enabled) override;
+	virtual bool setHdrEnabled(bool enabled) override;
+	virtual bool hdrActive() const override;
 	virtual bool setSceneEffectSurfaces(gfx_api::SceneEffectSurfaces cfg) override;
 	virtual bool setSceneDynamicResolution(bool enabled) override;
 	virtual bool supportsGpuFrameTiming() const override;

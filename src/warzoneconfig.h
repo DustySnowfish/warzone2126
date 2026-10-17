@@ -263,6 +263,11 @@ enum class SMAA_MODE : uint8_t
 };
 SMAA_MODE war_getSmaaMode();
 void war_setSmaaMode(SMAA_MODE mode);
+// Warzone 2126: HDR rendering (half-float scene, bloom, tonemapping)
+bool war_getHdr();
+void war_setHdr(bool enabled);
+int war_getBloomIntensity(); // percent, 0 disables bloom
+void war_setBloomIntensity(int percent);
 
 bool war_getPointLightPerPixelLighting();
 void war_setPointLightPerPixelLighting(bool perPixelEnabled);

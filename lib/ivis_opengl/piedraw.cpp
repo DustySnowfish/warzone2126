@@ -1711,11 +1711,14 @@ static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const g
 	auto* tcmask = textures.tcmaskpage != iV_TEX_INVALID ? &pie_Texture(textures.tcmaskpage) : nullptr;
 	auto* normalmap = textures.normalpage != iV_TEX_INVALID ? &pie_Texture(textures.normalpage) : nullptr;
 	auto* specularmap = textures.specularpage != iV_TEX_INVALID ? &pie_Texture(textures.specularpage) : nullptr;
+	auto* emissivemap = textures.emissivepage != iV_TEX_INVALID ? &pie_Texture(textures.emissivepage) : nullptr;
 
 	gfx_api::Draw3DShapeInstancedPerMeshUniforms meshUniforms {
 		tcmask ? 1 : 0, normalmap != nullptr, specularmap != nullptr, shape->buffers[VBO_TANGENT] != nullptr,
 		shieldEffect ? 1 : 0, static_cast<int>(fogOutput),
-		((shape->flags & iV_IMD_PBR) && specularmap != nullptr) ? ((shape->flags & iV_IMD_PBR_NO_AO) ? 2 : 1) : 0
+		((shape->flags & iV_IMD_PBR) && specularmap != nullptr) ? ((shape->flags & iV_IMD_PBR_NO_AO) ? 2 : 1) : 0,
+		emissivemap != nullptr ? 1 : 0,
+		glm::vec4(shape->emissiveFactor.x, shape->emissiveFactor.y, shape->emissiveFactor.z, 0.f)
 	};
 
 	gfx_api::buffer* pTangentBuffer = (shape->buffers[VBO_TANGENT] != nullptr) ? shape->buffers[VBO_TANGENT] : getZeroedVertexBuffer(shape->vertexCount * 4 * sizeof(gfx_api::gfxFloat));
@@ -1734,7 +1737,7 @@ static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const g
 		std::make_tuple(shape->buffers[VBO_TEXCOORD], 0),
 		std::make_tuple(pTangentBuffer, 0),
 		std::make_tuple(instanceDataBuffer, instanceBufferOffset) });
-	Draw3DInstancedPSO::get().bind_textures(&pie_Texture(textures.texpage), tcmask, normalmap, specularmap, shadowMap, lightmapTexture);
+	Draw3DInstancedPSO::get().bind_textures(&pie_Texture(textures.texpage), tcmask, normalmap, specularmap, shadowMap, lightmapTexture, emissivemap);
 
 	Draw3DInstancedPSO::get().draw_elements_instanced(shape->polys.size() * 3, 0, instance_count);
 //	Draw3DInstancedPSO::get().unbind_vertex_buffers(shape->buffers[VBO_VERTEX], shape->buffers[VBO_NORMAL], shape->buffers[VBO_TEXCOORD]);

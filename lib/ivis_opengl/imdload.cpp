@@ -141,6 +141,7 @@ iIMDShape& iIMDShape::operator=(iIMDShape&& other) noexcept
 		std::swap(modelName, other.modelName);
 		std::swap(modelLevel, other.modelLevel);
 		std::swap(tilesetTextureFiles, other.tilesetTextureFiles);
+		std::swap(emissiveFactor, other.emissiveFactor);
 		std::swap(next, other.next);
 		std::swap(m_textures, other.m_textures);
 
@@ -399,7 +400,8 @@ static std::unique_ptr<iIMDShape> tryLoadGLTFDisplayModel(const WzString &filena
 		return nullptr;
 	}
 	std::string error;
-	auto pieText = gltfConvertToPIE(modelPath, glbData, gltfOverride->scale, error);
+	GLTFExtraMaterial extra;
+	auto pieText = gltfConvertToPIE(modelPath, glbData, gltfOverride->scale, error, extra);
 	if (!pieText.has_value())
 	{
 		debug(LOG_ERROR, "glTF override for %s (%s): %s", filename.toUtf8().c_str(), modelPath.c_str(), error.c_str());
@@ -408,6 +410,15 @@ static std::unique_ptr<iIMDShape> tryLoadGLTFDisplayModel(const WzString &filena
 	}
 	const char *pData = pieText->c_str();
 	auto result = iV_ProcessIMD(filename, &pData, pieText->c_str() + pieText->size(), false, true);
+	if (result && !extra.emissiveFile.empty())
+	{
+		// Emissive is not a PIE concept: attach it to every level directly
+		for (iIMDShape *level = result.get(); level != nullptr; level = level->next.get())
+		{
+			level->tilesetTextureFiles[0].emissivefile = extra.emissiveFile;
+			level->emissiveFactor = Vector3f(extra.emissiveFactor[0], extra.emissiveFactor[1], extra.emissiveFactor[2]);
+		}
+	}
 	if (result)
 	{
 		debug(LOG_INFO, "Using glTF display model %s for %s", modelPath.c_str(), filename.toUtf8().c_str());
@@ -1298,6 +1309,7 @@ struct ImdResolvedLevelTextureFiles
 	optional<std::string> tcmaskFile;
 	optional<std::string> normalFile;
 	optional<std::string> specularFile;
+	optional<std::string> emissiveFile;
 };
 
 static bool imdResolveLevelTextureFiles(const iIMDShape& s, size_t tilesetIdx, ImdResolvedLevelTextureFiles& resolved)
@@ -1338,6 +1350,12 @@ static bool imdResolveLevelTextureFiles(const iIMDShape& s, size_t tilesetIdx, I
 		resolved.specularFile = pLevelSettingsToUseForSpecular->specfile;
 	}
 
+	const TilesetTextureFiles* pLevelSettingsToUseForEmissive = (!tilesetSettings.emissivefile.empty()) ? &tilesetSettings : &defaultSettings;
+	if (!pLevelSettingsToUseForEmissive->emissivefile.empty())
+	{
+		resolved.emissiveFile = pLevelSettingsToUseForEmissive->emissivefile;
+	}
+
 	return true;
 }
 
@@ -1348,12 +1366,13 @@ static gfx_api::texture_type imdSpecularSlotTextureType(const iIMDShape& s)
 	return (s.flags & iV_IMD_PBR) ? gfx_api::texture_type::normal_map : gfx_api::texture_type::specular_map;
 }
 
-static void imdAssignLoadedLevelTexturePages(iIMDShapeTextures& output, size_t texpage, const optional<size_t>& tcmaskpage, const optional<size_t>& normalpage, const optional<size_t>& specpage)
+static void imdAssignLoadedLevelTexturePages(iIMDShapeTextures& output, size_t texpage, const optional<size_t>& tcmaskpage, const optional<size_t>& normalpage, const optional<size_t>& specpage, const optional<size_t>& emissivepage)
 {
 	output.texpage = texpage;
 	output.tcmaskpage = tcmaskpage.value_or(iV_TEX_INVALID);
 	output.normalpage = normalpage.value_or(iV_TEX_INVALID);
 	output.specularpage = specpage.value_or(iV_TEX_INVALID);
+	output.emissivepage = emissivepage.value_or(iV_TEX_INVALID);
 }
 
 static bool _imd_load_level_textures(const iIMDShape& s, size_t tilesetIdx, iIMDShapeTextures& output)
@@ -1392,7 +1411,15 @@ static bool _imd_load_level_textures(const iIMDShape& s, size_t tilesetIdx, iIMD
 		ASSERT_OR_RETURN(false, specpage.has_value(), "%s could not load tex page %s", filename.toUtf8().c_str(), resolved.specularFile->c_str());
 	}
 
-	imdAssignLoadedLevelTexturePages(output, texpage.value(), tcmaskpage, normalpage, specpage);
+	optional<size_t> emissivepage;
+	if (resolved.emissiveFile.has_value())
+	{
+		debug(LOG_TEXTURE, "Loading emissive map %s for %s", resolved.emissiveFile->c_str(), filename.toUtf8().c_str());
+		emissivepage = iV_GetTexture(resolved.emissiveFile->c_str(), gfx_api::texture_type::game_texture);
+		ASSERT_OR_RETURN(false, emissivepage.has_value(), "%s could not load tex page %s", filename.toUtf8().c_str(), resolved.emissiveFile->c_str());
+	}
+
+	imdAssignLoadedLevelTexturePages(output, texpage.value(), tcmaskpage, normalpage, specpage, emissivepage);
 	return true;
 }
 
@@ -1440,7 +1467,16 @@ LoadingTask<> imdLoadLevelTexturesTask(
 		specpage = specpageResult.value();
 	}
 
-	imdAssignLoadedLevelTexturePages(output, texpage.value(), tcmaskpage, normalpage, specpage);
+	optional<size_t> emissivepage;
+	if (resolved.emissiveFile.has_value())
+	{
+		debug(LOG_TEXTURE, "Loading emissive map %s for %s", resolved.emissiveFile->c_str(), filename.toUtf8().c_str());
+		const auto emissivepageResult = co_await iV_GetTextureTask(controller, resolved.emissiveFile->c_str(), gfx_api::texture_type::game_texture);
+		CORO_ASSERT_OR_RETURN(load_fail(), emissivepageResult.has_value() && emissivepageResult->has_value(), "%s could not load tex page %s", filename.toUtf8().c_str(), resolved.emissiveFile->c_str());
+		emissivepage = emissivepageResult.value();
+	}
+
+	imdAssignLoadedLevelTexturePages(output, texpage.value(), tcmaskpage, normalpage, specpage, emissivepage);
 	co_return load_ok();
 }
 

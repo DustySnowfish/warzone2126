@@ -361,6 +361,102 @@ const PipelineSurfaceCatalogTable PIPELINE_SURFACE_CATALOG = {{
 		PipelineSurfaceId::Count,
 		BlurResolutionStage::None,
 		ScenePostEffectId::RangeRings),
+	// BloomDown2
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv2,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomDown4
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv4,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomDown8
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv8,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomDown16
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv16,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomUp8
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv8,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomUp4
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv4,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// BloomUp2
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv2,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// TonemappedColor - display-ready scene colour after tonemapping
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchScene,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::FixedRGBA8,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::HdrActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
 	// ShadowMap
 	makeCatalogEntry(
 		PipelineSurfaceUsage::DepthOnly,
@@ -534,6 +630,8 @@ bool evalEnablePolicy(const PipelineSurfaceCatalogEntry& cat, const PipelineSurf
 		return inputs.prepassNeeds != PrepassNeed::None;
 	case SurfaceEnablePolicy::ScenePrepassNormalsActive:
 		return hasFlag(inputs.prepassNeeds, PrepassNeed::Normals);
+	case SurfaceEnablePolicy::HdrActive:
+		return inputs.hdr;
 	}
 	ASSERT(false, "Unknown SurfaceEnablePolicy");
 	return false;
@@ -590,6 +688,8 @@ pixel_format resolveFormat(SurfaceFormatClass formatClass, PipelineSurfaceId for
 		return pixel_format::FORMAT_RGBA8_UNORM_PACK8;
 	case SurfaceFormatClass::SingleChannelR8:
 		return pixel_format::FORMAT_R8_UNORM;
+	case SurfaceFormatClass::HdrColor:
+		return caps.hdrColorFormat;
 	}
 	return pixel_format::invalid;
 }
@@ -627,6 +727,18 @@ void resolveExtent(const PipelineSurfaceCatalogEntry& cat, const PipelineSurface
 		width = inputs.shadowMapSize;
 		height = inputs.shadowMapSize;
 		break;
+	case SurfaceExtentPolicy::MatchSceneDiv2:
+	case SurfaceExtentPolicy::MatchSceneDiv4:
+	case SurfaceExtentPolicy::MatchSceneDiv8:
+	case SurfaceExtentPolicy::MatchSceneDiv16:
+	{
+		const uint32_t divisor = (cat.extentPolicy == SurfaceExtentPolicy::MatchSceneDiv2) ? 2u
+			: (cat.extentPolicy == SurfaceExtentPolicy::MatchSceneDiv4) ? 4u
+			: (cat.extentPolicy == SurfaceExtentPolicy::MatchSceneDiv8) ? 8u : 16u;
+		width = divideSurfaceExtent(inputs.sceneW, divisor);
+		height = divideSurfaceExtent(inputs.sceneH, divisor);
+		break;
+	}
 	}
 }
 

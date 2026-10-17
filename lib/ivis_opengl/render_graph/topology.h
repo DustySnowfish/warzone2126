@@ -71,6 +71,8 @@ struct RenderFeatures
 		SSAODownsample     = 1u << 7,
 		/// Downsample generated SSR into the blur target when blur is coarser.
 		SSRDownsample      = 1u << 8,
+		/// Warzone 2126: HDR scene, bloom chain and tonemap pass before SMAA / scaling.
+		Hdr                = 1u << 9,
 	};
 };
 
@@ -156,6 +158,8 @@ public:
 	/// True when the backend has a scene-sized SMAA blend output surface for a
 	/// following scaling pass to consume.
 	virtual bool smaaIntermediateActive() const = 0;
+	/// True when the backend has the HDR bloom chain and tonemap output surfaces.
+	virtual bool hdrActive() const = 0;
 	/// Allocated scene-effect surfaces (not raw gameplay config).
 	virtual SceneEffectSurfaces sceneEffectSurfaces() const = 0;
 	virtual uint32_t shadowMapSize() const = 0;

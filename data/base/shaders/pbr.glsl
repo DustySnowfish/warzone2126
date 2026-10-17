@@ -26,7 +26,9 @@ vec3 wzSRGBToLinear(vec3 c)
 
 vec3 wzLinearToSRGB(vec3 c)
 {
-	return pow(clamp(c, vec3(0.0), vec3(1.0)), vec3(1.0 / 2.2));
+	// Not clamped above: with HDR rendering, values over 1.0 are kept (and tonemapped later);
+	// without it the 8/10-bit render target clamps on write.
+	return pow(max(c, vec3(0.0)), vec3(1.0 / 2.2));
 }
 
 float wzDistributionGGX(float NdotH, float roughness)

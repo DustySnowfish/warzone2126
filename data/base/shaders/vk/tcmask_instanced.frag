@@ -14,6 +14,7 @@ layout(set = 3, binding = 2) uniform sampler2D TextureNormal; // normal map
 layout(set = 3, binding = 3) uniform sampler2D TextureSpecular; // specular map
 layout(set = 3, binding = 4) uniform sampler2DArrayShadow shadowMap; // shadow map
 layout(set = 3, binding = 5) uniform sampler2D lightmap_tex;
+layout(set = 3, binding = 6) uniform sampler2D TextureEmissive; // emissive map (Warzone 2126 glTF models)
 
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec3 lightDir;
@@ -87,7 +88,13 @@ void main()
 		if (pbrMaterial == 2) { orm.r = 1.0; } // no occlusion in this texture
 		float teamMask = (tcmask != 0) ? texture(TextureTcmask, texCoord, WZ_MIP_LOAD_BIAS).r : 0.0;
 		vec3 baseSRGB = wzPBRBaseColour(diffuseMap.rgb, teamMask, teamcolour.rgb);
-		vec3 pbrColour = wzLinearToSRGB(wzShadePBR(baseSRGB, orm, N));
+		vec3 pbrLinear = wzShadePBR(baseSRGB, orm, N);
+		if (emissiveMap != 0)
+		{
+			// Emissive light is added in linear space; strengths above 1 bloom when HDR is on
+			pbrLinear += wzSRGBToLinear(texture(TextureEmissive, texCoord, WZ_MIP_LOAD_BIAS).rgb) * emissiveFactor.rgb;
+		}
+		vec3 pbrColour = wzLinearToSRGB(pbrLinear);
 		if (WZ_POINT_LIGHT_ENABLED == 1)
 		{
 			vec2 clipSpaceCoordPBR = gl_FragCoord.xy / vec2(float(viewportWidth), float(viewportHeight));

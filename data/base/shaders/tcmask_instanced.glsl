@@ -38,7 +38,8 @@ layout(std140) uniform meshuniforms {
 	int shieldEffect;
 	int fogOutput;
 	int pbrMaterial; // Warzone 2126: 0 classic, 1 PBR (ORM in the specular slot), 2 PBR without occlusion
-	int meshPad0;
+	int emissiveMap; // Warzone 2126: 1 when an emissive texture is bound
+	vec4 emissiveFactor; // Warzone 2126: linear RGB emissive multiplier
 };
 
 // Which transport carries the light arrays: 0 uniform block, 1 buffer texture, 2 storage buffer.

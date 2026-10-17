@@ -668,6 +668,22 @@ namespace gfx_api
 			return true;
 		}
 
+		/// Warzone 2126: HDR scene colour (half-float) with bloom and tonemapping.
+		bool hdrEnabled() const { return _hdrEnabled; }
+		/// Backend overrides store the value via this base implementation and rebuild
+		/// their scene targets, switching the scene colour format and creating or dropping the bloom surfaces.
+		virtual bool setHdrEnabled(bool enabled)
+		{
+			_hdrEnabled = enabled;
+			return true;
+		}
+		/// True when HDR is enabled and the backend can render to a half-float scene target
+		/// at the current MSAA setting (the HDR passes only run when this is true).
+		virtual bool hdrActive() const { return false; }
+		/// Bloom strength applied by the tonemap pass (0 disables bloom).
+		float bloomIntensity() const { return _bloomIntensity; }
+		void setBloomIntensity(float value) { _bloomIntensity = value; }
+
 		/// Commit SSAO/SSR/fog/range-ring catalog requests in one store. Backends rebuild surfaces.
 		/// Scene prepass follows `prepassNeeds(cfg)` in pipelineSurfaceSyncInputs().
 		virtual bool setSceneEffectSurfaces(SceneEffectSurfaces cfg)
@@ -786,6 +802,8 @@ namespace gfx_api
 		uint32_t _sceneRenderScalePercent = 100;
 		scene_upscaling_mode _sceneUpscalingMode = scene_upscaling_mode::bilinear;
 		bool _smaaEnabled = false;
+		bool _hdrEnabled = false;
+		float _bloomIntensity = 0.6f;
 		SceneEffectSurfaces _sceneEffectSurfaces;
 		float _sceneRenderFraction = 1.f;
 		bool _sceneDynamicResolution = false;
@@ -829,6 +847,7 @@ namespace gfx_api
 	inline constexpr char kSampler_TextureTcmask[] = "TextureTcmask";
 	inline constexpr char kSampler_TextureNormal[] = "TextureNormal";
 	inline constexpr char kSampler_TextureSpecular[] = "TextureSpecular";
+	inline constexpr char kSampler_TextureEmissive[] = "TextureEmissive";
 	inline constexpr char kSampler_shadowMap[] = "shadowMap";
 	inline constexpr char kSampler_lightmap_tex[] = "lightmap_tex";
 	inline constexpr char kSampler_groundTex[] = "groundTex";
@@ -859,11 +878,14 @@ namespace gfx_api
 	inline constexpr char kSampler_noiseTexture[] = "noiseTexture";
 	inline constexpr char kSampler_occlusionTexture[] = "occlusionTexture";
 	inline constexpr char kSampler_sceneTexture[] = "sceneTexture";
+	inline constexpr char kSampler_sourceTexture[] = "sourceTexture";
+	inline constexpr char kSampler_coarserTexture[] = "coarserTexture";
+	inline constexpr char kSampler_levelTexture[] = "levelTexture";
+	inline constexpr char kSampler_bloomTexture[] = "bloomTexture";
 	inline constexpr char kSampler_ssaoTexture[] = "ssaoTexture";
 	inline constexpr char kSampler_prepassNormals[] = "prepassNormals";
 	inline constexpr char kSampler_prepassDepth[] = "prepassDepth";
 	inline constexpr char kSampler_rangeRingSdf[] = "rangeRingSdf";
-	inline constexpr char kSampler_sourceTexture[] = "sourceTexture";
 	inline constexpr char kSampler_skyboxTexture[] = "skyboxTexture";
 	inline constexpr char kSampler_ssrTexture[] = "ssrTexture";
 
@@ -1266,7 +1288,8 @@ namespace gfx_api
 		int shieldEffect;
 		int fogOutput;
 		int pbrMaterial; // Warzone 2126: 0 classic, 1 PBR with ORM texture, 2 PBR without occlusion (metal/roughness texture only)
-		int meshPad0 = 0; // keeps the block a multiple of 16 bytes (std140)
+		int emissiveMap = 0; // Warzone 2126: 1 when an emissive texture is bound
+		glm::vec4 emissiveFactor = glm::vec4(0.f); // Warzone 2126: linear RGB emissive multiplier (w unused)
 	};
 	static_assert(sizeof(Draw3DShapeInstancedPerMeshUniforms) % 16 == 0, "meshuniforms must be a multiple of 16 bytes");
 

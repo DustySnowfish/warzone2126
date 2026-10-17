@@ -36,8 +36,58 @@ namespace gfx_api
 namespace
 {
 
+/// Warzone 2126 HDR: bloom chain (prefilter at 1/2, down to 1/16, back up to 1/2),
+/// then tonemap the HDR scene plus bloom into a display-ready surface.
+/// Returns the pass whose output the rest of the presentation chain should read.
+static PassId appendHdrBloomAndTonemap(BlueprintBuilder& builder, PassId incomingColor)
+{
+	builder.beginPass(PassId::BloomPrefilter, std::string("BloomPrefilter"));
+	builder.color(PipelineSurfaceId::BloomDown2, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+		.viewport(ViewportRule::ColorTarget)
+		.readFrom(incomingColor, AttachmentRole::PrimaryColor);
+
+	const struct { PassId pass; const char* name; PipelineSurfaceId out; PassId src; } downs[] = {
+		{ PassId::BloomDown4, "BloomDown4", PipelineSurfaceId::BloomDown4, PassId::BloomPrefilter },
+		{ PassId::BloomDown8, "BloomDown8", PipelineSurfaceId::BloomDown8, PassId::BloomDown4 },
+		{ PassId::BloomDown16, "BloomDown16", PipelineSurfaceId::BloomDown16, PassId::BloomDown8 },
+	};
+	for (const auto& d : downs)
+	{
+		builder.beginPass(d.pass, std::string(d.name));
+		builder.color(d.out, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+			.viewport(ViewportRule::ColorTarget)
+			.readFrom(d.src, AttachmentRole::PrimaryColor);
+	}
+
+	// Each upsample reads the coarser level (read 0) and adds the same-size downsample (read 1)
+	const struct { PassId pass; const char* name; PipelineSurfaceId out; PassId coarser; PassId sameLevel; } ups[] = {
+		{ PassId::BloomUp8, "BloomUp8", PipelineSurfaceId::BloomUp8, PassId::BloomDown16, PassId::BloomDown8 },
+		{ PassId::BloomUp4, "BloomUp4", PipelineSurfaceId::BloomUp4, PassId::BloomUp8, PassId::BloomDown4 },
+		{ PassId::BloomUp2, "BloomUp2", PipelineSurfaceId::BloomUp2, PassId::BloomUp4, PassId::BloomPrefilter },
+	};
+	for (const auto& u : ups)
+	{
+		builder.beginPass(u.pass, std::string(u.name));
+		builder.color(u.out, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+			.viewport(ViewportRule::ColorTarget)
+			.readFrom(u.coarser, AttachmentRole::PrimaryColor)
+			.readFrom(u.sameLevel, AttachmentRole::PrimaryColor);
+	}
+
+	builder.beginPass(PassId::Tonemap, std::string("Tonemap"));
+	builder.color(PipelineSurfaceId::TonemappedColor, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+		.viewport(ViewportRule::SceneColorTarget)
+		.readFrom(incomingColor, AttachmentRole::PrimaryColor)
+		.readFrom(PassId::BloomUp2, AttachmentRole::PrimaryColor);
+	return PassId::Tonemap;
+}
+
 void appendPresentation(BlueprintBuilder& builder, const RenderTopologySnapshot& snapshot, PassId incomingColor)
 {
+	if (snapshot.features & RenderFeatures::Hdr)
+	{
+		incomingColor = appendHdrBloomAndTonemap(builder, incomingColor);
+	}
 	const bool smaaActive = (snapshot.features & RenderFeatures::Smaa) != 0;
 	const bool smaaIntermediate = (snapshot.features & RenderFeatures::SmaaIntermediate) != 0;
 	if (smaaActive)

@@ -577,6 +577,18 @@ vk::Format findSceneColorBufferFormat(const vk::PhysicalDevice& physicalDevice, 
 	);
 }
 
+vk::Format findHdrColorBufferFormat(const vk::PhysicalDevice& physicalDevice, const WZ_vk::DispatchLoaderDynamic& vkDynLoader)
+{
+	std::vector<vk::Format> hdrColorFormats = { vk::Format::eR16G16B16A16Sfloat };
+	return findSupportedFormat(
+		physicalDevice,
+		hdrColorFormats,
+		vk::ImageTiling::eOptimal,
+		vk::FormatFeatureFlags{vk::FormatFeatureFlagBits::eColorAttachment | vk::FormatFeatureFlagBits::eColorAttachmentBlend | vk::FormatFeatureFlagBits::eSampledImage | vk::FormatFeatureFlagBits::eSampledImageFilterLinear},
+		vkDynLoader
+	);
+}
+
 bool checkValidationLayerSupport(PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr)
 {
 	std::vector<VkLayerProperties> availableLayers;
@@ -4620,6 +4632,8 @@ void VkRoot::createSwapchain(bool allowHandleSurfaceLost)
 
 	depthStencilAttachmentFormat = findDepthStencilFormat(physicalDevice, vkDynLoader);
 	sceneColorVkFormat = findSceneColorBufferFormat(physicalDevice, vkDynLoader);
+	hdrColorVkFormat = findHdrColorBufferFormat(physicalDevice, vkDynLoader);
+	debug(LOG_INFO, "Half-float (HDR) scene color support %s detected", (hdrColorVkFormat != vk::Format::eUndefined) ? "was" : "was NOT");
 	debug(LOG_3D, "Using depth buffer format: %s", to_string(depthStencilAttachmentFormat).c_str());
 	debug(LOG_3D, "Using scene color format: %s", to_string(sceneColorVkFormat).c_str());
 
@@ -5612,6 +5626,8 @@ gfx_api::pixel_format gfx_api::vkFormatToPixelFormat(::vk::Format format)
 		return gfx_api::pixel_format::FORMAT_RGB8_UNORM_PACK8;
 	case ::vk::Format::eA2B10G10R10UnormPack32:
 		return gfx_api::pixel_format::FORMAT_A2B10G10R10_UNORM_PACK32;
+	case ::vk::Format::eR16G16B16A16Sfloat:
+		return gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT;
 	case ::vk::Format::eD24UnormS8Uint:
 		return gfx_api::pixel_format::FORMAT_D24_UNORM_S8;
 	case ::vk::Format::eD32SfloatS8Uint:
@@ -5644,6 +5660,8 @@ gfx_api::pixel_format gfx_api::vkFormatToPixelFormat(::vk::Format format)
 		return ::vk::Format::eR16G16Unorm;
 	case gfx_api::pixel_format::FORMAT_A2B10G10R10_UNORM_PACK32:
 		return ::vk::Format::eA2B10G10R10UnormPack32;
+	case gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT:
+		return ::vk::Format::eR16G16B16A16Sfloat;
 	case gfx_api::pixel_format::FORMAT_D24_UNORM_S8:
 		return ::vk::Format::eD24UnormS8Uint;
 	case gfx_api::pixel_format::FORMAT_D32_SFLOAT_S8_UINT:
@@ -6210,6 +6228,7 @@ gfx_api::PipelineSurfaceSyncInputs VkRoot::pipelineSurfaceSyncInputs() const
 	inputs.fsr1SceneUpscale = (getSceneUpscalingMode() == gfx_api::context::scene_upscaling_mode::fsr1);
 	inputs.sceneDynamicResolution = sceneDynamicResolutionEnabled();
 	inputs.smaa = smaaEnabled();
+	inputs.hdr = hdrActive();
 	inputs.effects = storedSceneEffectSurfaces();
 	inputs.prepassNeeds = gfx_api::prepassNeeds(inputs.effects);
 	return inputs;
@@ -6224,6 +6243,15 @@ gfx_api::SurfaceCapabilityHints VkRoot::surfaceCapabilities() const
 	if (caps.sceneColorFormat == gfx_api::pixel_format::invalid)
 	{
 		caps.sceneColorFormat = gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8;
+	}
+	if (hdrColorVkFormat != vk::Format::eUndefined)
+	{
+		caps.hdrColorFormat = gfx_api::vkFormatToPixelFormat(hdrColorVkFormat);
+		if (hdrActive())
+		{
+			// HDR: half-float scene colour so lighting and effects can exceed 1.0 (tonemapped later)
+			caps.sceneColorFormat = caps.hdrColorFormat;
+		}
 	}
 	caps.depthStencilFormat = (depthStencilAttachmentFormat != vk::Format::eUndefined)
 		? gfx_api::vkFormatToPixelFormat(depthStencilAttachmentFormat)
@@ -7367,6 +7395,27 @@ bool VkRoot::setSceneUpscalingMode(gfx_api::context::scene_upscaling_mode mode)
 	}
 	invalidateWarmEntries();
 	return syncPipelineSurfaces();
+}
+
+bool VkRoot::setHdrEnabled(bool enabled)
+{
+	if (enabled == hdrEnabled())
+	{
+		return true;
+	}
+	gfx_api::context::setHdrEnabled(enabled);
+	if (!dev || swapchainSize.width == 0 || swapchainSize.height == 0)
+	{
+		// no surfaces exist yet, the setting applies when they are created
+		return true;
+	}
+	invalidateWarmEntries();
+	return syncPipelineSurfaces();
+}
+
+bool VkRoot::hdrActive() const
+{
+	return hdrEnabled() && hdrColorVkFormat != vk::Format::eUndefined;
 }
 
 bool VkRoot::setSmaaEnabled(bool enabled)

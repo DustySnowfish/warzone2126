@@ -64,8 +64,9 @@ namespace gfx_api
 		FORMAT_A2B10G10R10_UNORM_PACK32, // 10-bit RGB + 2-bit A (e.g. VK scene color)
 		FORMAT_D32_SFLOAT_S8_UINT,       // depth/stencil attachment
 		FORMAT_D32_SFLOAT,               // depth-only (e.g. shadow maps)
+		FORMAT_RGBA16_SFLOAT,            // half-float RGBA (Warzone 2126 HDR scene colour and bloom)
 	};
-	constexpr pixel_format MAX_PIXEL_FORMAT = pixel_format::FORMAT_D32_SFLOAT;
+	constexpr pixel_format MAX_PIXEL_FORMAT = pixel_format::FORMAT_RGBA16_SFLOAT;
 
 	static inline bool is_uncompressed_format(const pixel_format& format)
 	{
@@ -78,6 +79,7 @@ namespace gfx_api
 			case gfx_api::pixel_format::FORMAT_RG8_UNORM:
 			case gfx_api::pixel_format::FORMAT_R8_UNORM:
 			case gfx_api::pixel_format::FORMAT_A2B10G10R10_UNORM_PACK32:
+			case gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT:
 			case gfx_api::pixel_format::FORMAT_R16_UNORM:
 			case gfx_api::pixel_format::FORMAT_RG16_UNORM:
 				return true;

@@ -391,7 +391,7 @@ void gltfResetOverrides()
 	overrides.clear();
 }
 
-optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::vector<char> &glbData, float scale, std::string &errorOut)
+optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::vector<char> &glbData, float scale, std::string &errorOut, GLTFExtraMaterial &extraOut)
 {
 	cgltf_options options = {};
 	cgltf_data *raw = nullptr;
@@ -455,6 +455,18 @@ optional<std::string> gltfConvertToPIE(const std::string &modelPath, const std::
 	}
 	const std::string normalMap = resolveImagePath(modelDir, mesh.material->normal_texture);
 	const std::string ormMap = resolveImagePath(modelDir, mesh.material->pbr_metallic_roughness.metallic_roughness_texture);
+
+	extraOut = GLTFExtraMaterial();
+	const std::string emissiveMap = resolveImagePath(modelDir, mesh.material->emissive_texture);
+	if (!emissiveMap.empty())
+	{
+		const float strength = mesh.material->has_emissive_strength ? mesh.material->emissive_strength.emissive_strength : 1.f;
+		extraOut.emissiveFile = emissiveMap;
+		for (int c = 0; c < 3; ++c)
+		{
+			extraOut.emissiveFactor[c] = mesh.material->emissive_factor[c] * strength;
+		}
+	}
 	if (ormMap.empty())
 	{
 		debug(LOG_WARNING, "%s: no metallic-roughness (ORM) texture; using classic shading", modelPath.c_str());

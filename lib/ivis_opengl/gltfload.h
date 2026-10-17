@@ -64,6 +64,13 @@ optional<GLTFOverride> gltfFindOverride(const std::string &pieFilename);
 /// Forget the cached override list (it is re-read on next use).
 void gltfResetOverrides();
 
+/// Material properties that PIE cannot carry; applied to the display model after loading.
+struct GLTFExtraMaterial
+{
+	std::string emissiveFile;                    ///< data-root path ('/'-prefixed), empty if none
+	float emissiveFactor[3] = { 0.f, 0.f, 0.f }; ///< glTF emissiveFactor x KHR_materials_emissive_strength
+};
+
 /// Converts a glTF 2.0 binary model into PIE 4 text, which the existing PIE loader then
 /// turns into a display model. Returns nullopt and fills errorOut on failure.
-optional<std::string> gltfConvertToPIE(const std::string &displayName, const std::vector<char> &glbData, float scale, std::string &errorOut);
+optional<std::string> gltfConvertToPIE(const std::string &displayName, const std::vector<char> &glbData, float scale, std::string &errorOut, GLTFExtraMaterial &extraOut);

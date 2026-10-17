@@ -2216,6 +2216,19 @@ int realmain(int argc, char *argv[])
 		}
 	}
 	display3d_setUpscalingSharpness(war_getUpscalingSharpness() / 100.f);
+	gfx_api::context::get().setBloomIntensity(static_cast<float>(war_getBloomIntensity()) / 100.f);
+	if (war_getHdr())
+	{
+		if (!gfx_api::context::get().setHdrEnabled(true))
+		{
+			debug(LOG_ERROR, "Failed to enable HDR rendering");
+			war_setHdr(false);
+		}
+		else if (!gfx_api::context::get().hdrActive())
+		{
+			debug(LOG_INFO, "HDR rendering is enabled but not supported by this graphics driver; using standard rendering");
+		}
+	}
 	if (war_getSmaaMode() != SMAA_MODE::OFF)
 	{
 		if (!display3d_setSmaaMode(war_getSmaaMode()))

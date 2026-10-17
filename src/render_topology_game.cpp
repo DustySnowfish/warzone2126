@@ -116,6 +116,11 @@ public:
 		return gfx_api::context::get().getPipelineSurface(gfx_api::PipelineSurfaceId::SmaaColor) != nullptr;
 	}
 
+	bool hdrActive() const override
+	{
+		return gfx_api::context::get().getPipelineSurface(gfx_api::PipelineSurfaceId::TonemappedColor) != nullptr;
+	}
+
 	gfx_api::SceneEffectSurfaces sceneEffectSurfaces() const override
 	{
 		// Follow allocated surfaces rather than raw config. Config is applied in

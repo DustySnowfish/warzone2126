@@ -3483,6 +3483,14 @@ bool gl_context::_initialize(const gfx_api::backend_Impl_Factory& impl, int32_t 
 		debug(LOG_INFO, "  * 10 bit scene color at %dx MSAA %s supported", requestedMsaaSamples,
 			hasTenBitMsaaSupport ? "is" : "is NOT");
 	}
+	hasHalfFloatSceneColorSupport = initHalfFloatSceneColorSupport();
+	debug(LOG_INFO, "  * Half-float (HDR) scene color support %s detected", hasHalfFloatSceneColorSupport ? "was" : "was NOT");
+	if (hasHalfFloatSceneColorSupport && requestedMsaaSamples > 1)
+	{
+		hasHalfFloatMsaaSupport = initHalfFloatMsaaSupport(requestedMsaaSamples);
+		debug(LOG_INFO, "  * Half-float scene color at %dx MSAA %s supported", requestedMsaaSamples,
+			hasHalfFloatMsaaSupport ? "is" : "is NOT");
+	}
 
 	int width, height = 0;
 	backend_impl->getDrawableSize(&width, &height);
@@ -4179,6 +4187,7 @@ gfx_api::PipelineSurfaceSyncInputs gl_context::pipelineSurfaceSyncInputs() const
 	inputs.fsr1SceneUpscale = (getSceneUpscalingMode() == gfx_api::context::scene_upscaling_mode::fsr1);
 	inputs.sceneDynamicResolution = sceneDynamicResolutionEnabled();
 	inputs.smaa = smaaEnabled();
+	inputs.hdr = hdrActive();
 	inputs.effects = storedSceneEffectSurfaces();
 	inputs.prepassNeeds = gfx_api::prepassNeeds(inputs.effects);
 	return inputs;
@@ -4193,7 +4202,16 @@ gfx_api::SurfaceCapabilityHints gl_context::surfaceCapabilities() const
 	// With MSAA: the format must also back a multisampled renderbuffer at the sample count in use -
 	// if it can't, the sample count wins (since MSAA is the setting the player chose).
 	const bool useTenBit = hasTenBitSceneColorSupport && (clampedMsaa <= 1 || hasTenBitMsaaSupport);
-	if (useTenBit)
+	if (hasHalfFloatSceneColorSupport)
+	{
+		caps.hdrColorFormat = gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT;
+	}
+	if (hdrActive())
+	{
+		// HDR: half-float scene colour so lighting and effects can exceed 1.0 (tonemapped later)
+		caps.sceneColorFormat = gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT;
+	}
+	else if (useTenBit)
 	{
 		caps.sceneColorFormat = gfx_api::pixel_format::FORMAT_A2B10G10R10_UNORM_PACK32;
 	}
@@ -5757,6 +5775,75 @@ bool gl_context::initTenBitMsaaSupport(GLsizei samples)
 	return supported;
 }
 
+// Warzone 2126 HDR: RGBA16F must be colour-renderable. Desktop GL 3.0+ guarantees it;
+// OpenGL ES needs EXT_color_buffer_half_float or EXT_color_buffer_float, so probe rather than assume.
+bool gl_context::initHalfFloatSceneColorSupport()
+{
+	wzGLClearErrors();
+
+	GLuint probeTexture = 0;
+	glGenTextures(1, &probeTexture);
+	glBindTexture(GL_TEXTURE_2D, probeTexture);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA16F, 4, 4, 0, GL_RGBA, GL_HALF_FLOAT, nullptr);
+	bool supported = (glGetError() == GL_NO_ERROR);
+
+	GLuint probeFbo = 0;
+	if (supported)
+	{
+		GLint previousFbo = 0;
+		glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFbo);
+		glGenFramebuffers(1, &probeFbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, probeFbo);
+		glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, probeTexture, 0);
+		supported = (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) && (glGetError() == GL_NO_ERROR);
+		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFbo));
+	}
+
+	if (probeFbo != 0)
+	{
+		glDeleteFramebuffers(1, &probeFbo);
+	}
+	glBindTexture(GL_TEXTURE_2D, 0);
+	glDeleteTextures(1, &probeTexture);
+	wzGLClearErrors();
+	return supported;
+}
+
+bool gl_context::initHalfFloatMsaaSupport(GLsizei samples)
+{
+	wzGLClearErrors();
+
+	GLint previousFbo = 0;
+	glGetIntegerv(GL_FRAMEBUFFER_BINDING, &previousFbo);
+
+	GLuint probeRenderbuffer = 0;
+	glGenRenderbuffers(1, &probeRenderbuffer);
+	glBindRenderbuffer(GL_RENDERBUFFER, probeRenderbuffer);
+	glRenderbufferStorageMultisample(GL_RENDERBUFFER, samples, GL_RGBA16F, 4, 4);
+	bool supported = (glGetError() == GL_NO_ERROR);
+	glBindRenderbuffer(GL_RENDERBUFFER, 0);
+
+	GLuint probeFbo = 0;
+	if (supported)
+	{
+		glGenFramebuffers(1, &probeFbo);
+		glBindFramebuffer(GL_FRAMEBUFFER, probeFbo);
+		glFramebufferRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, probeRenderbuffer);
+		supported = (glCheckFramebufferStatus(GL_FRAMEBUFFER) == GL_FRAMEBUFFER_COMPLETE) && (glGetError() == GL_NO_ERROR);
+		glBindFramebuffer(GL_FRAMEBUFFER, static_cast<GLuint>(previousFbo));
+	}
+
+	if (probeFbo != 0)
+	{
+		glDeleteFramebuffers(1, &probeFbo);
+	}
+	glDeleteRenderbuffers(1, &probeRenderbuffer);
+	wzGLClearErrors();
+	return supported;
+}
+
 bool gl_context::initGpuTimestampSupport()
 {
 #if !defined(WZ_GL_TIMER_QUERY_SUPPORTED) || defined(WZ_STATIC_GL_BINDINGS)
@@ -6039,6 +6126,30 @@ bool gl_context::setSmaaEnabled(bool enabled)
 		return true;
 	}
 	return syncPipelineSurfaces();
+}
+
+bool gl_context::setHdrEnabled(bool enabled)
+{
+	if (enabled == hdrEnabled())
+	{
+		return true;
+	}
+	gfx_api::context::setHdrEnabled(enabled);
+	if (viewportWidth == 0 || viewportHeight == 0)
+	{
+		// no usable drawable right now, the setting applies when the scene framebuffer is next created
+		return true;
+	}
+	return syncPipelineSurfaces();
+}
+
+bool gl_context::hdrActive() const
+{
+	if (!hdrEnabled() || !hasHalfFloatSceneColorSupport)
+	{
+		return false;
+	}
+	return clampedMultiSampleCount() <= 1 || hasHalfFloatMsaaSupport;
 }
 
 bool gl_context::setSceneEffectSurfaces(gfx_api::SceneEffectSurfaces cfg)
@@ -6430,6 +6541,11 @@ bool gl_context::PipelineSurfaceAllocator::create(gfx_api::PipelineSurfaceId id,
 				colorBaseFormat = GL_RGBA;
 				colorType = GL_UNSIGNED_INT_2_10_10_10_REV;
 				break;
+			case gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT:
+				colorInternalFormat = GL_RGBA16F;
+				colorBaseFormat = GL_RGBA;
+				colorType = GL_HALF_FLOAT;
+				break;
 			case gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8:
 				colorInternalFormat = root.multiSampledBufferInternalFormat;
 				colorBaseFormat = root.multiSampledBufferBaseFormat;
@@ -6472,6 +6588,10 @@ bool gl_context::PipelineSurfaceAllocator::create(gfx_api::PipelineSurfaceId id,
 			if (createSpec.format == gfx_api::pixel_format::FORMAT_A2B10G10R10_UNORM_PACK32)
 			{
 				msaaFormat = GL_RGB10_A2;
+			}
+			else if (createSpec.format == gfx_api::pixel_format::FORMAT_RGBA16_SFLOAT)
+			{
+				msaaFormat = GL_RGBA16F;
 			}
 			else if (createSpec.format == gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8)
 			{

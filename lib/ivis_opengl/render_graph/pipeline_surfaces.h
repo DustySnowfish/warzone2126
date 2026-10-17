@@ -166,6 +166,18 @@ enum class PipelineSurfaceId : uint8_t
 	RangeRingSdfDepth,
 	/// Scene-sized lit scene with range-ring overlay applied; feeds SMAA/blit/FSR.
 	RangeRingColor,
+	/// Warzone 2126 bloom chain (half-float): prefiltered bright parts at 1/2 scene size,
+	/// then downsampled to 1/4, 1/8 and 1/16.
+	BloomDown2,
+	BloomDown4,
+	BloomDown8,
+	BloomDown16,
+	/// Bloom upsample chain: each level adds the next coarser level back in.
+	BloomUp8,
+	BloomUp4,
+	BloomUp2,
+	/// Scene-sized tonemapped (display-ready) scene colour with bloom; feeds SMAA/blit/FSR.
+	TonemappedColor,
 	ShadowMap,
 	SwapchainColor,
 	SwapchainMSAAColor,
@@ -201,6 +213,11 @@ enum class SurfaceExtentPolicy : uint8_t
 	/// sceneW/H divided by the owner effect's selected blur-resolution stage.
 	MatchSceneDivided,
 	ShadowMapSquare,
+	/// Fixed fractions of the scene size (Warzone 2126 bloom chain).
+	MatchSceneDiv2,
+	MatchSceneDiv4,
+	MatchSceneDiv8,
+	MatchSceneDiv16,
 };
 
 /// Which stage of a scene effect's blur resolution `MatchSceneDivided` uses.
@@ -254,6 +271,8 @@ enum class SurfaceFormatClass : uint8_t
 	FixedRGBA8,
 	/// Fixed FORMAT_R8_UNORM (e.g. SSAO occlusion buffers).
 	SingleChannelR8,
+	/// Half-float colour (`SurfaceCapabilityHints::hdrColorFormat`), for the bloom chain.
+	HdrColor,
 };
 
 /// Abstract GPU usage flags the backend must honor when allocating.
@@ -308,6 +327,8 @@ enum class SurfaceEnablePolicy : uint8_t
 	ScenePrepassActive,
 	/// Scene prepass normals only when `prepassNeeds` includes Normals (example: SSAO).
 	ScenePrepassNormalsActive,
+	/// Warzone 2126 HDR (bloom chain + tonemap output) active.
+	HdrActive,
 };
 
 /// How the backend materializes the surface (allocate vs WSI import).
@@ -388,6 +409,8 @@ struct PipelineSurfaceSyncInputs
 	/// Dynamic resolution keeps scene-sized intermediates alive even at a 1:1 scene size.
 	bool sceneDynamicResolution = false;
 	bool smaa = false;
+	/// Warzone 2126: HDR (half-float scene colour, bloom chain and tonemap output) is active.
+	bool hdr = false;
 	/// Allocated scene-effect catalog request (enable flags + SSAO divisors).
 	SceneEffectSurfaces effects;
 	/// Enabled post-effect prepass capabilities, plus the separated transparents depth need when any effect is enabled (`prepassNeeds(effects)`).
@@ -400,6 +423,8 @@ struct SurfaceCapabilityHints
 	pixel_format sceneColorFormat = pixel_format::FORMAT_RGBA8_UNORM_PACK8;
 	pixel_format depthStencilFormat = pixel_format::FORMAT_D24_UNORM_S8;
 	pixel_format depthSampledFormat = pixel_format::FORMAT_D24_UNORM_S8;
+	/// Half-float colour format for the bloom chain (invalid when unsupported).
+	pixel_format hdrColorFormat = pixel_format::invalid;
 };
 
 constexpr size_t PIPELINE_SURFACE_COUNT = static_cast<size_t>(PipelineSurfaceId::Count);

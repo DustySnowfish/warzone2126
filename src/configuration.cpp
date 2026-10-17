@@ -802,6 +802,8 @@ bool loadConfig()
 		}
 	}
 	war_setUpscalingSharpness(iniGetInteger("upscalingSharpness", war_getUpscalingSharpness()).value());
+	war_setHdr(iniGetBool("hdr", war_getHdr()).value());
+	war_setBloomIntensity(iniGetInteger("bloomIntensity", war_getBloomIntensity()).value());
 	{
 		std::string smaaValue = iniGetString("smaa", "off").value();
 		if (smaaValue == "low")
@@ -1129,6 +1131,8 @@ bool saveConfig()
 	iniSetInteger("renderResolution", (int)war_getRenderResolutionPercent());
 	iniSetString("upscaling", (war_getSceneUpscalingMode() == SCENE_UPSCALING_MODE::FSR1) ? "fsr1" : "bilinear");
 	iniSetInteger("upscalingSharpness", war_getUpscalingSharpness());
+	iniSetBool("hdr", war_getHdr());
+	iniSetInteger("bloomIntensity", war_getBloomIntensity());
 	switch (war_getSmaaMode())
 	{
 		case SMAA_MODE::OFF: iniSetString("smaa", "off"); break;

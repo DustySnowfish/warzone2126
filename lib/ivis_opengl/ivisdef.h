@@ -169,6 +169,7 @@ struct iIMDShapeTextures
 	size_t tcmaskpage = iV_TEX_INVALID;
 	size_t normalpage = iV_TEX_INVALID;
 	size_t specularpage = iV_TEX_INVALID;
+	size_t emissivepage = iV_TEX_INVALID; // Warzone 2126 (glTF models)
 };
 
 struct TilesetTextureFiles
@@ -177,6 +178,7 @@ struct TilesetTextureFiles
 	std::string tcmaskfile;
 	std::string normalfile;
 	std::string specfile;
+	std::string emissivefile; // Warzone 2126 (glTF models)
 };
 
 // DISPLAY-ONLY
@@ -238,6 +240,9 @@ struct iIMDShape
 	uint32_t modelLevel = 0;
 
 	std::array<TilesetTextureFiles, 3> tilesetTextureFiles;
+
+	// Warzone 2126: emissive colour multiplier (linear RGB, already scaled by strength), used with the emissive texture
+	Vector3f emissiveFactor = Vector3f(0.f, 0.f, 0.f);
 
 	std::unique_ptr<iIMDShape> next = nullptr;  // next pie in multilevel pies (NULL for non multilevel !)
 

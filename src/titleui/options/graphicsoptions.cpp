@@ -758,6 +758,52 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("gfx.hdr", N_("HDR Lighting"), N_("High dynamic range rendering: bright lights, glowing surfaces and explosions can exceed normal white and glow (bloom), then are smoothly brought back into the screen's range."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getHdr());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				if (!gfx_api::context::get().setHdrEnabled(newValue))
+				{
+					debug(LOG_ERROR, "Failed to change HDR rendering");
+					return false;
+				}
+				war_setHdr(newValue);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.bloom", N_("Bloom"), N_("Strength of the glow around very bright light (needs HDR Lighting)."));
+		auto valueChanger = OptionsDropdown<int>::make(
+			[]() {
+				OptionChoices<int> result;
+				result.choices = {
+					{ _("Off"), "", 0 },
+					{ _("Low"), "", 30 },
+					{ _("Medium"), "", 60 },
+					{ _("High"), "", 100 },
+				};
+				result.setCurrentIdxForValue(war_getBloomIntensity());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setBloomIntensity(newValue);
+				gfx_api::context::get().setBloomIntensity(static_cast<float>(newValue) / 100.f);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("gfx.vsync", N_("Vertical Sync"), "");
 		auto valueChanger = OptionsDropdown<gfx_api::context::swap_interval_mode>::make(
 			[]() {

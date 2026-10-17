@@ -40,6 +40,7 @@
 #include "ssao.h"
 #include "ssr.h"
 #include "fog_pass.h"
+#include "hdr_pass.h"
 #include "range_rings.h"
 #include "terrain.h"
 
@@ -293,6 +294,14 @@ void registerInGame3DRecordFuncs(gfx_api::RecordFuncTable& table)
 	table.set(gfx_api::PassId::RangeRingSdfWeapon, range_rings::recordSdfWeapon);
 	table.set(gfx_api::PassId::RangeRingSdfMin, range_rings::recordSdfMin);
 	table.set(gfx_api::PassId::RangeRingComposite, range_rings::recordComposite);
+	table.set(gfx_api::PassId::BloomPrefilter, hdr_pass::recordBloomPrefilter);
+	table.set(gfx_api::PassId::BloomDown4, hdr_pass::recordBloomDownsample);
+	table.set(gfx_api::PassId::BloomDown8, hdr_pass::recordBloomDownsample);
+	table.set(gfx_api::PassId::BloomDown16, hdr_pass::recordBloomDownsample);
+	table.set(gfx_api::PassId::BloomUp8, hdr_pass::recordBloomUpsample);
+	table.set(gfx_api::PassId::BloomUp4, hdr_pass::recordBloomUpsample);
+	table.set(gfx_api::PassId::BloomUp2, hdr_pass::recordBloomUpsample);
+	table.set(gfx_api::PassId::Tonemap, hdr_pass::recordTonemap);
 	table.set(gfx_api::PassId::SceneBlit, recordSceneBlit);
 	table.set(gfx_api::PassId::SceneUpscaleEASU, recordSceneUpscaleEASU);
 	table.set(gfx_api::PassId::SceneUpscaleRCAS, recordSceneUpscaleRCAS);

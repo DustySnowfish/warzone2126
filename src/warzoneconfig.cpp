@@ -124,6 +124,8 @@ struct WARZONE_GLOBALS
 	SCENE_UPSCALING_MODE sceneUpscalingMode = SCENE_UPSCALING_MODE::BILINEAR;
 	int upscalingSharpness = 25; // RCAS sharpness in hundredths of stops
 	SMAA_MODE smaaMode = SMAA_MODE::OFF;
+	bool hdr = true;
+	int bloomIntensity = 60;
 	SSAO_MODE ssaoMode = SSAO_MODE::OFF; // screen-space ambient occlusion (default off)
 	SSR_MODE ssrMode = SSR_MODE::OFF; // screen-space reflections (default off)
 	// UI config
@@ -960,6 +962,26 @@ SMAA_MODE war_getSmaaMode()
 void war_setSmaaMode(SMAA_MODE mode)
 {
 	warGlobs.smaaMode = mode;
+}
+
+bool war_getHdr()
+{
+	return warGlobs.hdr;
+}
+
+void war_setHdr(bool enabled)
+{
+	warGlobs.hdr = enabled;
+}
+
+int war_getBloomIntensity()
+{
+	return warGlobs.bloomIntensity;
+}
+
+void war_setBloomIntensity(int percent)
+{
+	warGlobs.bloomIntensity = std::max(0, std::min(percent, 300));
 }
 
 bool war_getPointLightPerPixelLighting()
