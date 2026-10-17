@@ -26,7 +26,7 @@ on:
 
 env:
   # Controls whether release builds are signed
-  WZ_CI_SIGN_RELEASE_BUILDS: true
+  WZ_CI_SIGN_RELEASE_BUILDS: false
 
 jobs:
   windows-build:
