@@ -1,0 +1,59 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 1999-2004  Eidos Interactive
+	Copyright (C) 2005-2020  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+/** @file
+ *  Interface to routing gateway code.
+ */
+
+#ifndef __INCLUDED_SRC_GATEWAY_H__
+#define __INCLUDED_SRC_GATEWAY_H__
+
+#include <list>
+
+#include <stdint.h>
+
+struct WorldMapState;
+
+struct GATEWAY
+{
+	uint8_t x1, y1, x2, y2;
+};
+
+typedef std::list<GATEWAY *> GATEWAY_LIST;
+
+/// Initialise the gateway system
+bool gwInitialise(WorldMapState& mapState);
+
+/// Shutdown the gateway system
+void gwShutDown(WorldMapState& mapState);
+
+/// Add a gateway to the system
+bool gwNewGateway(WorldMapState& mapState, int x1, int y1, int x2, int y2);
+
+/// Restore a gateway verbatim from a saved GameState (no reorder/clamp), so the gateway list and tile
+/// flags round-trip exactly. gwNewGateway is not idempotent on its own clamped output - see the impl.
+bool gwRestoreGateway(WorldMapState& mapState, int x1, int y1, int x2, int y2);
+
+/// Get number of gateways.
+size_t gwNumGateways(const WorldMapState& mapState);
+
+/// Get the gateway list.
+GATEWAY_LIST &gwGetGateways(WorldMapState& mapState);
+
+#endif // __INCLUDED_SRC_GATEWAY_H__

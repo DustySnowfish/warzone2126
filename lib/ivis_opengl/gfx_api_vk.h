@@ -1,0 +1,1175 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 2017-2026  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+
+#pragma once
+
+#if defined(WZ_VULKAN_ENABLED)
+
+#include "vk/vulkan_hpp_include.h"
+#include "vk/wz_vk.h"
+
+#include "lib/framework/frame.h"
+#include "lib/framework/hash_combine.h"
+
+#include "gfx_api.h"
+#include "gfx_api_frame_resource_cache.h"
+#include "render_graph/layout_subresource.h"
+#include "render_graph/pass_resolve.h"
+#include "render_graph/pipeline_surfaces.h"
+#include "vk/frame_layout_tracker.h"
+#include "vk/layout_key_builder.h"
+#include "vk/pass_layout_key.h"
+#include "vk/pre_pass_barrier_emitter.h"
+#include "vk/render_pass_layout_cache.h"
+#include "vk/screen_frame_coordinator.h"
+#include "vk/screenshot_readback.h"
+#include "vk/warm_entry.h"
+#include <algorithm>
+#include <sstream>
+#include <map>
+#include <vector>
+#include <limits>
+#include <unordered_map>
+#include <typeindex>
+
+#include <nonstd/optional.hpp>
+using nonstd::optional;
+
+#if defined( _MSC_VER )
+#pragma warning( push )
+#pragma warning( disable : 4191 ) // warning C4191: '<function-style-cast>': unsafe conversion from 'PFN_vkVoidFunction' to 'PFN_vk<...>'
+#pragma warning( disable : 4324 ) // warning C4324: 'struct_name' : structure was padded due to alignment specifier
+#endif
+#include "3rdparty/vkh_renderpasscompat.hpp"
+#include "3rdparty/vkh_info.hpp"
+#if defined(__clang__)
+# pragma clang diagnostic push
+#  if defined(__has_warning)
+#    if __has_warning("-Wnullability-extension")
+#      pragma clang diagnostic ignored "-Wnullability-extension"
+#    endif
+#    if __has_warning("-Wnullability-completeness")
+#      pragma clang diagnostic ignored "-Wnullability-completeness"
+#    endif
+#  endif
+#endif
+#include "3rdparty/vk_mem_alloc.h"
+#if defined(__clang__)
+# pragma clang diagnostic pop
+#endif
+#if defined( _MSC_VER )
+#pragma warning( pop )
+#endif
+
+namespace gfx_api
+{
+	/// Map a Vulkan format to gfx_api::pixel_format (surface / capability reporting).
+	pixel_format vkFormatToPixelFormat(::vk::Format format);
+	/// Map gfx_api::pixel_format to a Vulkan format (textures + pipeline surfaces).
+	::vk::Format pixelFormatToVkFormat(pixel_format format);
+
+	class backend_Vulkan_Impl
+	{
+	public:
+		backend_Vulkan_Impl() {};
+		virtual ~backend_Vulkan_Impl() {};
+
+		virtual PFN_vkGetInstanceProcAddr getVkGetInstanceProcAddr() = 0;
+		virtual bool getRequiredInstanceExtensions(std::vector<const char*> &output) = 0;
+		virtual bool createWindowSurface(VkInstance instance, VkSurfaceKHR* surface) = 0;
+
+		// Use this function to get the size of the window's underlying drawable dimensions in pixels. This is used for setting viewport sizes, scissor rectangles, and other places where the a VkExtent might show up in relation to the window.
+		virtual void getDrawableSize(int* w, int* h) = 0;
+
+		virtual bool allowImplicitLayers() const = 0;
+	};
+}
+
+namespace std {
+	template <>
+	struct hash<vk::DescriptorBufferInfo>
+	{
+		std::size_t operator()(const vk::DescriptorBufferInfo& k) const
+		{
+			std::size_t h = 0;
+			hash_combine(h, static_cast<VkBuffer>(k.buffer), k.offset, k.range);
+			return h;
+		}
+	};
+}
+
+struct BlockBufferAllocator
+{
+	BlockBufferAllocator(VmaAllocator allocator, uint32_t minimumBlockSize, const vk::BufferUsageFlags& usageFlags, const VmaAllocationCreateInfo& allocInfo, bool autoMap = false);
+	BlockBufferAllocator(VmaAllocator allocator, uint32_t minimumBlockSize, const vk::BufferUsageFlags& usageFlags, const VmaMemoryUsage usage, bool autoMap = false);
+	~BlockBufferAllocator();
+
+private:
+	static std::tuple<uint32_t, uint32_t> getWritePosAndNewWriteLocation(uint32_t currentWritePos, uint32_t amount, uint32_t totalSize, uint32_t align);
+
+	void allocateNewBlock(uint32_t minimumSize);
+
+	struct Block
+	{
+		vk::Buffer buffer;
+		VmaAllocation allocation = VK_NULL_HANDLE;
+		uint32_t size = 0;
+		void *pMappedMemory = nullptr;
+	};
+
+public:
+	struct AllocationResult
+	{
+		vk::Buffer buffer;
+		uint32_t offset;
+
+		AllocationResult(const Block& block, const uint32_t offset)
+		: buffer(block.buffer)
+		, offset(offset)
+		, block(block)
+		{ }
+
+		const Block& block;
+	};
+	AllocationResult alloc(uint32_t amount, uint32_t align);
+	void * mapMemory(AllocationResult memoryAllocation);
+	void unmapMemory(AllocationResult memoryAllocation);
+	void unmapAutomappedMemory();
+	void flushAutomappedMemory();
+	void clean();
+
+private:
+	VmaAllocator allocator;
+	const uint32_t minimumBlockSize;
+	const vk::BufferUsageFlags usageFlags;
+	VmaAllocationCreateInfo allocInfo;
+
+	std::vector<Block> blocks;
+	uint64_t totalCapacity = 0;
+	uint32_t currentWritePosInLastBlock = 0;
+
+	uint32_t minimumFirstBlockSize = 0;
+
+	const bool autoMap = false;
+};
+
+struct VkRoot; // forward-declare
+struct VkPSO; // forward-declare
+struct buffering_mechanism;
+
+namespace gfx_api::vk
+{
+class TransferRecorder;
+class ScreenFrameCoordinator;
+class ScreenshotReadback;
+} // namespace gfx_api::vk
+
+[[noreturn]] void handleUnrecoverableError(vk::Result reason);
+
+/// Per-frame screen commit state: swapchain inputs plus slot seal/submit/present flow.
+struct ScreenFramePipelineState
+{
+	bool mustSkipDrawing = false;
+	/// Signal only - recreate is deferred to next Begin reconcile (except macOS present suboptimal).
+	bool swapchainRecreatePending = false;
+	/// Snapshot of ring-slot acquire before seal/submit clears swapchainImageAcquired.
+	bool acquiredSwapchainImage = false;
+	int drawableWidth = 0;
+	int drawableHeight = 0;
+
+	bool hadDrawCmdBufferRecording = false;
+	bool hasCopyWork = false;
+	bool submitDrawBuffer = false;
+	bool submittedQueueWork = false;
+	bool shouldPresent = false;
+	bool ringSwapped = false;
+};
+
+/// Queue submit inputs for `perFrameResources_t::submitCommandBuffers`.
+struct FrameQueueSubmitParams
+{
+	vk::Queue& graphicsQueue;
+	const WZ_vk::DispatchLoaderDynamic& vkDynLoader;
+	vk::Semaphore* renderFinishedSemaphore = nullptr;
+};
+
+struct perFrameResources_t
+{
+	vk::Device dev;
+	VmaAllocator allocator;
+	struct DescriptorPoolDetails
+	{
+		vk::DescriptorPool poolHandle;
+		vk::DescriptorPoolSize size;
+		size_t maxSets = 0;
+		size_t requestedDescriptors = 0;
+		size_t requestedSets = 0;
+
+		DescriptorPoolDetails(vk::DescriptorPool poolHandle,
+							  vk::DescriptorPoolSize size,
+							  size_t maxSets)
+		: poolHandle(poolHandle)
+		, size(size)
+		, maxSets(maxSets)
+		{ }
+	};
+	struct DescriptorPoolsContainer
+	{
+	public:
+		inline void push_back(const DescriptorPoolDetails& pool)
+		{
+			pools.push_back(pool);
+		}
+		void reset(vk::Device dev, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+		inline DescriptorPoolDetails& current() { return pools.at(currPool); }
+		bool nextPool() { if (!pools.empty() && (currPool < (pools.size() - 1))) { ++currPool; return true; } else { return false; } }
+	public:
+		std::vector<DescriptorPoolDetails> pools;
+		size_t currPool = 0;
+	};
+	DescriptorPoolsContainer combinedImageSamplerDescriptorPools;
+	DescriptorPoolsContainer uniformDynamicDescriptorPools;
+	uint32_t numalloc = 0;
+	vk::CommandPool pool;
+	vk::Fence previousSubmission;
+	vk::Semaphore imageAcquireSemaphore;
+	std::vector</*WZ_vk::UniqueBuffer*/vk::Buffer> buffer_to_delete;
+	std::vector</*WZ_vk::UniqueImage*/vk::Image> image_to_delete;
+	std::vector<WZ_vk::UniqueImageView> image_view_to_delete;
+	std::vector<vk::DeviceMemory> devicememory_to_free;
+	std::vector<VmaAllocation> vmamemory_to_free;
+	std::vector<VkPSO*> pso_to_delete;
+	std::vector<vk::Framebuffer> fbo_to_delete;
+
+	BlockBufferAllocator stagingBufferAllocator;
+	BlockBufferAllocator streamedVertexBufferAllocator;
+	BlockBufferAllocator uniformBufferAllocator;
+	BlockBufferAllocator lightDataBufferAllocator;
+
+	typedef std::pair<vk::DescriptorBufferInfo, vk::DescriptorSet> DynamicUniformBufferDescriptorSets;
+	typedef std::unordered_map<VkPSO *, std::vector<optional<DynamicUniformBufferDescriptorSets>>> PerPSODynamicUniformBufferDescriptorSets;
+	PerPSODynamicUniformBufferDescriptorSets perPSO_dynamicUniformBufferDescriptorSets;
+
+	perFrameResources_t( const perFrameResources_t& other ) = delete; // non construction-copyable
+	perFrameResources_t& operator=( const perFrameResources_t& ) = delete; // non copyable
+
+	perFrameResources_t(vk::Device& _dev, const VmaAllocator& allocator, const uint32_t& graphicsQueueIndex, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+	~perFrameResources_t();
+
+public:
+	vk::CommandBuffer* currentDrawCmdBuffer();
+
+	vk::CommandBuffer copyCmdBuffer();
+	vk::CommandBuffer drawCmdBuffer();
+
+	void ensureDrawCmdBufferBegun();
+	void endCopyCmdBufferIfRecording();
+	void endDrawCmdBufferIfRecording();
+
+	bool drawCmdBufferBegun = false;
+	bool copyCmdBufferBegun = false;
+	/// True after tryAcquireSwapchainImage() signals imageAcquireSemaphore for this slot.
+	bool swapchainImageAcquired = false;
+	/// True when TransferRecorder recorded copy/barrier work this screen frame.
+	bool transferWorkRecorded = false;
+	/// True after cmdCopy was queue-submitted without a subsequent command-pool reset on this slot.
+	bool copyCmdBufferSubmittedSincePoolReset = false;
+
+	/// Open the copy command buffer for recording on the current ring slot.
+	void ensureTransferRecordingBegun(const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+
+	/// Flush CPU-side automapped allocators before queue submit.
+	void flushMappedAllocators();
+
+	/// End the copy stream with the standard upload -> draw barrier.
+	void sealTransferStream(const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+
+	/// Submit copy and optionally draw command buffers to the graphics queue.
+	void submitCommandBuffers(const FrameQueueSubmitParams& submit, ScreenFramePipelineState& state);
+
+private:
+	friend struct buffering_mechanism;
+
+	// upload / transfer commands
+	vk::CommandBuffer cmdCopy;
+
+	// all render passes recorded sequentially in graph order
+	vk::CommandBuffer cmdDraw;
+
+	void resetDescriptorPools();
+	void clean();
+
+public:
+	vk::DescriptorPool getDescriptorPool(uint32_t numSets, vk::DescriptorType descriptorType, uint32_t numDescriptors);
+
+private:
+	DescriptorPoolDetails createNewDescriptorPool(vk::DescriptorType type, uint32_t maxSets, uint32_t descriptorCount);
+
+private:
+	const WZ_vk::DispatchLoaderDynamic *pVkDynLoader;
+	vk::CommandBuffer *pCurrentDrawCmdBuffer = nullptr;
+};
+
+struct perSwapchainImageResources_t
+{
+	vk::Device dev;
+	vk::Semaphore renderFinishedSemaphore;
+
+	perSwapchainImageResources_t( const perSwapchainImageResources_t& other ) = delete; // non construction-copyable
+	perSwapchainImageResources_t& operator=( const perSwapchainImageResources_t& ) = delete; // non copyable
+
+	perSwapchainImageResources_t(vk::Device& _dev, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+	~perSwapchainImageResources_t();
+
+protected:
+	friend struct buffering_mechanism;
+	void clean();
+
+private:
+	const WZ_vk::DispatchLoaderDynamic *pVkDynLoader;
+};
+
+struct buffering_mechanism
+{
+	static std::vector<std::unique_ptr<perFrameResources_t>> perFrameResources;
+	static std::vector<std::unique_ptr<perSwapchainImageResources_t>> perSwapchainImageResources;
+
+	static size_t currentFrame;
+
+	static perFrameResources_t& get_current_resources();
+	static perSwapchainImageResources_t& get_swapchain_resources(uint32_t swapchainIndex);
+	static void init(vk::Device dev, const VmaAllocator& allocator, size_t swapchainImageCount, const uint32_t& graphicsQueueFamilyIndex, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+	static void destroy(vk::Device dev, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+	static void swap(vk::Device dev, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+	static bool isInitialized();
+	static size_t get_current_frame_num();
+	static size_t numFrames();
+};
+
+VKAPI_ATTR VkBool32 VKAPI_CALL messageCallback(
+						 VkDebugReportFlagsEXT flags,
+						 VkDebugReportObjectTypeEXT objType,
+						 uint64_t srcObject,
+						 std::size_t location,
+						 int32_t msgCode,
+						 const char* pLayerPrefix,
+						 const char* pMsg,
+						 void* pUserData);
+
+struct VkPSOId final : public gfx_api::pipeline_state_object
+{
+public:
+	size_t psoID = 0;
+public:
+	VkPSOId(size_t psoID, bool _isbroken) : psoID(psoID)
+	{
+		broken = _isbroken;
+	}
+	~VkPSOId() {}
+};
+
+struct VkPSO final
+{
+	vk::Pipeline object;
+	std::vector<vk::DescriptorSetLayout> cbuffer_set_layout;
+	// Block type each uniform set expects (so a frame uniform reaching the wrong set is caught)
+	std::vector<std::type_index> uniformBlockTypes;
+	uint32_t textures_first_set = 0;
+	bool hasLightDataBindings = false;
+	vk::DescriptorSetLayout textures_set_layout;
+	vk::PipelineLayout layout;
+	vk::ShaderModule vertexShader;
+	vk::ShaderModule tessControlShader; // optional (only for tessellation pipelines)
+	vk::ShaderModule tessEvalShader; // optional (only for tessellation pipelines)
+	vk::ShaderModule fragmentShader;
+	vk::Device dev;
+	const WZ_vk::DispatchLoaderDynamic* pVkDynLoader;
+	std::vector<vk::Sampler> samplers;
+
+	std::shared_ptr<VkhRenderPassCompat> renderpass_compat;
+	bool hasSpecializationConstant_ShadowConstants = false;
+	bool hasSpecializationConstant_PointLightConstants = false;
+
+private:
+	// Read shader into text buffer
+	static std::vector<uint32_t> readShaderBuf(const std::string& name);
+
+	vk::ShaderModule get_module(const std::string& name, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+
+	static std::vector<vk::PipelineShaderStageCreateInfo> get_stages(const vk::ShaderModule& vertexModule, const vk::ShaderModule& tessControlModule, const vk::ShaderModule& tessEvalModule, const vk::ShaderModule& fragmentModule);
+
+	static std::array<vk::PipelineColorBlendAttachmentState, 1> to_vk(const REND_MODE& blend_state, const uint8_t& color_mask);
+
+	static vk::PipelineDepthStencilStateCreateInfo to_vk(DEPTH_MODE depth_mode, const gfx_api::stencil_mode& stencil);
+
+	static vk::PipelineRasterizationStateCreateInfo to_vk(const bool& offset, const gfx_api::cull_mode& cull);
+
+	static vk::Format to_vk(const gfx_api::vertex_attribute_type& type);
+
+	vk::SamplerCreateInfo to_vk(const gfx_api::sampler_type& type, const gfx_api::pixel_format_target& target, gfx_api::border_color border);
+
+	static vk::PrimitiveTopology to_vk(const gfx_api::primitive_type& primitive);
+
+	static vk::BorderColor to_vk(gfx_api::border_color border);
+
+public:
+	VkPSO(vk::Device _dev,
+		  const vk::PhysicalDeviceLimits& limits,
+		  const gfx_api::pipeline_create_info& createInfo,
+		  vk::RenderPass rp,
+		  const std::shared_ptr<VkhRenderPassCompat>& renderpass_compat,
+		  vk::SampleCountFlagBits rasterizationSamples,
+		  const WZ_vk::DispatchLoaderDynamic& _vkDynLoader,
+		  const VkRoot& root
+		  );
+
+	~VkPSO();
+
+	VkPSO(const VkPSO&) = default;
+	VkPSO(VkPSO&&) = default;
+	VkPSO& operator=(VkPSO&&) = default;
+
+private:
+	const VkRoot* root;
+};
+
+struct VkBuf final : public gfx_api::buffer
+{
+	vk::Device dev;
+	gfx_api::buffer::usage usage;
+//	WZ_vk::UniqueBuffer object;
+//	WZ_vk::UniqueDeviceMemory memory;
+	vk::Buffer object;
+	VmaAllocation allocation = VK_NULL_HANDLE;
+	size_t buffer_size = 0;
+	size_t lastUploaded_FrameNum = 0;
+
+	std::string debugName;
+
+	VkBuf(vk::Device _dev, const gfx_api::buffer::usage&, const VkRoot& root, const std::string& debugName);
+
+	virtual ~VkBuf() override;
+
+	virtual void upload(const size_t & size, const void * data) override;
+	virtual void update(const size_t & start, const size_t & size, const void * data, const update_flag flag = update_flag::none) override;
+	virtual size_t current_buffer_size() override;
+
+	virtual void bind() override;
+
+private:
+	void allocateBufferObject(const std::size_t& size);
+
+private:
+	const VkRoot* root;
+};
+
+struct VkTexture final : public gfx_api::texture
+{
+	vk::Device dev;
+//	WZ_vk::UniqueImage object;
+	vk::Image object;
+	WZ_vk::UniqueImageView view;
+//	WZ_vk::UniqueDeviceMemory memory;
+	VmaAllocation allocation = VK_NULL_HANDLE;
+	gfx_api::pixel_format internal_format = gfx_api::pixel_format::invalid;
+	size_t mipmap_levels = 0;
+	size_t tex_width = 0;
+	size_t tex_height = 0;
+
+#if defined(WZ_DEBUG_GFX_API_LEAKS)
+	std::string debugName;
+#endif
+
+
+	static size_t format_size(const gfx_api::pixel_format& format);
+
+	static size_t format_size(const vk::Format& format);
+
+	VkTexture(const VkRoot& root, const std::size_t& mipmap_count, const std::size_t& width, const std::size_t& height, const gfx_api::pixel_format& internal_pixel_format, const std::string& filename);
+
+	virtual ~VkTexture() override;
+
+	virtual void bind() override;
+
+	virtual bool upload(const size_t& mip_level, const iV_BaseImage& image) override;
+	virtual bool upload_sub(const size_t& mip_level, const size_t& offset_x, const size_t& offset_y, const iV_BaseImage& image) override;
+	virtual unsigned id() override;
+	virtual gfx_api::texture2dDimensions get_dimensions() const override;
+	virtual size_t backend_internal_value() const override;
+
+	VkTexture( const VkTexture& other ) = delete; // non construction-copyable
+	VkTexture& operator=( const VkTexture& ) = delete; // non copyable
+
+private:
+	bool upload_internal(const std::size_t& mip_level, const std::size_t& offset_x, const std::size_t& offset_y, const iV_BaseImage& image);
+
+private:
+	const VkRoot* root;
+};
+
+struct VkTextureArray final : public gfx_api::texture_array
+{
+	const vk::Device dev;
+	vk::Image object;
+	WZ_vk::UniqueImageView view;
+	VmaAllocation allocation = VK_NULL_HANDLE;
+	gfx_api::pixel_format internal_format = gfx_api::pixel_format::invalid;
+	size_t mipmap_levels;
+	size_t layer_count;
+	size_t texWidth;
+	size_t texHeight;
+	bool transitionedToTransferDstFormat = false;
+
+#if defined(WZ_DEBUG_GFX_API_LEAKS)
+	std::string debugName;
+#endif
+
+	VkTextureArray(const VkRoot& root, size_t mipmap_count, size_t layer_count, size_t width, size_t height, gfx_api::pixel_format internal_pixel_format, const std::string& filename);
+
+	virtual ~VkTextureArray() override;
+
+	virtual void bind() override {};
+	virtual unsigned id() override { return 0; }
+	virtual size_t backend_internal_value() const override;
+
+	virtual bool upload_layer(const size_t& layer, const size_t& mip_level, const iV_BaseImage& image) override;
+
+	virtual void flush() override;
+
+	VkTextureArray( const VkTextureArray& other ) = delete; // non construction-copyable
+	VkTextureArray& operator=( const VkTextureArray& ) = delete; // non copyable
+
+private:
+	const VkRoot* root;
+};
+
+struct VkDepthMapImage final : public gfx_api::abstract_texture
+{
+	vk::Device dev;
+//	WZ_vk::UniqueImage object;
+	vk::Image object;
+	WZ_vk::UniqueImageView view;
+//	WZ_vk::UniqueDeviceMemory memory;
+	VmaAllocation allocation = VK_NULL_HANDLE;
+
+	size_t layer_count;
+	vk::Format depthMapFormat = vk::Format::eUndefined;
+	uint32_t mapSize = 0;
+
+#if defined(WZ_DEBUG_GFX_API_LEAKS)
+	std::string debugName;
+#endif
+
+	VkDepthMapImage(const VkRoot& root, const std::size_t& layer_count, const std::size_t& size, vk::Format depthMapFormat, const std::string& filename);
+
+	virtual ~VkDepthMapImage() override;
+
+	virtual void bind() override;
+	virtual bool isArray() const override;
+	virtual size_t backend_internal_value() const override;
+
+	void destroy(vk::Device dev, const VmaAllocator& allocator, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+
+	VkDepthMapImage( const VkDepthMapImage& other ) = delete; // non construction-copyable
+	VkDepthMapImage& operator=( const VkDepthMapImage& ) = delete; // non copyable
+};
+
+struct VkRenderedImage final : public gfx_api::abstract_texture
+{
+	vk::Device dev;
+//	WZ_vk::UniqueImage object;
+	vk::Image object;
+	WZ_vk::UniqueImageView view;
+//	WZ_vk::UniqueDeviceMemory memory;
+	VmaAllocation allocation = VK_NULL_HANDLE;
+
+	vk::Format imageFormat = vk::Format::eUndefined;
+	uint32_t width = 0;
+	uint32_t height = 0;
+
+#if defined(WZ_DEBUG_GFX_API_LEAKS)
+	std::string debugName;
+#endif
+
+	VkRenderedImage(const VkRoot& root, size_t width, size_t height, vk::Format imageFormat, const std::string& filename);
+
+	virtual ~VkRenderedImage() override;
+
+	virtual void bind() override;
+	virtual bool isArray() const override;
+	virtual size_t backend_internal_value() const override;
+
+	void destroy(vk::Device dev, const VmaAllocator& allocator, const WZ_vk::DispatchLoaderDynamic& vkDynLoader);
+
+	VkRenderedImage( const VkRenderedImage& other ) = delete; // non construction-copyable
+	VkRenderedImage& operator=( const VkRenderedImage& ) = delete; // non copyable
+};
+
+/// Non-owning wrapper for pipeline attachment images (scene MSAA / depth) owned by VkRoot.
+struct VkAttachmentImage final : public gfx_api::abstract_texture
+{
+	vk::Image image;
+	vk::ImageView view;
+	vk::Format imageFormat = vk::Format::eUndefined;
+	uint32_t width = 0;
+	uint32_t height = 0;
+	vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
+
+#if defined(WZ_DEBUG_GFX_API_LEAKS)
+	std::string debugName;
+#endif
+
+	VkAttachmentImage(vk::Image _image, vk::ImageView _view, vk::Format format, uint32_t w, uint32_t h,
+		vk::SampleCountFlagBits sampleCount, const std::string& filename);
+
+	virtual ~VkAttachmentImage() override;
+	virtual void bind() override;
+	virtual bool isArray() const override { return false; }
+	virtual size_t backend_internal_value() const override;
+};
+
+/// Non-owning wrapper for the current swapchain image (view selected per frame).
+struct VkSwapchainColorSurface final : public gfx_api::abstract_texture
+{
+	const VkRoot& root;
+	vk::Format imageFormat = vk::Format::eUndefined;
+
+	VkSwapchainColorSurface(const VkRoot& rootRef, vk::Format format);
+	virtual ~VkSwapchainColorSurface() override;
+	virtual void bind() override;
+	virtual bool isArray() const override { return false; }
+	virtual size_t backend_internal_value() const override;
+};
+
+/// Non-owning wrapper for the shared swapchain depth/stencil image.
+struct VkSwapchainDepthSurface final : public gfx_api::abstract_texture
+{
+	const VkRoot& root;
+	vk::Format imageFormat = vk::Format::eUndefined;
+	vk::SampleCountFlagBits samples = vk::SampleCountFlagBits::e1;
+
+	VkSwapchainDepthSurface(const VkRoot& rootRef, vk::Format format, vk::SampleCountFlagBits sampleCount);
+	virtual ~VkSwapchainDepthSurface() override;
+	virtual void bind() override;
+	virtual bool isArray() const override { return false; }
+	virtual 	size_t backend_internal_value() const override;
+};
+
+struct QueueFamilyIndices
+{
+	optional<uint32_t> graphicsFamily;
+	optional<uint32_t> presentFamily;
+
+	bool isComplete()
+	{
+		return graphicsFamily.has_value() && presentFamily.has_value();
+	}
+};
+
+struct SwapChainSupportDetails
+{
+	vk::SurfaceCapabilitiesKHR capabilities;
+	std::vector<vk::SurfaceFormatKHR> formats;
+	std::vector<vk::PresentModeKHR> presentModes;
+};
+
+struct VkRoot;
+
+/// Backend-owned GPU objects for one pipeline surface (store holds non-owning texture*).
+struct VkSurfaceGpu
+{
+	std::unique_ptr<gfx_api::abstract_texture> texture;
+	std::vector<WZ_vk::UniqueImageView> cascadeViews; // ShadowMap only
+
+	// Owned GPU resources for attachment-style allocates (MSAA color / depth).
+	// Unused when texture owns VMA resources (SceneColor / ShadowMap) or WsiPresentColor.
+	vk::Image image {};
+	vk::DeviceMemory memory {};
+	vk::ImageView view {};
+};
+
+struct VkRoot final : gfx_api::context
+{
+	std::unique_ptr<gfx_api::backend_Vulkan_Impl> backend_impl;
+	VkhInfo debugInfo;
+	gfx_api::context::swap_interval_mode swapMode = gfx_api::context::swap_interval_mode::vsync;
+	gfx_api::lighting_constants shadowConstants;
+
+	std::vector<VkExtensionProperties> supportedInstanceExtensionProperties;
+	std::vector<const char*> instanceExtensions;
+	vk::ApplicationInfo appInfo;
+	vk::InstanceCreateInfo instanceCreateInfo;
+	vk::Instance inst;
+	std::vector<const char*> layers;
+	WZ_vk::DispatchLoaderDynamic vkDynLoader;
+
+	// physical device (and info)
+	vk::PhysicalDevice physicalDevice;
+	vk::PhysicalDeviceProperties physDeviceProps;
+	vk::PhysicalDeviceFeatures physDeviceFeatures;
+	vk::PhysicalDeviceMemoryProperties memprops;
+#if 0 // this is not a "stable" extension yet
+	vk::PhysicalDevicePortabilitySubsetFeaturesKHR physDevicePortabilitySubsetFeatures;
+#endif
+	bool hasPortabilitySubset = false;
+
+
+	QueueFamilyIndices queueFamilyIndices;
+	std::vector<const char*> enabledDeviceExtensions;
+	vk::Device dev;
+	vk::SurfaceKHR surface;
+	vk::Queue graphicsQueue;
+	vk::Queue presentQueue;
+	bool queueSupportsTimestamps = false;
+
+	// allocator
+	VmaAllocator allocator = VK_NULL_HANDLE;
+
+	// swapchain
+	vk::PresentModeKHR presentMode = vk::PresentModeKHR::eFifo;
+	vk::Extent2D swapchainSize;
+	vk::SurfaceFormatKHR surfaceFormat;
+	vk::SwapchainKHR swapchain;
+	uint32_t currentSwapchainIndex = 0;
+	std::vector<vk::Image> swapchainImages;
+	std::vector<vk::ImageView> swapchainImageView;
+	bool _swapchainSupportsScreenshotReadback = false;
+
+	vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1; // msaaSamples used for scene
+	vk::SampleCountFlagBits msaaSamplesSwapchain = vk::SampleCountFlagBits::e1; // msaaSamples used for swapchain assets (should generally be 1)
+
+	// render passes
+	static constexpr size_t INVALID_RENDER_PASS_ID = std::numeric_limits<size_t>::max();
+
+	struct RenderPassDetails
+	{
+		vk::RenderPass rp;
+		std::shared_ptr<VkhRenderPassCompat> rp_compat_info;
+		vk::SampleCountFlagBits msaaSamples = vk::SampleCountFlagBits::e1;
+		size_t identifier;
+
+		RenderPassDetails(size_t _identifier)
+		: identifier(_identifier)
+		{ }
+	};
+
+	// render passes
+	std::vector<RenderPassDetails> renderPasses;
+
+	// depth render passes / scene formats (cached for sync inputs + capabilities)
+	vk::Format depthBufferFormat = vk::Format::eUndefined;
+	vk::Format depthStencilAttachmentFormat = vk::Format::eUndefined;
+	vk::Format sceneColorVkFormat = vk::Format::eUndefined;
+	uint32_t depthMapSize = 4096;
+
+	// GPU frame timing
+	static constexpr size_t GPU_TIMING_SLOTS = 8;
+	struct GpuTimingSlot
+	{
+		size_t frameNum = 0;
+		bool inFlight = false;
+	};
+	vk::QueryPool gpuTimingQueryPool; // 2 timestamp queries per slot
+	std::array<GpuTimingSlot, GPU_TIMING_SLOTS> gpuTimingSlots;
+	size_t gpuTimingWriteIdx = 0;
+	size_t gpuTimingReadIdx = 0;
+	bool gpuTimingFrameOpen = false;
+	bool hasGpuTimestampSupport = false;
+	float gpuTimestampPeriod = 0.f;
+	uint64_t gpuTimestampMask = ~uint64_t(0);
+
+	// default textures
+	VkTexture* pDefaultTexture = nullptr;
+	VkTextureArray* pDefaultArrayTexture = nullptr;
+	VkDepthMapImage* pDefaultDepthMapTexture = nullptr;
+
+	// Debug_Utils
+	PFN_vkCreateDebugUtilsMessengerEXT CreateDebugUtilsMessenger = nullptr;
+	PFN_vkDestroyDebugUtilsMessengerEXT DestroyDebugUtilsMessenger = nullptr;
+	VkDebugUtilsMessengerEXT debugUtilsCallback = 0;
+	VkDebugUtilsMessengerCreateInfoEXT instanceDebugUtilsCallbacksInfo = {};
+
+	// Debug_Report (old)
+	PFN_vkCreateDebugReportCallbackEXT CreateDebugReportCallback = nullptr;
+	PFN_vkDestroyDebugReportCallbackEXT DestroyDebugReportCallback = nullptr;
+	PFN_vkDebugReportMessageEXT dbgBreakCallback = nullptr;
+	VkDebugReportCallbackEXT msgCallback = 0;
+
+	struct BuiltPipelineRegistry
+	{
+		const gfx_api::pipeline_create_info createInfo;
+		std::vector<VkPSO *> renderPassPSO;
+
+		BuiltPipelineRegistry(const gfx_api::pipeline_create_info& _createInfo, size_t numRenderPasses)
+		: createInfo(_createInfo)
+		{
+			renderPassPSO.resize(numRenderPasses, nullptr);
+		}
+	};
+
+	std::vector<BuiltPipelineRegistry> createdPipelines;
+	VkPSO* currentPSO = nullptr;
+
+	bool validationLayer = false;
+	bool debugCallbacksEnabled = true;
+	bool debugUtilsExtEnabled = false;
+
+	bool frameHasDrawCommands = false;
+	bool hasActivePass = false;
+	const size_t maxErrorHandlingDepth = 10;
+	std::vector<vk::Result> errorHandlingDepth;
+
+	size_t frameNum = 0;
+	bool _screenFrameOpen = false;
+	gfx_api::vk::ScreenFrameCoordinator _screenFrameCoordinator;
+
+public:
+	VkRoot(bool _debug);
+	~VkRoot();
+
+	virtual gfx_api::pipeline_state_object * build_pipeline(gfx_api::pipeline_state_object *existing_pso, const gfx_api::pipeline_create_info& createInfo) override;
+
+	virtual void draw(const std::size_t& offset, const std::size_t& count, const gfx_api::primitive_type&) override;
+	virtual void draw_elements(const std::size_t& offset, const std::size_t& count, const gfx_api::primitive_type&, const gfx_api::index_type&) override;
+	virtual void bind_vertex_buffers(const std::size_t& first, const std::vector<std::tuple<gfx_api::buffer*, std::size_t>>& vertex_buffers_offset) override;
+	virtual void unbind_vertex_buffers(const std::size_t& first, const std::vector<std::tuple<gfx_api::buffer*, std::size_t>>& vertex_buffers_offset) override;
+	virtual void disable_all_vertex_buffers() override;
+	virtual void bind_streamed_vertex_buffers(const void* data, const std::size_t size) override;
+
+	virtual gfx_api::texture* create_texture(const std::size_t& mipmap_count, const std::size_t& width, const std::size_t& height, const gfx_api::pixel_format& internal_format, const std::string& filename = "") override;
+	virtual gfx_api::texture_array* create_texture_array(const std::size_t& mipmap_count, const std::size_t& layer_count, const std::size_t& width, const std::size_t& height, const gfx_api::pixel_format& internal_format, const std::string& filename = "") override;
+
+	virtual gfx_api::buffer * create_buffer_object(const gfx_api::buffer::usage &usage, const buffer_storage_hint& hint = buffer_storage_hint::static_draw, const std::string& debugName = "") override;
+
+private:
+
+	std::vector<vk::DescriptorSet> allocateDescriptorSet(vk::DescriptorSetLayout arg, vk::DescriptorType descriptorType, uint32_t numDescriptors);
+	std::vector<vk::DescriptorSet> allocateDescriptorSets(std::vector<vk::DescriptorSetLayout> args, vk::DescriptorType descriptorType, uint32_t numDescriptors);
+
+	bool getSupportedInstanceExtensions(std::vector<VkExtensionProperties> &output, PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr);
+	bool findSupportedInstanceExtensions(std::vector<const char*> extensionsToFind, std::vector<const char*> &output, PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr);
+#if defined(VK_EXT_layer_settings)
+	std::vector<vk::LayerSettingEXT> initLayerSettings();
+#endif
+	bool createVulkanInstance(uint32_t apiVersion, const std::vector<const char*>& extensions, const std::vector<const char*>& layers, PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr);
+	bool setupDebugUtilsCallbacks(const std::vector<const char*>& extensions, PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr);
+	bool setupDebugReportCallbacks(const std::vector<const char*>& extensions, PFN_vkGetInstanceProcAddr _vkGetInstanceProcAddr);
+	vk::PhysicalDevice pickPhysicalDevice();
+
+	bool createSurface();
+	bool canUseVulkanInstanceAPI(uint32_t minVulkanAPICoreVersion) const;
+	bool canUseVulkanDeviceAPI(uint32_t minVulkanAPICoreVersion) const;
+
+	// pickPhysicalDevice();
+	bool getQueueFamiliesInfo();
+	bool createLogicalDevice();
+	bool createAllocator();
+	void getQueues();
+	/// Create the swapchain and swapchain-specific resources.
+	/// Does not acquire an image; End acquireSwapchainForFrameDraw() owns acquire.
+	void createSwapchain(bool allowHandleSurfaceLost = true); // Throws on failure
+	void rebuildPipelinesIfNecessary();
+
+	void setupSwapchainImages();
+	void resetAllPipelineSurfaceSlots();
+	/// Reset scene + swapchain surfaces; keeps ShadowMap across swapchain recreate.
+	void resetSwapchainPipelineSurfaceSlots();
+
+	struct PipelineSurfaceAllocator final : gfx_api::SurfaceAllocator
+	{
+		VkRoot& root;
+		explicit PipelineSurfaceAllocator(VkRoot& r) : root(r) {}
+		bool create(gfx_api::PipelineSurfaceId id, const gfx_api::ResolvedSurfaceSpec& spec,
+			gfx_api::abstract_texture*& outTexture) override;
+		void destroy(gfx_api::PipelineSurfaceId id, gfx_api::abstract_texture* texture) override;
+		void prepareForSurfaceDestroy() override;
+		void onChanged() override;
+	};
+
+	// GPU frame timing (a ring of timestamp query pairs, read a few frames late)
+	bool initGpuTimestampSupport();
+	void destroyGpuTimingQueryPool();
+	void pollGpuFrameTimings();
+	/// Write the frame's begin timestamp on first use of the draw command buffer (must be outside a render pass)
+	void writeGpuTimingBeginIfNeeded(vk::CommandBuffer cmdBuffer);
+	/// Write the frame's end timestamp before the draw command buffer ends (must be outside a render pass)
+	void writeGpuTimingEndIfOpen(vk::CommandBuffer cmdBuffer);
+
+public:
+	vk::Format get_format(const gfx_api::pixel_format& format) const;
+
+private:
+	static vk::IndexType to_vk(const gfx_api::index_type& index);
+
+public:
+	virtual void bind_index_buffer(gfx_api::buffer& index_buffer, const gfx_api::index_type& index) override;
+	virtual void unbind_index_buffer(gfx_api::buffer&) override;
+
+	virtual void bind_textures(const std::vector<gfx_api::texture_input>& attribute_descriptions, const std::vector<gfx_api::abstract_texture*>& textures) override;
+
+public:
+	virtual void set_constants(const void* buffer, const std::size_t& size) override;
+	virtual void set_uniforms(const size_t& first, const std::vector<std::tuple<const void*, size_t>>& uniform_blocks) override;
+	virtual gfx_api::frame_uniform_allocation upload_frame_uniform_raw(const void* data, size_t size) override;
+	gfx_api::data_buffer_transport lightDataTransport() const override { return gfx_api::data_buffer_transport::storage_buffer; }
+	void upload_light_data(const void* lights, size_t lightBytes, const void* indices, size_t indexBytes) override;
+	virtual void set_frame_uniform_at(size_t slot, const gfx_api::frame_uniform_allocation& allocation, std::type_index type) override;
+
+	virtual void bind_pipeline(gfx_api::pipeline_state_object* pso, bool notextures) override;
+
+	virtual size_t numDepthPasses() override;
+	virtual bool setDepthPassProperties(size_t numDepthPasses, size_t depthBufferResolution) override;
+	virtual bool setSceneRenderScale(uint32_t scalePercent) override;
+	virtual bool setSceneUpscalingMode(gfx_api::context::scene_upscaling_mode mode) override;
+	virtual bool setSmaaEnabled(bool enabled) override;
+	virtual bool setSceneEffectSurfaces(gfx_api::SceneEffectSurfaces cfg) override;
+	virtual bool setSceneDynamicResolution(bool enabled) override;
+	virtual bool supportsGpuFrameTiming() const override;
+	virtual bool setGpuFrameTimingEnabled(bool enabled) override;
+	virtual void beginPass(const gfx_api::RenderPassDesc& pass, const gfx_api::CompiledPass* compiledPass = nullptr) override;
+	virtual void endPass(const gfx_api::CompiledPass* compiledPass = nullptr) override;
+	virtual void beginScreenFrame() override;
+	virtual void finishScreenFrame() override;
+	virtual void reconcileSwapchainAtFrameOpen() override;
+	virtual void acquireSwapchainForFrameDraw() override;
+	virtual bool canRecordSwapchainDraws() const override;
+	/// True between beginScreenFrame() and finishScreenFrame().
+	bool isScreenFrameOpen() const { return _screenFrameOpen; }
+	/// Typed wrapper for per-frame GPU upload / copy command recording.
+	gfx_api::vk::TransferRecorder transferRecorder() const;
+	virtual size_t getDepthPassDimensions(size_t idx) override;
+	virtual gfx_api::abstract_texture* getPipelineSurface(gfx_api::PipelineSurfaceId id) override;
+	virtual gfx_api::PipelineSurfaceUsage pipelineSurfaceUsage(gfx_api::PipelineSurfaceId id) const override;
+	virtual const gfx_api::ResolvedSurfaceSpec& resolvedPipelineSurface(gfx_api::PipelineSurfaceId id) const override;
+	virtual bool isSceneMSAAEnabled() const override;
+	virtual bool isSwapchainMSAAEnabled() const override;
+	virtual bool isMultisampledColorAttachment(gfx_api::abstract_texture* texture) const override;
+	virtual gfx_api::pixel_format getDepthStencilFormat() const override;
+	virtual gfx_api::PipelineSurfaceSyncInputs pipelineSurfaceSyncInputs() const override;
+	virtual gfx_api::SurfaceCapabilityHints surfaceCapabilities() const override;
+	virtual bool ensurePipelineSurfaces(const gfx_api::ResolvedSurfaceTable& specs) override;
+	virtual void purgeFrameResources() override;
+	virtual optional<std::pair<uint32_t, uint32_t>> getRenderTargetDimensions(gfx_api::abstract_texture* texture) override;
+	virtual void warmCompiledRenderGraph(std::vector<gfx_api::RenderPassDesc>& passes,
+		gfx_api::PassGraphCompileResult& compileResult) override;
+	virtual void set_polygon_offset(const float& factor, const float& units) override;
+	virtual void set_depth_range(const float& min, const float& max) override;
+private:
+	enum class SwapchainAcquireStatus
+	{
+		Success,      // eSuccess - image acquired
+		Suboptimal,   // eSuboptimalKHR - index returned by Vulkan, but not consumed here
+		OutOfDate,
+		SurfaceLost
+	};
+	/// acquireNextImageKHR only. Never recreates, never sets pending WSI flags (coordinator owns that).
+	/// On Success: sets currentSwapchainIndex, swapchainImageAcquired, beginFrame().
+	/// On Suboptimal/OutOfDate/SurfaceLost: does not mark acquired (image abandoned until recreate).
+	SwapchainAcquireStatus tryAcquireSwapchainImage();
+	/// Re-attach an already-open screen frame to buffering after mid-frame swapchain recreate.
+	void rebindOpenScreenFrameResources();
+
+	void handleSurfaceLost(); // Throws on failure
+	void waitForAllIdle(); // Throws on failure
+	/// Submit recorded-but-unsubmitted copy work so pending uploads survive buffering teardown.
+	void submitPendingTransferWork(); // Throws on failure
+	/// Close any in-progress command buffer / render pass recording before GPU teardown.
+	/// Does not clear _screenFrameOpen (owned by beginScreenFrame / finish / shutdown).
+	void finalizeActiveRecording();
+	void destroySwapchainAndSwapchainSpecificStuff(bool doDestroySwapchain);
+	void createNewSwapchainAndSwapchainSpecificStuff(const vk::Result& reason); // Throws on failure
+
+public:
+	virtual int32_t get_context_value(const gfx_api::context::context_value property) override;
+	virtual uint64_t get_estimated_vram_mb(bool dedicatedOnly) override;
+	virtual void debugStringMarker(const char *str) override;
+	virtual void debugSceneBegin(const char *descr) override;
+	virtual void debugSceneEnd(const char *descr) override;
+	virtual bool debugPerfAvailable() override;
+	virtual bool debugPerfStart(size_t sample) override;
+	virtual void debugPerfStop() override;
+	virtual void debugPerfBegin(PERF_POINT pp, const char *descr) override;
+	virtual void debugPerfEnd(PERF_POINT pp) override;
+	virtual uint64_t debugGetPerfValue(PERF_POINT pp) override;
+	virtual std::map<std::string, std::string> getBackendGameInfo() override;
+	virtual const std::string& getFormattedRendererInfoString() const override;
+	virtual bool getScreenshot(std::function<void (std::unique_ptr<iV_Image>)> callback) override;
+	virtual void handleWindowSizeChange(unsigned int oldWidth, unsigned int oldHeight, unsigned int newWidth, unsigned int newHeight) override;
+	virtual std::pair<uint32_t, uint32_t> getDrawableDimensions() override;
+	bool isYAxisInverted() const override { return true; }
+	virtual bool shouldDraw() override;
+	virtual void shutdown() override;
+	virtual const size_t& current_FrameNum() const override;
+	virtual bool setSwapInterval(gfx_api::context::swap_interval_mode mode, const SetSwapIntervalCompletionHandler& completionHandler) override;
+	virtual gfx_api::context::swap_interval_mode getSwapInterval() const override;
+	virtual bool textureFormatIsSupported(gfx_api::pixel_format_target target, gfx_api::pixel_format format, gfx_api::pixel_format_usage::flags usage) override;
+	virtual bool supportsMipLodBias() const override;
+	virtual bool supports2DTextureArrays() const override;
+	virtual bool supportsIntVertexAttributes() const override;
+	virtual size_t maxFramesInFlight() const override;
+	virtual gfx_api::lighting_constants getShadowConstants() override;
+	virtual bool setShadowConstants(gfx_api::lighting_constants values) override;
+	// tessellation shaders
+	virtual bool supportsTessellationShaders() const override;
+	// instanced rendering APIs
+	virtual bool supportsInstancedRendering() override;
+	virtual void draw_instanced(const std::size_t& offset, const std::size_t &count, const gfx_api::primitive_type &primitive, std::size_t instance_count) override;
+	virtual void draw_elements_instanced(const std::size_t& offset, const std::size_t& count, const gfx_api::primitive_type& primitive, const gfx_api::index_type& index, std::size_t instance_count) override;
+	// debug apis for recompiling pipelines
+	virtual bool debugRecompileAllPipelines() override;
+	/// Records post-upload / external-producer layout for one subresource.
+	void noteExternalSubresourceLayout(const gfx_api::LayoutSubresourceKey& subresource,
+		vk::ImageLayout layout) const;
+private:
+	virtual bool _initialize(const gfx_api::backend_Impl_Factory& impl, int32_t antialiasing, swap_interval_mode mode, optional<float> mipLodBias, uint32_t depthMapResolution) override;
+	bool initPixelFormatsSupport();
+	gfx_api::pixel_format_usage::flags getPixelFormatUsageSupport(gfx_api::pixel_format format) const;
+	std::string calculateFormattedRendererInfoString() const;
+	void set_uniforms_set(const size_t& set_idx, const void* buffer, size_t bufferSize);
+	// Point a uniform set at a range already written this frame, without copying it again
+	void bindUniformBufferRange(const size_t& set_idx, vk::Buffer buffer, uint32_t offset, size_t bufferSize);
+
+	// Blocks uploaded once for the current frame, referenced by index, and dropped when the frame ends
+	struct FrameUniform
+	{
+		vk::Buffer buffer;
+		uint32_t offset = 0;
+		uint32_t size = 0;
+	};
+	std::vector<FrameUniform> frameUniforms;
+
+	// This frame's point light data, written once and read by every lit pipeline.
+	struct LightDataBuffers
+	{
+		vk::Buffer lightsBuffer;
+		uint32_t lightsOffset = 0;
+		uint32_t lightsRange = 0;
+		vk::Buffer indicesBuffer;
+		uint32_t indicesOffset = 0;
+		uint32_t indicesRange = 0;
+		bool valid() const { return lightsRange != 0 && indicesRange != 0; }
+	};
+	LightDataBuffers lightDataBuffers;
+	const RenderPassDetails& currentRenderPass();
+	bool recreateSwapchain(const vk::Result& reason);
+	void sealActivePassForFrameFinish();
+	void sealDrawCommandBufferForPresent();
+	void sealAndSubmitTransferGraphics(ScreenFramePipelineState& state);
+
+	void ensureRenderPassPSOCapacity(size_t requiredCount);
+	void destroyRenderPassIndexedPSOs(size_t fromIndex);
+	size_t getOrCreatePassRenderPassId(const gfx_api::vk::PassLayoutKey& key);
+	vk::Format getAttachmentVkFormat(gfx_api::abstract_texture* texture) const;
+	vk::SampleCountFlagBits getAttachmentVkSamples(gfx_api::abstract_texture* texture) const;
+	vk::ImageView getAttachmentImageView(const gfx_api::AttachmentDesc& attachment) const;
+	void destroyDynamicRenderPasses();
+	void resetImageLayoutTracker();
+	void setImageLayout(gfx_api::abstract_texture* texture, vk::ImageLayout layout);
+	void setImageLayout(const gfx_api::LayoutSubresourceKey& subresource, vk::ImageLayout layout);
+	vk::ImageLayout getImageLayout(gfx_api::abstract_texture* texture) const;
+	vk::ImageLayout getImageLayout(const gfx_api::LayoutSubresourceKey& subresource) const;
+	vk::Image getVkImageHandle(gfx_api::abstract_texture* texture) const;
+	vk::ImageAspectFlags getVkImageAspect(gfx_api::abstract_texture* texture) const;
+	/// Records an image barrier and updates `_frameLayoutTracker`
+	void transitionImageLayout(vk::CommandBuffer cmdBuffer, const gfx_api::LayoutSubresourceKey& subresource,
+		vk::ImageLayout oldLayout, vk::ImageLayout newLayout,
+		vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage,
+		vk::AccessFlags srcAccess, vk::AccessFlags dstAccess);
+	/// Records an image barrier and updates `_frameLayoutTracker`
+	void transitionImageLayout(vk::CommandBuffer cmdBuffer, gfx_api::abstract_texture* texture, vk::ImageLayout newLayout,
+		vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage, vk::AccessFlags srcAccess, vk::AccessFlags dstAccess);
+	/// Records an image barrier and updates `_frameLayoutTracker`
+	void transitionImageLayout(vk::CommandBuffer cmdBuffer, gfx_api::abstract_texture* texture, vk::ImageLayout oldLayout,
+		vk::ImageLayout newLayout, vk::PipelineStageFlags srcStage, vk::PipelineStageFlags dstStage,
+		vk::AccessFlags srcAccess, vk::AccessFlags dstAccess);
+	/// Delegates to `_barrierEmitter.emitBatch`
+	void emitPrePassBarriers(const gfx_api::ExecutionBatch& batch,
+		const std::vector<gfx_api::CompiledPass>& compiledPasses) override;
+	/// Applies `CompiledPass::postPassLayoutUpdates` via `_frameLayoutTracker`.
+	void applyCompiledPostPassLayouts(const gfx_api::CompiledPass& pass);
+	void applyViewport(vk::CommandBuffer cmdBuffer, uint32_t width, uint32_t height, float minDepth, float maxDepth);
+	void deferDestroyFramebuffer(vk::Framebuffer framebuffer);
+	/// Destroy all framebuffers queued in per-frame `fbo_to_delete` lists (requires GPU idle).
+	void flushDeferredFramebufferDeletes();
+	void clearFramebufferCache();
+	bool buildPassLayoutKey(gfx_api::vk::PassLayoutKey& out, const gfx_api::RenderPassDesc& pass,
+		const gfx_api::CompiledPass* compiledPass);
+	void buildFramebufferKey(gfx_api::FramebufferResourceKey& out, size_t renderPassId, uint32_t passWidth,
+		uint32_t passHeight, const std::vector<vk::ImageView>& fboAttachments);
+	/// Resizes `_warmEntries` to match compiled pass count.
+	void resizeWarmEntries(size_t passCount);
+	/// Marks all warm entries cold (epoch bump / render-graph rebuild).
+	void invalidateWarmEntries();
+	/// Per-`graphIndex` warm cache entry; populated by `warmCompiledRenderGraph`.
+	gfx_api::vk::VulkanWarmEntry& warmEntry(size_t graphIndex);
+	const gfx_api::vk::VulkanWarmEntry& warmEntry(size_t graphIndex) const;
+
+	// Friend access for vk/ modules that need device state, renderPasses[], and attachment helpers.
+	friend class gfx_api::vk::RenderPassLayoutCache;
+	friend class gfx_api::vk::FrameLayoutTracker;
+	friend class gfx_api::vk::PrePassBarrierEmitter;
+	friend class gfx_api::vk::ScreenFrameCoordinator;
+	friend class gfx_api::vk::ScreenshotReadback;
+	friend bool gfx_api::vk::populatePassLayoutKeyFormats(gfx_api::vk::PassLayoutKey&,
+		const gfx_api::RenderPassDesc&, const VkRoot&);
+	friend bool gfx_api::vk::populatePassLayoutKeyLayouts(gfx_api::vk::PassLayoutKey&,
+		const gfx_api::RenderPassDesc&, const gfx_api::vk::LayoutKeyBuildContext&);
+	friend bool gfx_api::vk::buildPassLayoutKey(gfx_api::vk::PassLayoutKey&,
+		const gfx_api::RenderPassDesc&, const gfx_api::vk::LayoutKeyBuildContext&, const VkRoot&);
+private:
+	size_t depthPassCount = WZ_MAX_SHADOW_CASCADES;
+	std::string formattedRendererInfoString;
+	std::vector<gfx_api::pixel_format_usage::flags> texture2DFormatsSupport;
+	uint32_t lastRenderPassEndTime = 0;
+	size_t currentRenderPassId = INVALID_RENDER_PASS_ID;
+
+	struct QueuedSwapModeChange
+	{
+		gfx_api::context::swap_interval_mode newMode;
+		SetSwapIntervalCompletionHandler completionHandler;
+	};
+	optional<QueuedSwapModeChange> queuedSwapModeChange = nullopt;
+
+	std::array<VkSurfaceGpu, gfx_api::PIPELINE_SURFACE_COUNT> _surfaceGpu {};
+	gfx_api::PipelineSurfaceStore _pipelineSurfaces;
+	gfx_api::FramebufferResourceCache _framebufferCache;
+
+	/// Reusable `PassLayoutKey` buffer for `buildPassLayoutKey` / cache lookup at call sites.
+	gfx_api::vk::PassLayoutKey _passLayoutScratch;
+	/// Owns layout keys and on-demand `vk::RenderPass` creation.
+	gfx_api::vk::RenderPassLayoutCache _renderPassLayoutCache;
+	/// Runtime per-texture layout map and swapchain present transition.
+	mutable gfx_api::vk::FrameLayoutTracker _frameLayoutTracker;
+	/// Swapchain screenshot readback.
+	gfx_api::vk::ScreenshotReadback _screenshotReadback;
+	/// Batched pre-pass barriers from `CompiledPass::prePassBarriers`.
+	gfx_api::vk::PrePassBarrierEmitter _barrierEmitter;
+	/// Warm render-pass layout ids keyed by `CompiledPass::graphIndex`.
+	std::vector<gfx_api::vk::VulkanWarmEntry> _warmEntries;
+	std::vector<vk::ImageView> _fboAttachmentsScratch;
+	std::vector<vk::ClearValue> _clearValuesScratch;
+	gfx_api::FramebufferResourceKey _framebufferKeyScratch;
+
+	float _viewportMinDepth = 0.f;
+	float _viewportMaxDepth = 1.f;
+	bool _activePassTargetsSwapchain = false;
+	vk::Framebuffer _activeDynamicFramebuffer;
+};
+
+#endif // defined(WZ_VULKAN_ENABLED)

@@ -1,0 +1,16 @@
+/*
+ * Sub1-d.wrf
+ *
+ */
+
+/* Directory for Proximity messages and mission briefs */
+directory	"messages"
+
+file		FLIC		"brief1d.json"
+file		PROX		"prox1d.json"
+
+directory "script"
+file JAVASCRIPT "rules.js"
+
+directory "script/campaign"
+file JAVASCRIPT "cam1-d.js"

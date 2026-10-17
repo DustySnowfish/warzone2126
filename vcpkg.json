@@ -1,0 +1,125 @@
+{
+	"name": "warzone2100",
+	"version-string": "master-branch",
+	"builtin-baseline": "7ed6d1a07ef0d35aac5960fd67ed6686c7802bc7",
+	"dependencies": [
+		"physfs",
+		{
+			"name": "sdl3",
+			"default-features": true,
+			"platform": "!emscripten"
+		},
+		{
+			"name": "sdl3",
+			"default-features": true,
+			"features": [
+				"emscripten-pthreads"
+			],
+			"platform": "emscripten"
+		},
+		{
+			"name": "harfbuzz",
+			"platform": "!emscripten"
+		},
+		{
+			"name": "fribidi",
+			"platform": "!emscripten"
+		},
+		{
+			"name": "freetype",
+			"platform": "!emscripten"
+		},
+		"libjpeg-turbo",
+		"libogg",
+		"libtheora",
+		"libvorbis",
+		"libvpx",
+		"opus",
+		{
+			"name": "libpng",
+			"platform": "!emscripten"
+		},
+		{
+			"name": "libspng",
+			"platform": "emscripten"
+		},
+		{
+			"name": "gettext-libintl",
+			"platform": "!emscripten"
+		},
+		{
+			"name": "openal-soft",
+			"platform": "!emscripten"
+		},
+		"zlib",
+		"sqlite3",
+		"libsodium",
+		{
+			"name": "libzip",
+			"default-features": false,
+			"features": [
+				"bzip2"
+			]
+		},
+		{
+			"$comment": "By not specifying curl[http3] feature, defaults to schannel for Windows, which is desired",
+			"name": "curl",
+			"default-features": false,
+			"features": [
+				"ssl"
+			],
+			"platform": "windows | mingw"
+		},
+		{
+			"name": "curl",
+			"default-features": false,
+			"features": [
+				"openssl",
+				"ssl"
+			],
+			"platform": "osx"
+		},
+		{
+			"name": "curl",
+			"default-features": false,
+			"features": [
+				"ssl"
+			],
+			"platform": "!windows & !mingw & !osx & !emscripten"
+		},
+		{
+			"name": "angle",
+			"platform": "windows | mingw"
+		},
+		{
+			"name": "basisu",
+			"host": true
+		},
+		{
+			"name": "protobuf",
+			"platform": "!emscripten"
+		}
+	],
+	"overrides": [
+		{ "name": "sqlite3", "version": "3.49.2" },
+		{ "name": "libiconv", "version": "1.18", "port-version": 3 }
+	],
+	"default-features": [
+		"vulkan"
+	],
+	"features": {
+		"vulkan": {
+			"description": "The Vulkan backend",
+			"dependencies": [
+				{
+					"name": "sdl3",
+					"default-features": true,
+					"features": [
+						"vulkan"
+					],
+					"platform": "!emscripten"
+				}
+			]
+		}
+	}
+}

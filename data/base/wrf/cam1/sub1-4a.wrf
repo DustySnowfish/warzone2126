@@ -1,0 +1,16 @@
+/*
+ * Sub1-4A.wrf
+ *
+ */
+
+/* Directory for Proximity messages and mission briefs */
+directory	"messages"
+
+file		FLIC		"brief1-4a.json"
+file		PROX		"prox1-4a.json"
+
+directory "script"
+file JAVASCRIPT "rules.js"
+
+directory "script/campaign"
+file JAVASCRIPT "cam1-4a.js"

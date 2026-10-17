@@ -1,0 +1,16 @@
+/*
+ * Cam1a.wrf
+ *
+ */
+
+/* Directory for Proximity messages and mission briefs */
+directory	"messages"
+
+file		FLIC		"brief1a.json"
+file		PROX		"prox1a.json"
+
+directory "script"
+file JAVASCRIPT "rules.js"
+
+directory "script/campaign"
+file JAVASCRIPT "cam1a.js"

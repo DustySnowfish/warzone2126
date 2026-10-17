@@ -1,0 +1,213 @@
+#!/bin/bash
+
+# USAGE:
+# Execute get-dependencies_linux.sh with 1-2 parameters
+# 1.) Specify one of the supported linux distros: ("ubuntu", "fedora", "alpine", "archlinux", "opensuse-tumbleweed", "gentoo", "raspberrypios") REQUIRED
+# 2.) Specify a mode: ("build-all" (default), "build-dependencies") OPTIONAL
+#
+# Example:
+#  get-dependencies_linux.sh ubuntu build-all
+#
+
+set -e
+
+if [ -z "$1" ]; then
+  echo "get-dependencies_linux.sh requires an argument specifying a linux distro: (\"ubuntu\", \"fedora\", \"alpine\", \"archlinux\", \"opensuse-tumbleweed\", \"gentoo\", \"raspberrypios\", \"debian\")"
+  exit 1
+fi
+DISTRO="$1"
+if ! [[ "$1" =~ ^(ubuntu|fedora|alpine|archlinux|opensuse-tumbleweed|gentoo|raspberrypios|debian)$ ]]; then
+  echo "This script does not currently support Linux distro (${DISTRO}). Please see the documentation."
+  exit 1
+fi
+
+MODE="build-all"
+if [ -n "$2" ]; then
+  if ! [[ "$2" =~ ^(build-all|build-dependencies)$ ]]; then
+    echo "get-dependencies_linux.sh supports the following build modes: (\"build-all\", \"build-dependencies\")"
+    exit 1
+  fi
+  MODE="$2"
+fi
+
+##################
+# Debian / Raspberry Pi OS
+##################
+# Package search: https://packages.debian.org/index
+
+if [[ $DISTRO == "raspberrypios" || $DISTRO == "debian" ]]; then
+
+  # Get Debian version
+  VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+  echo "Detected OS version: ${VERSION}"
+
+  # Split version into parts
+  VERSION_PARTS=( ${VERSION//./ } )
+
+  echo "apt-get -u update"
+  apt -u update
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for Debian"
+    DEBIAN_FRONTEND=noninteractive apt-get -y install gcc g++ libc-dev dpkg-dev ninja-build pkg-config
+  fi
+
+  if [[ "${VERSION_PARTS[0]}" == "12" || "${VERSION_PARTS[0]}" == "13" ]]; then
+    echo "Installing build-dependencies for Debian 12 / 13"
+    DEBIAN_FRONTEND=noninteractive apt -y install cmake git zip unzip 7zip gettext asciidoctor libphysfs-dev libpng-dev libopenal-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libvpx-dev libxrandr-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libcurl4-gnutls-dev gnutls-dev libsodium-dev libsqlite3-dev libprotobuf-dev protobuf-compiler libzip-dev libturbojpeg0-dev
+    echo "WARN: You will need to compile and install SDL3 from source!"
+  elif [ "${VERSION_PARTS[0]}" -ge "14" ]; then
+    echo "Installing build-dependencies for Debian 14+"
+    DEBIAN_FRONTEND=noninteractive apt -y install cmake git zip unzip 7zip gettext asciidoctor libsdl3-dev libphysfs-dev libpng-dev libopenal-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libvpx-dev libxrandr-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libcurl4-gnutls-dev gnutls-dev libsodium-dev libsqlite3-dev libprotobuf-dev protobuf-compiler libzip-dev libturbojpeg0-dev
+  else
+    echo "Script does not currently support Debian ${VERSION_PARTS[0]} (${VERSION})"
+    exit 1
+  fi
+
+  # Required because of broken CMake config files installed by libzip-dev:
+  DEBIAN_FRONTEND=noninteractive apt -y install zipcmp zipmerge ziptool
+fi
+
+
+##################
+# Ubuntu
+##################
+# Package search: https://packages.ubuntu.com/search
+
+if [ "${DISTRO}" == "ubuntu" ]; then
+
+  # Get Ubuntu version
+  VERSION=$(grep -oP '(?<=^VERSION_ID=).+' /etc/os-release | tr -d '"')
+  echo "Detected OS version: ${VERSION}"
+
+  # Split version into parts
+  VERSION_PARTS=( ${VERSION//./ } )
+
+  echo "apt-get -u update"
+  apt-get -u update
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for Ubuntu"
+    DEBIAN_FRONTEND=noninteractive apt-get -y install gcc g++ libc-dev dpkg-dev ninja-build pkg-config
+  fi
+
+  if [ "${VERSION_PARTS[0]}" -eq "18" ]; then
+    echo "Installing build-dependencies for Ubuntu 18.x"
+    DEBIAN_FRONTEND=noninteractive apt-get -y install cmake git zip unzip gettext asciidoctor libphysfs-dev libpng-dev libopenal-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libvpx-dev libxrandr-dev libfreetype6-dev libfribidi-dev libharfbuzz-dev libcurl4-gnutls-dev gnutls-dev libsodium-dev libsqlite3-dev libprotobuf-dev protobuf-compiler libzip-dev libturbojpeg0-dev
+    echo "WARN: You will need to compile and install SDL3 from source!"
+  elif [[ "${VERSION_PARTS[0]}" -ge 20 && "${VERSION_PARTS[0]}" -lt 25 ]]; then
+    echo "Installing build-dependencies for Ubuntu 20.x - 24.x"
+    DEBIAN_FRONTEND=noninteractive apt-get -y install cmake git zip unzip gettext asciidoctor libphysfs-dev libpng-dev libopenal-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libvpx-dev libxrandr-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libcurl4-gnutls-dev gnutls-dev libsodium-dev libsqlite3-dev libprotobuf-dev protobuf-compiler libzip-dev libturbojpeg0-dev
+    echo "WARN: You will need to compile and install SDL3 from source!"
+  elif [ "${VERSION_PARTS[0]}" -ge "25" ]; then
+    echo "Installing build-dependencies for Ubuntu 25.x+"
+    DEBIAN_FRONTEND=noninteractive apt-get -y install cmake git zip unzip gettext asciidoctor libsdl3-dev libphysfs-dev libpng-dev libopenal-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libvpx-dev libxrandr-dev libfreetype-dev libfribidi-dev libharfbuzz-dev libcurl4-gnutls-dev gnutls-dev libsodium-dev libsqlite3-dev libprotobuf-dev protobuf-compiler libzip-dev libturbojpeg0-dev
+  else
+    echo "Script does not currently support Ubuntu ${VERSION_PARTS[0]} (${VERSION})"
+    exit 1
+  fi
+
+  if [ "${VERSION_PARTS[0]}" -ge "24" ]; then
+    # Ubuntu 24.04+ packages 7-Zip 22.00+, which can leave timestamps out of the data archives
+    DEBIAN_FRONTEND=noninteractive apt-get -y install 7zip
+  fi
+
+  # Required because of broken CMake config files installed by libzip-dev:
+  DEBIAN_FRONTEND=noninteractive apt-get -y install zipcmp zipmerge ziptool
+fi
+
+##################
+# Fedora
+##################
+# Package search: https://packages.fedoraproject.org/search
+
+if [ "${DISTRO}" == "fedora" ]; then
+
+  echo "dnf -y update"
+  dnf -y update
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for Fedora"
+    dnf -y install gcc gcc-c++ ninja-build
+  fi
+
+  FEDORA_VER=$(rpm -E %fedora)
+
+  FEDORA_7ZIP_PACKAGE="7zip"
+  if [ "$FEDORA_VER" -lt 43 ]; then
+    FEDORA_7ZIP_PACKAGE="p7zip"
+  fi
+
+  echo "Installing build-dependencies for Fedora (${FEDORA_VER})"
+  dnf -y install cmake git $FEDORA_7ZIP_PACKAGE gettext rubygem-asciidoctor SDL3-devel physfs-devel libpng-devel openal-soft-devel libvorbis-devel libogg-devel opus-devel libtheora-devel libvpx-devel freetype-devel fribidi-devel harfbuzz-devel libcurl-devel libsodium-devel sqlite-devel protobuf-devel libzip-devel libjpeg-turbo-devel
+  # Required because of broken CMake config files installed by libzip-dev:
+  dnf -y install libzip-tools
+  dnf -y install vulkan-devel glslc
+fi
+
+##################
+# Alpine
+##################
+# Package search: https://pkgs.alpinelinux.org/packages
+
+if [ "${DISTRO}" == "alpine" ]; then
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for Alpine"
+    apk add --no-cache build-base ninja gdb
+  fi
+
+  echo "Installing build-dependencies for Alpine"
+  apk add --no-cache cmake git 7zip gettext asciidoctor sdl3-dev physfs-dev libpng-dev openal-soft-dev libvorbis-dev libogg-dev opus-dev libtheora-dev libvpx-dev freetype-dev fribidi-dev harfbuzz-dev curl-dev libsodium-dev sqlite-dev protobuf-dev libzip-dev libjpeg-turbo-dev
+fi
+
+##################
+# ArchLinux
+##################
+# Package search: https://archlinux.org/packages/
+
+if [ "${DISTRO}" == "archlinux" ]; then
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for ArchLinux"
+    pacman -S --noconfirm base-devel ninja gdb
+  fi
+
+  echo "Installing build-dependencies for ArchLinux"
+  pacman -S --noconfirm cmake git 7zip gettext asciidoctor sdl3 physfs libpng openal libvorbis libogg opus libtheora libvpx xorg-xrandr freetype2 fribidi harfbuzz curl libsodium sqlite protobuf libzip libjpeg-turbo
+fi
+
+##################
+# OpenSUSE Tumbleweed
+##################
+# Package search: https://software.opensuse.org/search
+
+if [ "${DISTRO}" == "opensuse-tumbleweed" ]; then
+
+  if [ "${MODE}" == "build-all" ]; then
+    echo "Installing build-all for OpenSUSE Tumbleweed"
+    zypper install -y gcc-c++ libc++-devel ninja pkgconf-pkg-config cmake zip 7zip git libcurl-devel
+  fi
+
+  echo "Installing build-dependencies for OpenSUSE Tumbleweed"
+  zypper install -y libSDL2-devel libphysfs-devel libpng16-devel libtheora-devel libvpx-devel libvorbis-devel libogg-devel libopus-devel freetype-devel fribidi-devel harfbuzz-devel openal-soft-devel libsodium-devel sqlite3-devel libzip-devel libtinygettext0 ruby3.0-rubygem-asciidoctor vulkan-devel protobuf-devel libjpeg-turbo
+fi
+
+##################
+# Gentoo
+##################
+# Package search: https://packages.gentoo.org/
+
+if [ "${DISTRO}" == "gentoo" ]; then
+
+	if [ "${MODE}" == "build-all" ]; then
+		echo "Merge build-all for Gentoo"
+		emerge dev-build/ninja dev-debug/gdb
+	fi
+
+	echo "Merge build-dependencies for Gentoo"
+	emerge dev-build/cmake dev-vcs/git dev-ruby/asciidoctor sys-devel/gettext media-libs/libsdl3 dev-games/physfs media-libs/libpng media-libs/libtheora media-libs/libvpx media-libs/libvorbis media-libs/libogg media-libs/opus media-libs/freetype media-libs/harfbuzz dev-libs/fribidi media-libs/openal net-misc/curl dev-libs/libsodium dev-db/sqlite dev-libs/libzip dev-libs/protobuf media-libs/libjpeg-turbo
+fi
+##################
+
+echo "get-dependencies_linux.sh: Done."

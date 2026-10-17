@@ -1,0 +1,3733 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 2011-2021  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+/**
+ * @file qtscript.cpp
+ *
+ * New scripting system
+ */
+
+// Documentation stuff follows. The build system will parse the comment prefixes
+// and sort the comments into the appropriate Markdown documentation files.
+
+//== # Globals
+//==
+//== This section describes global variables (or 'globals' for short) that are
+//== available from all scripts. You typically cannot write to these variables,
+//== they are read-only.
+//==
+//__ # Events
+//__
+//__ This section describes event callbacks (or 'events' for short) that are
+//__ called from the game when something specific happens. Which scripts
+//__ receive them is usually filtered by player. Call ```receiveAllEvents(true)```
+//__ to start receiving all events unfiltered.
+//__
+
+#include "lib/framework/wzapp.h"
+#include "lib/framework/wzconfig.h"
+#include "lib/framework/wzpaths.h"
+
+#include "qtscript.h"
+#include "display.h"
+#include "hci.h"
+#include "input/manager.h"
+#include "input/debugmappings.h"
+
+#include "lib/framework/file.h"
+#include "lib/gamelib/gtime.h"
+#include "lib/netplay/netplay.h"
+#include "multiplay.h"
+#include "levels.h"
+#include "map.h"
+#include "difficulty.h"
+#include "console.h"
+#include "clparse.h"
+#include "mission.h"
+#include "modding.h"
+#include "version.h"
+#include "game.h"
+#include "warzoneconfig.h"
+#include "challenge.h"
+#include "multistat.h"
+#include "gamehistorylogger.h"
+#include "campaigninfo.h"
+#include "hci/quickchat.h"
+
+#include <set>
+#include <memory>
+#include <utility>
+#include <unordered_map>
+#include <sstream>
+#include <iomanip>
+#include <algorithm>
+#include <queue>
+#include <limits>
+
+#include "wzscriptdebug.h"
+#include "quickjs_backend.h"
+
+#define ATTACK_THROTTLE 1000
+
+/// selection changes are too often and too erratic to trigger immediately,
+/// so until we have a queue system for events, delay triggering this way.
+static bool selectionChanged = false;
+
+void scripting_engine::GROUPMAP::saveLoadSetLastNewGroupId(int value)
+{
+	ASSERT_OR_RETURN(, value >= 0, "Invalid value: %d", value);
+	lastNewGroupId = value;
+}
+
+int scripting_engine::GROUPMAP::newGroupID()
+{
+	groupID newId = lastNewGroupId + 1;
+	while (m_groups.count(newId) != 0 && m_groups.at(newId).size() > 0)
+	{
+		if (newId < std::numeric_limits<int>::max())
+		{
+			newId++;
+		}
+		else
+		{
+			// loop back around
+			// NOTE: group zero is reserved
+			newId = 1;
+		}
+	}
+	lastNewGroupId = newId;
+	return newId;
+}
+
+void scripting_engine::GROUPMAP::insertObjectIntoGroup(const BASE_OBJECT *psObj, scripting_engine::GROUPMAP::groupID groupId)
+{
+	std::pair<ObjectToGroupMap::iterator,bool> result = m_map.insert(std::pair<const BASE_OBJECT *, scripting_engine::GROUPMAP::groupID>(psObj, groupId));
+	if (result.second)
+	{
+		// Keep the member list sorted by object id
+		// - The m_map insert above already guarantees psObj is not in any group, so this is always a new element
+		auto &groupSet = m_groups[groupId];
+		auto insertIt = std::lower_bound(groupSet.begin(), groupSet.end(), psObj,
+			[](const BASE_OBJECT *a, const BASE_OBJECT *b) { return a->id < b->id; });
+		ASSERT(insertIt == groupSet.end() || (*insertIt)->id != psObj->id, "Object already exists in group!");
+		groupSet.insert(insertIt, psObj);
+	}
+}
+
+size_t scripting_engine::GROUPMAP::groupSize(GROUPMAP::groupID groupId) const
+{
+	auto it = m_groups.find(groupId);
+	if (it != m_groups.end())
+	{
+		return it->second.size();
+	}
+	return 0;
+}
+
+optional<scripting_engine::GROUPMAP::groupID> scripting_engine::GROUPMAP::removeObjectFromGroup(const BASE_OBJECT *psObj)
+{
+	auto it = m_map.find(psObj);
+	if (it != m_map.end())
+	{
+		groupID groupId = it->second;
+		m_map.erase(it);
+
+		auto &groupSet = m_groups[groupId];
+		auto eraseIt = std::lower_bound(groupSet.begin(), groupSet.end(), psObj,
+			[](const BASE_OBJECT *a, const BASE_OBJECT *b) { return a->id < b->id; });
+		bool erased = (eraseIt != groupSet.end() && *eraseIt == psObj);
+		if (erased)
+		{
+			groupSet.erase(eraseIt);
+		}
+		ASSERT(erased, "Object did not exist in group set??");
+		return optional<groupID>(groupId);
+	}
+	return optional<groupID>();
+}
+
+std::vector<const BASE_OBJECT *> scripting_engine::GROUPMAP::getGroupObjects(groupID groupId) const
+{
+	std::vector<const BASE_OBJECT *> result;
+	auto it = m_groups.find(groupId);
+	if (it != m_groups.end())
+	{
+		result.assign(it->second.begin(), it->second.end());
+	}
+	return result;
+}
+
+scripting_engine::timerNode::timerNode(wzapi::scripting_instance* caller, const TimerFunc& func, const std::string& timerName, int plr, int frame, std::unique_ptr<timerAdditionalData> additionalParam /*= nullptr*/)
+: function(func), timerName(timerName), instance(caller), baseobj(-1), baseobjtype(OBJ_NUM_TYPES), additionalTimerFuncParam(std::move(additionalParam)),
+	frameTime(frame + gameTime), ms(frame), player(plr), calls(0), type(TIMER_REPEAT)
+{}
+
+scripting_engine::timerNode::~timerNode()
+{
+	if (additionalTimerFuncParam)
+	{
+		additionalTimerFuncParam->onTimerDelete(timerID, IdToObject(baseobjtype, baseobj, player));
+	}
+}
+
+scripting_engine::timerNode::timerNode(timerNode&& rhs)           // move constructor
+: timerNode()
+{
+	swap(rhs);
+}
+
+void scripting_engine::timerNode::swap(timerNode& _rhs)
+{
+// On Fedora 40, GCC 14 produces false-positive warnings for -Wuninitialized
+// when compiling this code with optimizations. Silence these warnings.
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Wuninitialized"
+#endif
+	std::swap(timerID, _rhs.timerID);
+#if !defined(__clang__) && !defined(__INTEL_COMPILER) && defined(__GNUC__) && __GNUC__ >= 14 && defined(__OPTIMIZE__)
+# pragma GCC diagnostic pop
+#endif
+	std::swap(function, _rhs.function);
+	std::swap(timerName, _rhs.timerName);
+	std::swap(instance, _rhs.instance);
+	std::swap(baseobj, _rhs.baseobj);
+	std::swap(baseobjtype, _rhs.baseobjtype);
+	std::swap(additionalTimerFuncParam, _rhs.additionalTimerFuncParam);
+	std::swap(frameTime, _rhs.frameTime);
+	std::swap(ms, _rhs.ms);
+	std::swap(player, _rhs.player);
+	std::swap(calls, _rhs.calls);
+	std::swap(type, _rhs.type);
+}
+
+scripting_engine::area_by_values_or_area_label_lookup::area_by_values_or_area_label_lookup() { }
+scripting_engine::area_by_values_or_area_label_lookup::area_by_values_or_area_label_lookup(const std::string &label)
+: m_isLabel(true)
+, m_label(label)
+{ }
+scripting_engine::area_by_values_or_area_label_lookup::area_by_values_or_area_label_lookup(int x1, int y1, int x2, int y2)
+: m_isLabel(false)
+, x1(x1), y1(y1), x2(x2), y2(y2)
+{ }
+
+#define MAX_US 20000
+#define HALF_MAX_US 10000
+
+
+uniqueTimerID scripting_engine::getNextAvailableTimerID()
+{
+	do {
+		++lastTimerID;
+	} while (timerIDMap.count(lastTimerID) > 0);
+	return lastTimerID;
+}
+
+uniqueTimerID scripting_engine::setTimer(wzapi::scripting_instance *caller, const TimerFunc& timerFunc, int player, int milliseconds, std::string timerName /*= ""*/, const BASE_OBJECT * obj /*= nullptr*/, timerType type /*= TIMER_REPEAT*/, std::unique_ptr<timerAdditionalData> additionalParam /*= nullptr*/)
+{
+	uniqueTimerID newTimerID = getNextAvailableTimerID();
+	std::shared_ptr<timerNode> node = std::make_shared<timerNode>(caller, timerFunc, timerName, player, milliseconds, std::move(additionalParam));
+	if (obj != nullptr)
+	{
+		node->baseobj = obj->id;
+		node->baseobjtype = obj->type;
+	}
+	node->type = type;
+	node->timerID = newTimerID;
+	auto inserted_iter = timers.emplace(timers.end(), std::move(node));
+	timerIDMap[newTimerID] = inserted_iter;
+	return newTimerID;
+}
+
+// internal-only function that adds a Timer node (used for restoring saved games)
+void scripting_engine::addTimerNode(std::shared_ptr<scripting_engine::timerNode>&& node)
+{
+	if (timerIDMap.count(node->timerID) != 0)
+	{
+		// Skip a colliding id - should never happen for live timers
+		ASSERT(false, "Duplicate timerID found: %s", WzString::number(node->timerID).toUtf8().c_str());
+		return;
+	}
+	auto inserted_iter = timers.emplace(timers.end(), std::move(node));
+	timerIDMap[(*inserted_iter)->timerID] = inserted_iter;
+}
+
+/// Scripting engine (what others call the scripting context, but QtScript's nomenclature is different).
+static std::vector<wzapi::scripting_instance *> scripts;
+
+/// Whether the scripts have been set up or not
+static bool scriptsReady = false;
+
+/// Structure for research events put on hold
+struct researchEvent
+{
+	RESEARCH *research;
+	STRUCTURE *structure;
+	int player;
+
+	researchEvent(RESEARCH *r, STRUCTURE *s, int p): research(r), structure(s), player(p) {}
+};
+/// Research events that are put on hold until the scripts are ready
+static std::queue<struct researchEvent> eventQueue;
+
+typedef struct monitor_bin
+{
+	int worst;
+	uint32_t worstGameTime;
+	int calls;
+	int overMaxTimeCalls;
+	int overHalfMaxTimeCalls;
+	uint64_t time;
+	monitor_bin() : worst(0),  worstGameTime(0), calls(0), overMaxTimeCalls(0), overHalfMaxTimeCalls(0), time(0) {}
+} MONITOR_BIN;
+typedef std::unordered_map<std::string, MONITOR_BIN> MONITOR;
+static std::unordered_map<wzapi::scripting_instance *, MONITOR *> monitors;
+
+static bool globalDialog = false;
+
+bool bInTutorial = false;
+
+// ----------------------------------------------------------
+
+Vector2i positions[MAX_PLAYERS];
+static std::set<uint16_t> derricks;
+
+void scriptSetStartPos(int position, int x, int y)
+{
+	positions[position].x = x;
+	positions[position].y = y;
+	debug(LOG_SCRIPT, "Setting start position %d to (%d, %d)", position, x, y);
+}
+
+void scriptSetDerrickPos(int x, int y)
+{
+	const auto mx = map_coord(x);
+	const auto my = map_coord(y);
+	// MAX_TILE_TEXTURES is 255, so 2 bytes are enough
+	// to describe a map position
+	static_assert(MAX_TILE_TEXTURES <= 255, "If MAX_TILE_TEXTURES is raised above 255, this code will need to change");
+	uint16_t out = (mx << 8) | my;
+	derricks.insert(out);
+}
+
+bool scriptInit()
+{
+	int i;
+
+	for (i = 0; i < MAX_PLAYERS; i++)
+	{
+		scriptSetStartPos(i, 0, 0);
+	}
+	derricks.clear();
+	return true;
+}
+
+Vector2i getPlayerStartPosition(int player)
+{
+	return positions[player];
+}
+
+nlohmann::json scripting_engine::constructDerrickPositions()
+{
+	// Static map knowledge about start positions
+	//== * ```derrickPositions``` A set of derrick starting positions on the current map. Each item in the set is an
+	//== object containing the x and y variables for a derrick.
+	nlohmann::json derrickPositions = nlohmann::json::array(); //engine->newArray(derricks.size());
+	for (uint16_t pos: derricks)
+	{
+		nlohmann::json vector = nlohmann::json::object();
+		const auto mx = (pos & static_cast<uint16_t>(0xff00)) >> 8;
+		const auto my = pos & (static_cast<uint16_t>(0x00ff));
+		vector["x"] = mx;
+		vector["y"] = my;
+		vector["type"] = SCRIPT_POSITION;
+		derrickPositions.push_back(std::move(vector));
+	}
+	return derrickPositions;
+}
+
+nlohmann::json scripting_engine::constructStartPositions()
+{
+	// Static map knowledge about start positions
+	//== * ```startPositions``` An array of player start positions on the current map. Each item in the array is an
+	//== object containing the x and y variables for a player start position.
+	nlohmann::json startPositions = nlohmann::json::array(); //engine->newArray(game.maxPlayers);
+	for (int i = 0; i < game.maxPlayers; i++)
+	{
+		nlohmann::json vector = nlohmann::json::object();
+		vector["x"] = map_coord(positions[i].x);
+		vector["y"] = map_coord(positions[i].y);
+		vector["type"] = SCRIPT_POSITION;
+		startPositions.push_back(vector);
+	}
+	return startPositions;
+}
+
+// ----------------------------------------------------------
+
+bool scripting_engine::removeTimer(uniqueTimerID timerID)
+{
+	auto it = timerIDMap.find(timerID);
+	if (it != timerIDMap.end())
+	{
+		(*it->second)->type = TIMER_REMOVED; // in case a timer is removed while running timers
+		timers.erase(it->second);
+		timerIDMap.erase(it);
+		return true;
+	}
+	return false;
+}
+
+void scriptRemoveObject(const BASE_OBJECT *psObj)
+{
+	// Weed out timers with dead objects
+	scripting_engine::instance().removeTimersIf([psObj](const scripting_engine::timerNode& node)
+	{
+		return (node.baseobj == psObj->id);
+	});
+	scripting_engine::instance().groupRemoveObject(psObj);
+}
+
+// do not want to call this 'init', since scripts are often loaded before we get here
+bool prepareScripts(bool loadGame)
+{
+	debug(LOG_WZ, "Scripts prepared");
+	if (!loadGame) // labels saved in savegame
+	{
+		scripting_engine::instance().prepareLabels();
+	}
+	// Assume that by this point all scripts are loaded
+	scriptsReady = true;
+	while (!eventQueue.empty())
+	{
+		researchEvent& resEvent = eventQueue.front();
+		triggerEventResearched(resEvent.research, resEvent.structure, resEvent.player);
+		eventQueue.pop();
+	}
+	return true;
+}
+
+bool initScripts()
+{
+	return true;
+}
+
+bool shutdownScripts()
+{
+	return scripting_engine::instance().shutdownScripts();
+}
+
+bool scripting_engine::shutdownScripts()
+{
+	scriptsReady = false;
+	jsDebugShutdown();
+	globalDialog = false;
+	clearReticuleCallbacks();
+	for (auto *instance : scripts)
+	{
+		MONITOR *monitor = monitors.at(instance);
+		WzString scriptName = WzString::fromUtf8(instance->scriptName());
+		instance->dumpScriptLog("=== PERFORMANCE DATA ===\n");
+		instance->dumpScriptLog("    calls | avg (usec) | worst (usec) | worst call at | >=limit | >=limit/2 | function\n");
+		for (MONITOR::const_iterator iter = monitor->begin(); iter != monitor->end(); ++iter)
+		{
+			const std::string &function = iter->first;
+			MONITOR_BIN m = iter->second;
+			std::ostringstream info;
+			info << std::right << std::setw(9) << m.calls << " | ";
+			info << std::right << std::setw(10) << (m.time / m.calls) << " | ";
+			info << std::right << std::setw(12) << m.worst << " | ";
+			info << std::right << std::setw(13) << m.worstGameTime << " | ";
+			info << std::right << std::setw(7) << m.overMaxTimeCalls << " | ";
+			info << std::right << std::setw(9) << m.overHalfMaxTimeCalls << " | ";
+			info << function << "\n";
+			instance->dumpScriptLog(info.str());
+		}
+		monitor->clear();
+		delete monitor;
+		unregisterFunctions(instance);
+	}
+	timers.clear();
+	lastTimerID = 0;
+	timerIDMap.clear();
+	monitors.clear();
+	for (auto& script : scripts)
+	{
+		delete script;
+	}
+	scripts.clear();
+	return true;
+}
+
+bool updateScripts()
+{
+	return scripting_engine::instance().updateScripts();
+}
+
+bool scripting_engine::updateScripts()
+{
+	// Call delayed triggers here
+	if (selectionChanged)
+	{
+		for (auto *instance : scripts)
+		{
+			instance->handle_eventSelectionChanged(wzapi::enumSelected());
+		}
+		selectionChanged = false;
+	}
+
+	// Update gameTime
+	for (auto *instance : scripts)
+	{
+		instance->updateGameTime(gameTime);
+	}
+	// Weed out dead timers
+	removeTimersIf([](const timerNode& node)
+	{
+		return (node.type == TIMER_ONESHOT_DONE);
+	});
+	// Check for timers, and run them if applicable.
+	// TODO - load balancing
+	std::vector<std::shared_ptr<timerNode>> runlist; // make a new list here, since we might trample all over the timer list during execution
+	for (auto &node : timers)
+	{
+		if (node->frameTime <= gameTime)
+		{
+			node->frameTime = node->ms + gameTime;	// update for next invokation
+			if (node->type == TIMER_ONESHOT_READY)
+			{
+				node->type = TIMER_ONESHOT_DONE; // unless there is none
+			}
+			node->calls++;
+			runlist.push_back(node);
+		}
+	}
+
+	for (auto &node : runlist)
+	{
+		// IMPORTANT: A queued function can delete a timer that is in the runlist!
+		// So we must verify that the node is not one of the deleted ones.
+		if (node->type == TIMER_REMOVED)
+		{
+			continue; // skip
+		}
+		node->function(node->timerID, IdToObject(node->baseobjtype, node->baseobj, node->player), node->additionalTimerFuncParam.get());
+	}
+
+	return true;
+}
+
+wzapi::scripting_instance* loadPlayerScript(const WzString& path, int player, AIDifficulty difficulty, wzapi::ScriptBinding binding)
+{
+	return scripting_engine::instance().loadPlayerScript(path, player, difficulty, binding);
+}
+
+static wzapi::scripting_instance* loadPlayerScriptByBackend(const WzString& path, int player, int realDifficulty)
+{
+	// JS scripts:
+	switch (war_getJSBackend())
+	{
+		case JS_BACKEND::quickjs:
+			return createQuickJSScriptInstance(path, player, realDifficulty);
+		case JS_BACKEND::num_backends:
+			debug(LOG_ERROR, "Invalid js backend value"); // should not happen
+	}
+	return nullptr;
+}
+
+wzapi::scripting_instance* scripting_engine::loadPlayerScript(const WzString& path, int player, AIDifficulty difficulty, wzapi::ScriptBinding binding)
+{
+	ASSERT_OR_RETURN(nullptr, player >= 0 && (player < MAX_PLAYERS || player == selectedPlayer), "Player index %d out of bounds", player);
+
+	if (binding == wzapi::ScriptBinding::PlayerAI && bMultiPlayer && NetPlay.bComms
+	    && player >= 0 && static_cast<size_t>(player) < NetPlay.players.size()
+	    && NetPlay.players[player].allocated)
+	{
+		debug(LOG_ERROR, "Cannot load script \"%s\" for player %d", path.toUtf8().c_str(), player);
+		return nullptr;
+	}
+
+	debug(LOG_SCRIPT, "loadPlayerScript[%d]: %s", player, path.toUtf8().c_str());
+
+	int realDifficulty;
+	if (game.type == LEVEL_TYPE::SKIRMISH)
+	{
+		realDifficulty = static_cast<int8_t>(difficulty);
+	}
+	else // campaign
+	{
+		realDifficulty = (int)getDifficultyLevel();
+	}
+
+	wzapi::scripting_instance* pNewInstance = loadPlayerScriptByBackend(path, player, realDifficulty);
+	if (pNewInstance)
+	{
+		pNewInstance->setBinding(binding);
+	}
+	if (!pNewInstance)
+	{
+		// failed to create new scripting instance
+		debug(LOG_ERROR, "Failed to create new scripting instance: path:\"%s\", player: %d, difficulty: %d", path.toUtf8().c_str(), player, static_cast<int>(difficulty));
+		return nullptr;
+	}
+
+	// Create group map
+	GROUPMAP *psMap = new GROUPMAP;
+	auto insert_result = groups.insert(ENGINEMAP::value_type(pNewInstance, psMap));
+	ASSERT(insert_result.second, "Entry for this engine %p already exists in ENGINEMAP!", static_cast<void *>(pNewInstance));
+
+	json globalVars = json::object();
+	// Special global variables
+	//== * ```version``` Current version of the game, set in *major.minor* format.
+	globalVars["version"] = version_getVersionString();
+	//== * ```selectedPlayer``` The player controlled by the client on which the script runs.
+	globalVars["selectedPlayer"] = selectedPlayer;
+	//== * ```gameTime``` The current game time. Updated before every invokation of a script.
+	pNewInstance->setSpecifiedGlobalVariable("gameTime", gameTime, wzapi::GlobalVariableFlags::ReadOnlyUpdatedFromApp | wzapi::GlobalVariableFlags::DoNotSave);
+	//== * ```modList``` An array of the current loaded mods (mod names).
+	globalVars["modList"] = getModNamesList();
+
+
+	//== * ```difficulty``` The currently set campaign difficulty, or the current AI's difficulty setting. It will be one of
+	//== ```SUPEREASY``` (campaign only), ```EASY```, ```MEDIUM```, ```HARD``` or ```INSANE```.
+	if (game.type == LEVEL_TYPE::SKIRMISH)
+	{
+		globalVars["difficulty"] = static_cast<int8_t>(difficulty);
+	}
+	else // campaign
+	{
+		globalVars["difficulty"] = (int)getDifficultyLevel();
+	}
+	//== * ```mapName``` The name of the current map.
+	globalVars["mapName"] = game.map;
+	//== * ```tilesetType``` The area name of the map.
+	std::string tilesetType("CUSTOM");
+	switch (currentMapTileset)
+	{
+		case MAP_TILESET::ARIZONA:
+			tilesetType = "ARIZONA";
+			break;
+		case MAP_TILESET::URBAN:
+			tilesetType = "URBAN";
+			break;
+		case MAP_TILESET::ROCKIES:
+			tilesetType = "ROCKIES";
+			break;
+	}
+	globalVars["tilesetType"] = tilesetType;
+	//== * ```baseType``` The type of base that the game starts with. It will be one of ```CAMP_CLEAN```, ```CAMP_BASE``` or ```CAMP_WALLS```.
+	globalVars["baseType"] = game.base;
+	//== * ```alliancesType``` The type of alliances permitted in this game. It will be one of ```NO_ALLIANCES```, ```ALLIANCES```, ```ALLIANCES_UNSHARED``` or ```ALLIANCES_TEAMS```.
+	globalVars["alliancesType"] = game.alliance;
+	//== * ```powerType``` The power level set for this game.
+	globalVars["powerType"] = game.power;
+	//== * ```maxPlayers``` The number of active players in this game.
+	globalVars["maxPlayers"] = game.maxPlayers;
+	//== * ```scavengers``` Whether or not scavengers are activated in this game, and, if so, which type.
+	globalVars["scavengers"] = game.scavengers;
+	//== * ```mapWidth``` Width of map in tiles.
+	globalVars["mapWidth"] = gameWorld.map.width;
+	//== * ```mapHeight``` Height of map in tiles.
+	globalVars["mapHeight"] = gameWorld.map.height;
+	//== * ```scavengerPlayer``` Index of scavenger player. (3.2+ only)
+	globalVars["scavengerPlayer"] = scavengerSlot();
+	//== * ```isMultiplayer``` If the current game is a online multiplayer game or not. (3.2+ only)
+	globalVars["isMultiplayer"] = NetPlay.bComms;
+	//== * ```challenge``` If the current game is a challenge. (4.1.4+ only)
+	globalVars["challenge"] = challengeActive;
+	//== * ```idleTime``` The amount of game time without active play before a player should be considered "inactive". (0 = disable activity alerts / AFK check) (4.2.0+ only)
+	globalVars["idleTime"] = game.inactivityMinutes * 60 * 1000;
+	//== * ```gameTimeLimit``` The game time limit (match will automatically end if it reaches this duration). (0 = disable limit) (4.4.0+ only)
+	globalVars["gameTimeLimit"] = game.gameTimeLimitMinutes * 60 * 1000;
+	//== * ```playerLeaveMode``` The mode used to handle human players leaving a multiplayer game in progress. (0 = destroy resources, 1 = split resources with team) (4.4.0+ only)
+	globalVars["playerLeaveMode"] = static_cast<uint8_t>(game.playerLeaveMode);
+	//== * ```playerReconnectWaitSeconds``` The maximum number of seconds the host will hold a dropped player's slot for a mid-match reconnect before considering them to have left (and applying playerLeaveMode). (0 = do not wait) (4.6.0+ only)
+	globalVars["playerReconnectWaitSeconds"] = static_cast<uint32_t>(game.playerReconnectWaitSeconds);
+	//== * ```tweakOptions``` The tweakOptions offered by the current mod / mode, as configured by the user. (4.5.0+ only)
+	globalVars["tweakOptions"] = getCamTweakOptions();
+
+	pNewInstance->setSpecifiedGlobalVariables(globalVars, wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	// Register 'Stats' object. It is a read-only representation of basic game component states.
+	pNewInstance->setSpecifiedGlobalVariable("Stats", wzapi::constructStatsObject(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	// Register 'MapTiles' two-dimensional array. It is a read-only representation of static map tile states.
+	pNewInstance->setSpecifiedGlobalVariable("MapTiles", wzapi::constructMapTilesArray(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	// Set some useful constants
+	pNewInstance->setSpecifiedGlobalVariables(wzapi::getUsefulConstants(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	/// Place to store group sizes
+	//== * ```groupSizes``` A sparse array of group sizes. If a group has never been used, the entry in this array will
+	//== be undefined.
+	pNewInstance->setSpecifiedGlobalVariable("groupSizes", nlohmann::json::object(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	// Static knowledge about players
+	pNewInstance->setSpecifiedGlobalVariable("playerData", wzapi::constructStaticPlayerData(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	// Static map knowledge about start positions
+	pNewInstance->setSpecifiedGlobalVariable("derrickPositions", constructDerrickPositions(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+	pNewInstance->setSpecifiedGlobalVariable("startPositions", constructStartPositions(), wzapi::GlobalVariableFlags::ReadOnly | wzapi::GlobalVariableFlags::DoNotSave);
+
+	WzPathInfo basename = WzPathInfo::fromPlatformIndependentPath(path.toUtf8());
+	json globalVarsToSave = json::object();
+	// We need to always save the 'me' special variable.
+	//== * ```me``` The player the script is currently running as.
+	globalVarsToSave["me"] = player;
+
+	// We also need to save the special 'scriptName' variable.
+	//== * ```scriptName``` Base name of the script that is running.
+	globalVarsToSave["scriptName"] = basename.baseName();
+
+	// We also need to save the special 'scriptPath' variable.
+	//== * ```scriptPath``` Base path of the script that is running.
+	globalVarsToSave["scriptPath"] = basename.path();
+
+	pNewInstance->setSpecifiedGlobalVariables(globalVarsToSave, wzapi::GlobalVariableFlags::ReadOnly); // ensure these are saved
+
+	// Clear previous log file
+	PHYSFS_delete((std::string("logs/") + pNewInstance->scriptName() + ".log").c_str());
+
+	// Attempt to ready instance for execution
+	if (!pNewInstance->readyInstanceForExecution())
+	{
+		removeTimersIf([pNewInstance](const timerNode& node) { return node.instance == pNewInstance; });
+		auto groupIt = groups.find(pNewInstance);
+		if (groupIt != groups.end())
+		{
+			delete groupIt->second;
+			groups.erase(groupIt);
+		}
+		ownedLabels.erase(pNewInstance);
+		delete pNewInstance;
+		debug(LOG_ERROR, "Unable to ready instance for execution: %s", path.toUtf8().c_str());
+		return nullptr;
+	}
+
+	// Register script
+	scripts.push_back(pNewInstance);
+
+	MONITOR *monitor = new MONITOR;
+	monitors[pNewInstance] = monitor;
+
+	debug(LOG_SAVE, "Created script engine %zu for player %d from %s", scripts.size() - 1, player, path.toUtf8().c_str());
+	return pNewInstance;
+}
+
+bool loadGlobalScript(WzString path)
+{
+	return loadPlayerScript(std::move(path), selectedPlayer, AIDifficulty::DISABLED,
+	                        wzapi::ScriptBinding::HostDeclaredGlobal);
+}
+
+bool saveScriptStates(const char *filename)
+{
+	return scripting_engine::instance().saveScriptStates(filename);
+}
+
+// In-memory (JSON) variants, for match-state serialization. Same v2 content as the file-based
+// versions, but to/from a nlohmann::json object instead of a WzConfig file.
+bool saveScriptStates(nlohmann::ordered_json &result, int onlyPlayer)
+{
+	return scripting_engine::instance().saveScriptStates2(result, onlyPlayer);
+}
+
+bool loadScriptStates(const nlohmann::ordered_json &result, int targetPlayer)
+{
+	return scripting_engine::instance().loadScriptStates2(result, targetPlayer);
+}
+
+bool scriptsAreReady()
+{
+	return scriptsReady;
+}
+
+// Script-state save format version:
+// 1 (or absent): Legacy flat layout (globals_<i> / groups_<i> / triggers_<i> keys, matched back
+//                to instances by embedded "me"/"scriptName"), written via WzConfig
+// 2: A single structured JSON document with top-level "instances" and "timers" arrays
+//    Each instance bundles its own "globals", "groups" and per-instance flags
+//    (ex. "isReceivingAllEvents"). "timers" is an ordered array restored in-order.
+static const int SCRIPTSTATE_VERSION = 2;
+
+bool scripting_engine::saveScriptStates(const char *filename)
+{
+	return saveScriptStates2(filename);
+}
+
+bool scripting_engine::saveScriptStates2(const char *filename)
+{
+	nlohmann::ordered_json root;
+	saveScriptStates2(root);
+	return saveJSONToFile(root, filename);
+}
+
+// In-memory (json) variant: builds the v2 document into 'root' (used by the match-state serializer).
+bool scripting_engine::saveScriptStates2(nlohmann::ordered_json &root, int onlyPlayer)
+{
+	root = nlohmann::ordered_json::object();
+	root["version"] = SCRIPTSTATE_VERSION;
+
+	// One object per script instance, bundling its globals, group memberships, and per-instance flags
+	nlohmann::ordered_json instancesArray = nlohmann::ordered_json::array();
+	for (int i = 0; i < scripts.size(); ++i)
+	{
+		wzapi::scripting_instance* instance = scripts.at(i);
+		// For a match snapshot bound to a single client (onlyPlayer >= 0) we only serialize the local
+		// rules/global script (player == onlyPlayer). Host-only AI instances belong to other players and
+		// must not be shipped to a joining client (where they do not exist). onlyPlayer < 0 saves all.
+		if (onlyPlayer >= 0 && instance->player() != onlyPlayer)
+		{
+			continue;
+		}
+
+		nlohmann::ordered_json instanceObj = nlohmann::ordered_json::object();
+		// 'me'/'scriptName' identify the instance on load (findInstanceForPlayer)
+		instanceObj["me"] = instance->player();
+		instanceObj["scriptName"] = instance->scriptName();
+
+		nlohmann::ordered_json globalsResult = nlohmann::ordered_json::object();
+		instance->saveScriptGlobals(globalsResult);
+		// 'scriptName' and 'me' are also saved implicitly inside globals by the backend's saveScriptGlobals
+		ASSERT(globalsResult.contains("me"), "Missing required global \"me\"");
+		ASSERT(globalsResult.contains("scriptName"), "Missing required global \"scriptName\"");
+		instanceObj["globals"] = std::move(globalsResult);
+
+		nlohmann::ordered_json groupsResult = nlohmann::ordered_json::object();
+		saveGroups(groupsResult, instance);
+		instanceObj["groups"] = std::move(groupsResult);
+
+		instanceObj["isReceivingAllEvents"] = instance->isReceivingAllEvents();
+
+		// Math.random() PRNG state, so a resumed instance continues the identical sequence rather than
+		// re-seeding from wall-clock time (which would desync host-side AI decisions across a restore)
+		instanceObj["mathRandomState"] = instance->saveMathRandomState();
+
+		// This instance's owned (script-created) labels - (Omitted entirely when the instance has none)
+		auto ownedIt = ownedLabels.find(instance);
+		if (ownedIt != ownedLabels.end() && !ownedIt->second.empty())
+		{
+			nlohmann::ordered_json instanceLabels = nlohmann::ordered_json::array();
+			writeLabelMap(ownedIt->second, instanceLabels);
+			instanceObj["labels"] = std::move(instanceLabels);
+		}
+
+		instancesArray.push_back(std::move(instanceObj));
+	}
+	root["instances"] = std::move(instancesArray);
+
+	// Timers as an ordered array - serialized (and thus restored) in the same order as the timers list
+	nlohmann::ordered_json timersArray = nlohmann::ordered_json::array();
+	for (const auto& node : timers)
+	{
+		// Match the instance filter above: a per-client snapshot carries only its own timers.
+		if (onlyPlayer >= 0 && node->player != onlyPlayer)
+		{
+			continue;
+		}
+		nlohmann::ordered_json nodeInfo = nlohmann::ordered_json::object();
+		nodeInfo["id"] = node->timerID;
+		nodeInfo["name"] = node->timerName;
+		// 'me'/'scriptName' identify the owning instance on load
+		nodeInfo["me"] = node->player;
+		nodeInfo["scriptName"] = node->instance->scriptName();
+		nodeInfo["functionRestoreInfo"] = node->instance->saveTimerFunction(node->timerID, node->timerName, node->additionalTimerFuncParam.get());
+		if (node->baseobj >= 0)
+		{
+			nodeInfo["object"] = node->baseobj;
+			nodeInfo["objectType"] = (int)node->baseobjtype;
+		}
+		nodeInfo["frame"] = node->frameTime;
+		nodeInfo["ms"] = node->ms;
+		nodeInfo["calls"] = node->calls;
+		nodeInfo["type"] = (int)node->type;
+
+		timersArray.push_back(std::move(nodeInfo));
+	}
+	root["timers"] = std::move(timersArray);
+
+	// Persist the monotonic timer-id counter
+	root["lastTimerID"] = lastTimerID;
+
+	// Global (map-authored / legacy / unowned) labels go at the top level
+	nlohmann::ordered_json globalLabelsArr = nlohmann::ordered_json::array();
+	writeLabelMap(globalLabels, globalLabelsArr);
+	root["labels"] = std::move(globalLabelsArr);
+
+	return true;
+}
+
+wzapi::scripting_instance* scripting_engine::findInstanceForPlayer(int match, const WzString& _scriptName)
+{
+	WzString scriptName = _scriptName.normalized(WzString::NormalizationForm_KD);
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		WzString matchName = WzString::fromUtf8(instance->scriptName()).normalized(WzString::NormalizationForm_KD);
+		if (match == player && (matchName.compare(scriptName) == 0 || scriptName.isEmpty()))
+		{
+			return instance;
+		}
+	}
+	ASSERT(false, "Script context for player %d and script name %s not found",
+	       match, scriptName.toUtf8().c_str());
+	return nullptr;
+}
+
+bool loadScriptStates(const char *filename)
+{
+	return scripting_engine::instance().loadScriptStates(filename);
+}
+
+bool scripting_engine::loadScriptStates(const char *filename)
+{
+	WzConfig ini(filename, WzConfig::ReadOnly);
+	const int version = ini.value("version", 1).toInt();
+	if (version >= 2)
+	{
+		debug(LOG_SAVE, "Loading script states (v%d) for %zu script contexts", version, scripts.size());
+		return loadScriptStates2(ini.currentJsonValue());
+	}
+
+	// ---- Legacy v1 loader (flat globals_<i> / groups_<i> / triggers_<i> layout) ----
+	uniqueTimerID maxRestoredTimerID = 0;
+	std::vector<WzString> list = ini.childGroups();
+	debug(LOG_SAVE, "Loading script states for %zu script contexts", scripts.size());
+	for (size_t i = 0; i < list.size(); ++i)
+	{
+		ini.beginGroup(list[i]);
+		int player = ini.value("me").toInt();
+		WzString scriptName = ini.value("scriptName").toWzString();
+		wzapi::scripting_instance* instance = findInstanceForPlayer(player, scriptName);
+		if (instance && list[i].startsWith("triggers_"))
+		{
+			std::shared_ptr<timerNode> node = std::make_shared<timerNode>();
+			if (ini.contains("timerID"))
+			{
+				node->timerID = ini.value("timerID").toInt();
+			}
+			else
+			{
+				// backwards-compat with old saves
+				node->timerID = getNextAvailableTimerID();
+			}
+			if (ini.contains("timerName"))
+			{
+				node->timerName = ini.value("timerName").toWzString().toStdString();
+			}
+			else
+			{
+				// backwards-compat with old saves
+				node->timerName = ini.value("function").toWzString().toStdString();
+			}
+			node->instance = instance;
+			debug(LOG_SAVE, "Registering trigger %zu for player %d, script %s",
+			      i, player, scriptName.toUtf8().c_str());
+			// NOTE: the save side has always written this under the "object" key (never "baseobj")
+			node->baseobj = ini.value("object", -1).toInt();
+			node->baseobjtype = (OBJECT_TYPE)ini.value("objectType", (int)OBJ_NUM_TYPES).toInt();
+			node->frameTime = ini.value("frame").toInt();
+			node->ms = ini.value("ms").toInt();
+			node->player = player;
+			node->calls = ini.value("calls").toInt();
+			node->type = (timerType)ini.value("type", TIMER_REPEAT).toInt();
+
+			std::tuple<TimerFunc, std::unique_ptr<timerAdditionalData>> restoredTimerInfo;
+			try
+			{
+				if (ini.contains("functionRestoreInfo"))
+				{
+					restoredTimerInfo = instance->restoreTimerFunction(ini.value("functionRestoreInfo").jsonValue());
+				}
+				else
+				{
+					// backwards-compat with old saves
+					// construct a JS-compatible functionRestoreInfo using the "function" key, which should be set in an older save
+					nlohmann::json backwardsCompatJSFunctionRestoreInfo = nlohmann::json::object();
+					if (!ini.contains("function"))
+					{
+						ASSERT(false, "Invalid trigger in save (%s) - missing new functionRestoreInfo block, and old function parameter", list[i].toUtf8().c_str());
+						ini.endGroup();
+						continue;
+					}
+					backwardsCompatJSFunctionRestoreInfo["function"] = ini.value("function").jsonValue();
+					restoredTimerInfo = instance->restoreTimerFunction(backwardsCompatJSFunctionRestoreInfo);
+				}
+			}
+			catch (const std::exception& e)
+			{
+				ASSERT(false, "Failed to restore saved timer function info: %s", e.what());
+				ini.endGroup();
+				continue;
+			}
+
+			node->function = std::get<0>(restoredTimerInfo);
+			node->additionalTimerFuncParam = std::move(std::get<1>(restoredTimerInfo));
+
+			maxRestoredTimerID = std::max<uniqueTimerID>(maxRestoredTimerID, node->timerID);
+
+			addTimerNode(std::move(node));
+		}
+		else if (instance && list[i].startsWith("globals_"))
+		{
+			nlohmann::json result = ini.currentJsonValue();
+			debug(LOG_SAVE, "Loading script globals for player %d, script %s -- found %zu values",
+				  instance->player(), instance->scriptName().c_str(), result.size());
+			// filter out "scriptName" and "me" variables
+			result.erase("me");
+			result.erase("scriptName");
+			// v1 (this legacy loader): undefined was stored as JSON null, so null -> undefined
+			instance->loadScriptGlobals(result, /*fixedNulls=*/false);
+		}
+		else if (instance && list[i].startsWith("groups_"))
+		{
+			std::vector<WzString> keys = ini.childKeys();
+			for (size_t j = 0; j < keys.size(); ++j)
+			{
+				std::vector<WzString> values = ini.value(keys.at(j)).toWzStringList();
+				bool ok = false; // check if number
+				int droidId = keys.at(j).toInt(&ok);
+				for (size_t k = 0; ok && k < values.size(); k++)
+				{
+					int groupId = values.at(k).toInt();
+					loadGroup(instance, groupId, droidId);
+				}
+			}
+			bool bHasLastNewGroupId = false;
+			int lastNewGroupId = ini.value("lastNewGroupId").toInt(&bHasLastNewGroupId);
+			if (bHasLastNewGroupId)
+			{
+				GROUPMAP *psMap = getGroupMap(instance);
+				if (psMap)
+				{
+					psMap->saveLoadSetLastNewGroupId(lastNewGroupId);
+				}
+			}
+		}
+		else
+		{
+			if (instance)
+			{
+				debug(LOG_WARNING, "Encountered unexpected group '%s' in loadScriptStates", list[i].toUtf8().c_str());
+			}
+		}
+		ini.endGroup();
+	}
+	lastTimerID = maxRestoredTimerID;
+	return true;
+}
+
+// Non-throwing JSON field accessor for the restore path: returns the field as T, or `fallback` when the
+// key is absent OR present-but-wrong-typed. nlohmann's value()/get<T>() throw on a type mismatch, which -
+// since the restore wipes live state up front - would leave the engine half-restored; defaulting instead
+// keeps the restore total. When a wrong type is encountered *mismatch is set, so the caller can note the
+// document was not fully faithful.
+template <typename T, typename JsonType>
+static T jsonValueOr(const JsonType &j, const char *key, T fallback, bool *mismatch = nullptr)
+{
+	auto it = j.find(key);
+	if (it == j.end())
+	{
+		return fallback;
+	}
+	try
+	{
+		return it->template get<T>();
+	}
+	catch (const nlohmann::json::exception &e)
+	{
+		debug(LOG_ERROR, "Wrong-typed field \"%s\"; using default (%s)", key, e.what());
+		if (mismatch) { *mismatch = true; }
+		return fallback;
+	}
+}
+
+// Loader for save format v2 (see SCRIPTSTATE_VERSION): a structured JSON document with top-level
+// "instances" and "triggers" arrays - 'root' is the parsed document object.
+//
+// The restore is total: it wipes each restored instance's live timers/groups and the label maps up front,
+// then rebuilds from the document. Because that wipe happens before the rebuild, every field read is
+// non-throwing (via jsonValueOr / type-guarded) and every mutating step is fault-tolerant, so a malformed
+// entry is skipped rather than aborting the whole restore and leaving the engine half-wiped. If anything
+// was skipped this returns false (the input was not fully faithful) so a caller restoring from an untrusted
+// source can choose to reject it; a returned true means a byte-faithful restore.
+bool scripting_engine::loadScriptStates2(const nlohmann::ordered_json &root, int targetPlayer)
+{
+	bool anySkipped = false;
+	const int version = jsonValueOr(root, "version", 1);
+	ASSERT_OR_RETURN(false, version >= 2, "Invalid version: %d", version);
+
+	if (version > SCRIPTSTATE_VERSION)
+	{
+		// script state version is newer than this version of WZ can support
+		debug(LOG_ERROR, "The scriptState version is newer than this version of WZ can support: %d", version);
+		return false;
+	}
+
+	// Clear each restored instance's existing timers/groups before reloading, so saved state replaces
+	// rather than duplicates the instance's live state. Needed wherever the restore lands on a world that
+	// already has running script state:
+	//  - network snapshot (targetPlayer >= 0): the running game's rules script already has timers/groups
+	//    (rebound onto targetPlayer, matched by scriptName);
+	//  - in-process round-trip (targetPlayer == -1): gameStateFromJson deserializes onto the LIVE world,
+	//    whose instances still hold their running timers/groups, which the saved state must replace.
+	// (On a disk cold-load, also targetPlayer == -1, this is a no-op: it is a fresh process, so instances
+	// have no script-registered timers/groups yet - eventGameInit/eventStartLevel do NOT fire on load.)
+	{
+		std::set<wzapi::scripting_instance *> instancesToReset;
+		auto resetInstancesIt = root.find("instances");
+		if (resetInstancesIt != root.end() && resetInstancesIt->is_array())
+		{
+			for (const auto& instanceObj : *resetInstancesIt)
+			{
+				if (!instanceObj.is_object() || !instanceObj.contains("scriptName"))
+				{
+					continue;
+				}
+				// targetPlayer >= 0: rebind onto this client's selectedPlayer; otherwise match saved "me".
+				const int savedPlayer = jsonValueOr(instanceObj, "me", -1, &anySkipped);
+				const int player = (targetPlayer >= 0) ? targetPlayer : savedPlayer;
+				const WzString scriptName = WzString::fromUtf8(jsonValueOr<std::string>(instanceObj, "scriptName", std::string(), &anySkipped));
+				wzapi::scripting_instance* instance = findInstanceForPlayer(player, scriptName);
+				if (instance)
+				{
+					instancesToReset.insert(instance);
+				}
+			}
+		}
+		for (wzapi::scripting_instance* instance : instancesToReset)
+		{
+			removeTimersIf([instance](const timerNode& node) { return node.instance == instance; });
+			GROUPMAP *psMap = getGroupMap(instance);
+			if (psMap)
+			{
+				psMap->clear();
+			}
+		}
+	}
+
+	// Labels: a v2 save is the authoritative source, so clear and rebuild both buckets here
+	// - Global (map-authored / legacy / unowned) labels live at the top level
+	// - Each instance's owned labels are nested under it (loaded in the instance loop below)
+	// - No map->id remapping is needed - savegame labels store already-synchronized runtime ids
+	globalLabels.clear();
+	ownedLabels.clear();
+	auto topLabelsIt = root.find("labels");
+	if (topLabelsIt != root.end() && topLabelsIt->is_array())
+	{
+		loadLabelMap(*topLabelsIt, globalLabels);
+	}
+
+	// Instances: per-instance globals + group memberships + flags
+	auto instancesIt = root.find("instances");
+	if (instancesIt != root.end() && instancesIt->is_array())
+	{
+		for (const auto& instanceObj : *instancesIt)
+		{
+			if (!instanceObj.is_object())
+			{
+				ASSERT(false, "Malformed instance entry in script states (not an object)");
+				anySkipped = true;
+				continue;
+			}
+			// targetPlayer >= 0: ignore the saved "me" (the host's selectedPlayer) and rebind onto this
+			// client's selectedPlayer. Otherwise (savegame-style) match the saved player verbatim.
+			const int savedPlayer = jsonValueOr(instanceObj, "me", -1, &anySkipped);
+			int player = (targetPlayer >= 0) ? targetPlayer : savedPlayer;
+			WzString scriptName = WzString::fromUtf8(jsonValueOr<std::string>(instanceObj, "scriptName", std::string(), &anySkipped));
+			wzapi::scripting_instance* instance = findInstanceForPlayer(player, scriptName);
+			if (!instance)
+			{
+				continue;
+			}
+
+			// Globals
+			auto globalsIt = instanceObj.find("globals");
+			if (globalsIt != instanceObj.end() && globalsIt->is_object())
+			{
+				nlohmann::ordered_json globals = *globalsIt;
+				debug(LOG_SAVE, "Loading script globals for player %d, script %s -- found %zu values",
+				      instance->player(), instance->scriptName().c_str(), globals.size());
+				// filter out "scriptName" and "me" variables (saved implicitly inside globals)
+				globals.erase("me");
+				globals.erase("scriptName");
+				// v2 saves tag undefined explicitly, so a bare JSON null means JS null. Guard against a
+				// malformed globals blob (e.g. a wrong-typed field the converter rejects, or over-deep
+				// nesting) so a single bad instance's globals are skipped rather than aborting the restore.
+				try
+				{
+					instance->loadScriptGlobals(globals, /*fixedNulls=*/true);
+				}
+				catch (const std::exception &e)
+				{
+					debug(LOG_ERROR, "Skipping malformed script globals for player %d, script %s: %s",
+					      instance->player(), instance->scriptName().c_str(), e.what());
+					anySkipped = true;
+				}
+			}
+
+			// Group memberships: { "lastNewGroupId": <int>, "<droidId>": ["<groupId>", ...], ... }
+			auto groupsIt = instanceObj.find("groups");
+			if (groupsIt != instanceObj.end() && groupsIt->is_object())
+			{
+				for (auto it = groupsIt->begin(); it != groupsIt->end(); ++it)
+				{
+					if (it.key() == "lastNewGroupId" || !it->is_array())
+					{
+						continue;
+					}
+					bool ok = false; // check if the key is a (droid) id number
+					int droidId = WzString::fromUtf8(it.key()).toInt(&ok);
+					if (!ok)
+					{
+						continue;
+					}
+					for (const auto& groupIdVal : *it)
+					{
+						int groupId = 0;
+						if (groupIdVal.is_number_integer())
+						{
+							groupId = groupIdVal.get<int>();
+						}
+						else if (groupIdVal.is_string())
+						{
+							groupId = WzString::fromUtf8(groupIdVal.get<std::string>()).toInt();
+						}
+						else
+						{
+							continue;
+						}
+						loadGroup(instance, groupId, droidId);
+					}
+				}
+				auto lastNewIt = groupsIt->find("lastNewGroupId");
+				if (lastNewIt != groupsIt->end() && lastNewIt->is_number_integer())
+				{
+					GROUPMAP *psMap = getGroupMap(instance);
+					if (psMap)
+					{
+						psMap->saveLoadSetLastNewGroupId(lastNewIt->get<int>());
+					}
+				}
+			}
+
+			// Per-instance flags
+			auto recvIt = instanceObj.find("isReceivingAllEvents");
+			if (recvIt != instanceObj.end() && recvIt->is_boolean())
+			{
+				instance->setReceiveAllEvents(recvIt->get<bool>());
+			}
+
+			// Math.random() PRNG state (see saveScriptStates2)
+			auto rngIt = instanceObj.find("mathRandomState");
+			if (rngIt != instanceObj.end() && rngIt->is_number())
+			{
+				instance->restoreMathRandomState(rngIt->get<uint64_t>());
+			}
+
+			// This instance's owned labels
+			auto instLabelsIt = instanceObj.find("labels");
+			if (instLabelsIt != instanceObj.end() && instLabelsIt->is_array())
+			{
+				loadLabelMap(*instLabelsIt, ownedLabels[instance]);
+			}
+		}
+	}
+
+	// Timers: ordered array of timer nodes, restored in-order
+	auto timersIt = root.find("timers");
+	if (timersIt != root.end() && timersIt->is_array())
+	{
+		// Bound the number of restored timers to something far above any real game
+		constexpr size_t MAX_RESTORED_TIMERS = 100000;
+		size_t restoredTimerCount = 0;
+		for (const auto& nodeInfo : *timersIt)
+		{
+			if (restoredTimerCount >= MAX_RESTORED_TIMERS)
+			{
+				debug(LOG_ERROR, "Too many timers in script state (> %zu); ignoring the rest", MAX_RESTORED_TIMERS);
+				anySkipped = true;
+				break;
+			}
+			if (!nodeInfo.is_object())
+			{
+				ASSERT(false, "Malformed timer entry in script states (not an object)");
+				anySkipped = true;
+				continue;
+			}
+			// Rebind onto targetPlayer when restoring a snapshot onto a running match (see instance loop).
+			const int savedTimerPlayer = jsonValueOr(nodeInfo, "me", -1, &anySkipped);
+			int player = (targetPlayer >= 0) ? targetPlayer : savedTimerPlayer;
+			WzString scriptName = WzString::fromUtf8(jsonValueOr<std::string>(nodeInfo, "scriptName", std::string(), &anySkipped));
+			wzapi::scripting_instance* instance = findInstanceForPlayer(player, scriptName);
+			if (!instance)
+			{
+				continue;
+			}
+
+			std::shared_ptr<timerNode> node = std::make_shared<timerNode>();
+			if (nodeInfo.contains("id"))
+			{
+				bool idMismatch = false;
+				node->timerID = jsonValueOr<int>(nodeInfo, "id", -1, &idMismatch);
+				if (idMismatch)
+				{
+					node->timerID = getNextAvailableTimerID();
+					anySkipped = true;
+				}
+			}
+			else
+			{
+				node->timerID = getNextAvailableTimerID();
+			}
+			node->timerName = jsonValueOr<std::string>(nodeInfo, "name", std::string(), &anySkipped);
+			node->instance = instance;
+			debug(LOG_SAVE, "Registering timer for player %d, script %s",
+			      player, scriptName.toUtf8().c_str());
+			node->baseobj = jsonValueOr(nodeInfo, "object", -1, &anySkipped);
+			node->baseobjtype = (OBJECT_TYPE)jsonValueOr(nodeInfo, "objectType", (int)OBJ_NUM_TYPES, &anySkipped);
+			node->frameTime = jsonValueOr(nodeInfo, "frame", 0, &anySkipped);
+			node->ms = jsonValueOr(nodeInfo, "ms", 0, &anySkipped);
+			if (node->ms < 0)
+			{
+				debug(LOG_ERROR, "Skipping restore of timer with negative ms (%d)", node->ms);
+				anySkipped = true;
+				continue;
+			}
+			node->player = player;
+			node->calls = jsonValueOr(nodeInfo, "calls", 0, &anySkipped);
+			node->type = (timerType)jsonValueOr(nodeInfo, "type", (int)TIMER_REPEAT, &anySkipped);
+
+			std::tuple<TimerFunc, std::unique_ptr<timerAdditionalData>> restoredTimerInfo;
+			try
+			{
+				auto friIt = nodeInfo.find("functionRestoreInfo");
+				if (friIt == nodeInfo.end())
+				{
+					debug(LOG_ERROR, "Skipping timer restore - missing functionRestoreInfo block");
+					anySkipped = true;
+					continue;
+				}
+				restoredTimerInfo = instance->restoreTimerFunction(*friIt);
+			}
+			catch (const std::exception& e)
+			{
+				// Reachable from a malformed/crafted document (e.g. restoreTimerFunction rejecting a
+				// reserved callback name), so log and skip rather than assert.
+				debug(LOG_ERROR, "Skipping timer restore - invalid function info: %s", e.what());
+				anySkipped = true;
+				continue;
+			}
+
+			node->function = std::get<0>(restoredTimerInfo);
+			node->additionalTimerFuncParam = std::move(std::get<1>(restoredTimerInfo));
+
+			addTimerNode(std::move(node));
+			++restoredTimerCount;
+		}
+	}
+
+	// Restore the monotonic timer-id counter
+	lastTimerID = jsonValueOr(root, "lastTimerID", static_cast<uniqueTimerID>(0), &anySkipped);
+
+	// false => at least one malformed/skipped entry: the restore completed and is self-consistent, but is
+	// not byte-faithful to the document. A caller loading from an untrusted source can treat that as reason
+	// to reject; the disk-savegame path accepts the repaired result and proceeds.
+	return !anySkipped;
+}
+
+std::unordered_map<wzapi::scripting_instance *, nlohmann::json> scripting_engine::debug_GetGlobalsSnapshot() const
+{
+	MODELMAP debug_globals;
+	for (auto *instance : scripts)
+	{
+		json scriptGlobals = instance->debugGetAllScriptGlobals();
+		debug_globals[instance] = std::move(scriptGlobals);
+	}
+	return debug_globals;
+}
+
+std::vector<scripting_engine::timerNodeSnapshot> scripting_engine::debug_GetTimersSnapshot() const
+{
+	std::vector<scripting_engine::timerNodeSnapshot> debug_timer_snapshot;
+	for (auto& timer : timers)
+	{
+		debug_timer_snapshot.emplace_back(timerNodeSnapshot(timer));
+	}
+	return debug_timer_snapshot;
+}
+
+void jsAutogameSpecific(const WzString &name, int player, AIDifficulty difficulty)
+{
+	if (bMultiPlayer && NetPlay.bComms)
+	{
+		const DebugInputManager& dbgInputManager = gInputManager.debugManager();
+		if (!dbgInputManager.debugMappingsAllowed())
+		{
+			debug(LOG_ERROR, "Cannot attach script \"%s\" to player %d", name.toUtf8().c_str(), player);
+			return;
+		}
+	}
+
+	wzapi::scripting_instance* instance = loadPlayerScript(name, player, difficulty, wzapi::ScriptBinding::PlayerAI);
+	if (!instance)
+	{
+		console(_("Failed to load selected AI! Check your logs to see why."));
+		return;
+	}
+	console(_("Loaded the %s AI script for current player!"), name.toUtf8().c_str());
+	instance->handle_eventGameInit();
+	instance->handle_eventStartLevel();
+}
+
+void jsHandleDebugClosed()
+{
+	globalDialog = false;
+}
+
+void jsShowDebug()
+{
+	globalDialog = true;
+	class make_shared_enabler : public scripting_engine::DebugInterface { };
+	bool isSpectator = NetPlay.players[realSelectedPlayer].isSpectator;
+	jsDebugCreate(std::make_shared<make_shared_enabler>(), jsHandleDebugClosed, isSpectator);
+}
+
+// ----------------------------------------------------------------------------------------
+// Events
+
+/// For generic, parameter-less triggers
+//__ ## eventGameInit()
+//__
+//__ An event that is run once as the game is initialized. Not all game state may have been
+//__ properly initialized by this time, so use this only to initialize script state.
+//__
+//__ ## eventStartLevel()
+//__
+//__ An event that is run once the game has started and all game data has been loaded.
+//__
+//__ ## eventMissionTimeout()
+//__
+//__ An event that is run when the mission timer has run out.
+//__
+//__ ## eventVideoDone()
+//__
+//__ An event that is run when a video show stopped playing.
+//__
+//__ ## eventGameLoaded()
+//__
+//__ An event that is run when game is loaded from a saved game. There is usually no need to use this event.
+//__
+//__ ## eventGameSaving()
+//__
+//__ An event that is run before game is saved. There is usually no need to use this event.
+//__
+//__ ## eventGameSaved()
+//__
+//__ An event that is run after game is saved. There is usually no need to use this event.
+//__
+//__ ## eventDeliveryPointMoving()
+//__
+//__ An event that is run when the current player starts to move a delivery point.
+//__
+//__ ## eventDeliveryPointMoved()
+//__
+//__ An event that is run after the current player has moved a delivery point.
+//__
+//__ ## eventTransporterLaunch(transport)
+//__
+//__ An event that is run when the mission transporter has been ordered to fly off.
+//__
+//__ ## eventTransporterArrived(transport)
+//__
+//__ An event that is run when the mission transporter has arrived at the map edge with reinforcements.
+//__
+//__ ## eventTransporterExit(transport)
+//__
+//__ An event that is run when the mission transporter has left the map.
+//__
+//__ ## eventTransporterDone(transport)
+//__
+//__ An event that is run when the mission transporter has no more reinforcements to deliver.
+//__
+//__ ## eventTransporterLanded(transport)
+//__
+//__ An event that is run when the mission transporter has landed with reinforcements.
+//__
+//__ ## eventDesignBody()
+//__
+//__ An event that is run when current user picks a body in the design menu.
+//__
+//__ ## eventDesignPropulsion()
+//__
+//__ An event that is run when current user picks a propulsion in the design menu.
+//__
+//__ ## eventDesignWeapon()
+//__
+//__ An event that is run when current user picks a weapon in the design menu.
+//__
+//__ ## eventDesignCommand()
+//__
+//__ An event that is run when current user picks a command turret in the design menu.
+//__
+//__ ## eventDesignSystem()
+//__
+//__ An event that is run when current user picks a system other than command turret in the design menu.
+//__
+//__ ## eventDesignQuit()
+//__
+//__ An event that is run when current user leaves the design menu.
+//__
+//__ ## eventMenuBuildSelected()
+//__
+//__ An event that is run when current user picks something new in the build menu.
+//__
+//__ ## eventMenuBuild()
+//__
+//__ An event that is run when current user opens the build menu.
+//__
+//__ ## eventMenuResearch()
+//__
+//__ An event that is run when current user opens the research menu.
+//__
+//__ ## eventMenuManufacture()
+//__
+//__ An event that is run when current user opens the manufacture menu.
+//__
+bool triggerEvent(SCRIPT_TRIGGER_TYPE trigger, BASE_OBJECT *psObj)
+{
+	// HACK: TRIGGER_VIDEO_QUIT is called before scripts for initial campaign video
+	ASSERT(scriptsReady || trigger == TRIGGER_VIDEO_QUIT, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		if (psObj)
+		{
+			int player = instance->player();
+			bool receiveAll = instance->isReceivingAllEvents();
+			if (player != psObj->player && !receiveAll)
+			{
+				continue;
+			}
+		}
+
+		switch (trigger)
+		{
+		case TRIGGER_GAME_INIT:
+			instance->handle_eventGameInit();
+			break;
+		case TRIGGER_START_LEVEL:
+			processVisibility(); // make sure we initialize visibility first
+			instance->handle_eventStartLevel();
+			break;
+		case TRIGGER_TRANSPORTER_LAUNCH:
+			instance->handle_eventLaunchTransporter(); // deprecated!
+			instance->handle_eventTransporterLaunch(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_ARRIVED:
+			instance->handle_eventReinforcementsArrived(); // deprecated!
+			instance->handle_eventTransporterArrived(psObj);
+			break;
+		case TRIGGER_DELIVERY_POINT_MOVING:
+			instance->handle_eventDeliveryPointMoving(psObj);
+			break;
+		case TRIGGER_DELIVERY_POINT_MOVED:
+			instance->handle_eventDeliveryPointMoved(psObj);
+			break;
+		case TRIGGER_OBJECT_RECYCLED:
+			instance->handle_eventObjectRecycled(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_EXIT:
+			instance->handle_eventTransporterExit(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_DONE:
+			instance->handle_eventTransporterDone(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_LANDED:
+			instance->handle_eventTransporterLanded(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_EMBARKED:
+			instance->handle_eventTransporterEmbarked(psObj);
+			break;
+		case TRIGGER_TRANSPORTER_DISEMBARKED:
+			instance->handle_eventTransporterDisembarked(psObj);
+			break;
+		case TRIGGER_MISSION_TIMEOUT:
+			instance->handle_eventMissionTimeout();
+			break;
+		case TRIGGER_VIDEO_QUIT:
+			instance->handle_eventVideoDone();
+			break;
+		case TRIGGER_GAME_LOADED:
+			instance->handle_eventGameLoaded();
+			break;
+		case TRIGGER_GAME_SAVING:
+			instance->handle_eventGameSaving();
+			break;
+		case TRIGGER_GAME_SAVED:
+			instance->handle_eventGameSaved();
+			break;
+		case TRIGGER_DESIGN_BODY:
+			instance->handle_eventDesignBody();
+			break;
+		case TRIGGER_DESIGN_PROPULSION:
+			instance->handle_eventDesignPropulsion();
+			break;
+		case TRIGGER_DESIGN_WEAPON:
+			instance->handle_eventDesignWeapon();
+			break;
+		case TRIGGER_DESIGN_COMMAND:
+			instance->handle_eventDesignCommand();
+			break;
+		case TRIGGER_DESIGN_SYSTEM:
+			instance->handle_eventDesignSystem();
+			break;
+		case TRIGGER_DESIGN_QUIT:
+			instance->handle_eventDesignQuit();
+			break;
+		case TRIGGER_MENU_BUILD_SELECTED:
+			instance->handle_eventMenuBuildSelected();
+			break;
+		case TRIGGER_MENU_RESEARCH_SELECTED:
+			instance->handle_eventMenuResearchSelected();
+			break;
+		case TRIGGER_MENU_BUILD_UP:
+			instance->handle_eventMenuBuild();
+			break;
+		case TRIGGER_MENU_RESEARCH_UP:
+			instance->handle_eventMenuResearch();
+			break;
+		case TRIGGER_MENU_DESIGN_UP:
+			instance->handle_eventMenuDesign();
+			break;
+		case TRIGGER_MENU_MANUFACTURE_UP:
+			instance->handle_eventMenuManufacture();
+			break;
+		}
+	}
+
+	if ((trigger == TRIGGER_START_LEVEL || trigger == TRIGGER_GAME_LOADED) && !saveandquit_enabled().empty())
+	{
+		// --saveandquit produces a normal mid-mission save (which, unlike the old START path, also captures script state)
+		saveGame(saveandquit_enabled().c_str(), GTYPE_SAVE_MIDMISSION);
+		wzQuit(0);
+	}
+
+	return true;
+}
+
+//__ ## eventPlayerLeft(player)
+//__
+//__ An event that is run after a player has left the game.
+//__
+bool triggerEventPlayerLeft(int player)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventPlayerLeft(player);
+	}
+	return true;
+}
+
+//__ ## eventCheatMode(entered)
+//__
+//__ Game entered or left cheat/debug mode.
+//__ The entered parameter is true if cheat mode entered, false otherwise.
+//__
+bool triggerEventCheatMode(bool entered)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	GameStoryLogger::instance().logDebugModeChange(entered);
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventCheatMode(entered);
+	}
+	return true;
+}
+
+//__ ## eventDroidIdle(droid)
+//__
+//__ A droid should be given new orders.
+//__
+bool triggerEventDroidIdle(DROID *psDroid)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		if (player == psDroid->player)
+		{
+			instance->handle_eventDroidIdle(psDroid);
+		}
+	}
+	return true;
+}
+
+//__ ## eventDroidBuilt(droid[, structure])
+//__
+//__ An event that is run every time a droid is built. The structure parameter is set
+//__ if the droid was produced in a factory. It is not triggered for droid theft or
+//__ gift (check ```eventObjectTransfer``` for that).
+//__
+bool triggerEventDroidBuilt(DROID *psDroid, STRUCTURE *psFactory)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+
+	if (psFactory != nullptr) // Ignore droids that were gifted or cheated (debug add)
+	{
+		// Increment built count for droids built in a factory
+		updateMultiStatsBuilt(psDroid);
+	}
+
+	optional<const STRUCTURE *> opt_factory = (psFactory) ? optional<const STRUCTURE *>(psFactory) : nullopt;
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psDroid->player || receiveAll)
+		{
+			instance->handle_eventDroidBuilt(psDroid, opt_factory);
+		}
+	}
+	return true;
+}
+
+//__ ## eventStructureBuilt(structure[, droid])
+//__
+//__ An event that is run every time a structure is produced. The droid parameter is set
+//__ if the structure was built by a droid. It is not triggered for building theft
+//__ (check ```eventObjectTransfer``` for that).
+//__
+bool triggerEventStructBuilt(STRUCTURE *psStruct, DROID *psDroid)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+
+	if (psDroid != nullptr) // Ignore structures that were gifted or cheated (debug add)
+	{
+		// Increment structure count for structures built by a droid
+		updateMultiStatsBuilt(psStruct);
+	}
+
+	optional<const DROID *> opt_droid = (psDroid) ? optional<const DROID *>(psDroid) : nullopt;
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psStruct->player || receiveAll)
+		{
+			instance->handle_eventStructureBuilt(psStruct, opt_droid);
+		}
+	}
+	return true;
+}
+
+//__ ## eventStructureDemolish(structure[, droid])
+//__
+//__ An event that is run every time a structure begins to be demolished. This does
+//__ not trigger again if the structure is partially demolished.
+//__
+bool triggerEventStructDemolish(STRUCTURE *psStruct, DROID *psDroid)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	optional<const DROID *> opt_droid = (psDroid) ? optional<const DROID *>(psDroid) : nullopt;
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psStruct->player || receiveAll)
+		{
+			instance->handle_eventStructureDemolish(psStruct, opt_droid);
+		}
+	}
+	return true;
+}
+
+//__ ## eventStructureReady(structure)
+//__
+//__ An event that is run every time a structure is ready to perform some
+//__ special ability. It will only fire once, so if the time is not right,
+//__ register your own timer to keep checking.
+//__
+bool triggerEventStructureReady(STRUCTURE *psStruct)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psStruct->player || receiveAll)
+		{
+			instance->handle_eventStructureReady(psStruct);
+		}
+	}
+	return true;
+}
+
+//__ ## eventStructureUpgradeStarted(structure)
+//__
+//__ An event that is run every time a structure starts to be upgraded.
+//__
+bool triggerEventStructureUpgradeStarted(STRUCTURE *psStruct)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psStruct->player || receiveAll)
+		{
+			instance->handle_eventStructureUpgradeStarted(psStruct);
+		}
+	}
+	return true;
+}
+
+//__ ## eventDroidRankGained(droid, rankNum)
+//__
+//__ An event that is run whenever a droid gains a rank.
+//__
+bool triggerEventDroidRankGained(const DROID *psDroid, int rankNum)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psDroid) { return true; }
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psDroid->player || receiveAll)
+		{
+			instance->handle_eventDroidRankGained(psDroid, rankNum);
+		}
+	}
+	return true;
+}
+
+//__ ## eventAttacked(victim, attacker)
+//__
+//__ An event that is run when an object belonging to the script's controlling player is
+//__ attacked. The attacker parameter may be either a structure or a droid.
+//__
+bool triggerEventAttacked(BASE_OBJECT *psVictim, BASE_OBJECT *psAttacker, int lastHit)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psAttacker)
+	{
+		// do not fire off this event if there is no attacker -- nothing do respond to
+		// (FIXME -- consider this carefully)
+		return false;
+	}
+	// throttle the event for performance
+	if (gameTime - lastHit < ATTACK_THROTTLE)
+	{
+		return false;
+	}
+	for (auto *instance : scripts)
+	{
+		int player = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (player == psVictim->player || receiveAll)
+		{
+			instance->handle_eventAttacked(psVictim, psAttacker);
+		}
+	}
+	return true;
+}
+
+//__ ## eventResearched(research, structure, player)
+//__
+//__ An event that is run whenever a new research is available. The structure
+//__ parameter is set if the research comes from a research lab owned by the
+//__ current player. If an ally does the research, the structure parameter will
+//__ be set to null. The player parameter gives the player it is called for.
+//__
+bool triggerEventResearched(RESEARCH *psResearch, STRUCTURE *psStruct, int player)
+{
+	//HACK: This event can be triggered when loading savegames, before the script engines are initialized.
+	// if this is the case, we need to store these events and replay them later
+	if (!scriptsReady)
+	{
+		eventQueue.emplace(psResearch, psStruct, player);
+		return true;
+	}
+
+	updateMultiStatsResearchComplete(psResearch, player);
+	GameStoryLogger::instance().logResearchCompleted(psResearch, psStruct, player);
+
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == player || receiveAll)
+		{
+			instance->handle_eventResearched(wzapi::researchResult(psResearch, player), psStruct, player);
+		}
+	}
+	return true;
+}
+
+//__ ## eventDestroyed(object)
+//__
+//__ An event that is run whenever an object is destroyed. Careful passing
+//__ the parameter object around, since it is about to vanish!
+//__
+bool triggerEventDestroyed(BASE_OBJECT *psVictim)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psVictim) { return true; }
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventDestroyed(psVictim);
+	}
+	return true;
+}
+
+//__ ## eventPickup(feature, droid)
+//__
+//__ An event that is run whenever a feature is picked up. It is called for
+//__ all players / scripts.
+//__ Careful passing the parameter object around, since it is about to vanish! (3.2+ only)
+//__
+bool triggerEventPickup(FEATURE *psFeat, DROID *psDroid)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventPickup(psFeat, psDroid);
+	}
+	return true;
+}
+
+//__ ## eventObjectSeen(viewer, seen)
+//__
+//__ An event that is run sometimes when an object, which was marked by an object label,
+//__ which was reset through resetLabel() to subscribe for events, goes from not seen to seen.
+//__ An event that is run sometimes when an objectm  goes from not seen to seen.
+//__ First parameter is **game object** doing the seeing, the next the game
+//__ object being seen.
+//__
+//__ ## eventGroupSeen(viewer, group)
+//__
+//__ An event that is run sometimes when a member of a group, which was marked by a group label,
+//__ which was reset through resetLabel() to subscribe for events, goes from not seen to seen.
+//__ First parameter is **game object** doing the seeing, the next the id of the group
+//__ being seen.
+//__
+bool triggerEventSeen(BASE_OBJECT *psViewer, BASE_OBJECT *psSeen)
+{
+	return scripting_engine::instance().triggerEventSeen(psViewer, psSeen);
+}
+bool scripting_engine::triggerEventSeen(BASE_OBJECT *psViewer, BASE_OBJECT *psSeen)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psSeen || !psViewer) { return true; }
+	for (auto *instance : scripts)
+	{
+		std::pair<bool, int> callbacks = scripting_engine::instance().seenLabelCheck(instance, psSeen, psViewer);
+		if (callbacks.first)
+		{
+			instance->handle_eventObjectSeen(psViewer, psSeen);
+		}
+		if (callbacks.second)
+		{
+			int groupId = callbacks.second;
+			instance->handle_eventGroupSeen(psViewer, groupId);
+		}
+	}
+	return true;
+}
+
+//__ ## eventObjectTransfer(object, from)
+//__
+//__ An event that is run whenever an object is transferred between players,
+//__ for example due to a Nexus Link weapon. The event is called after the
+//__ object has been transferred, so the target player is in object.player.
+//__ The event is called for both players.
+//__
+bool triggerEventObjectTransfer(BASE_OBJECT *psObj, int from)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	if (!psObj) { return true; }
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == psObj->player || me == from || receiveAll)
+		{
+			instance->handle_eventObjectTransfer(psObj, from);
+		}
+	}
+	return true;
+}
+
+//__ ## eventChat(from, to, message)
+//__
+//__ An event that is run whenever a chat message is received. The ```from``` parameter is the
+//__ player sending the chat message. For the moment, the ```to``` parameter is always the script
+//__ player.
+//__
+bool triggerEventChat(int from, int to, const char *message)
+{
+	if (!scriptsReady)
+	{
+		// just ignore chat messages before scripts are ready / initialized
+		return false;
+	}
+	ASSERT_OR_RETURN(false, message, "No message provided");
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == to || (receiveAll && to == from))
+		{
+			instance->handle_eventChat(from, to, message);
+		}
+	}
+	return true;
+}
+
+//__ ## eventQuickChat(from, to, messageEnum)
+//__
+//__ An event that is run whenever a quick chat message is received. The ```from``` parameter is the
+//__ player sending the chat message. For the moment, the ```to``` parameter is always the script
+//__ player. ```messageEnum``` is the WzQuickChatMessage value (see the WzQuickChatMessages global
+//__ object for constants to match with it). The ```teamSpecific``` parameter is true if this message
+//__ was sent only to teammates, false otherwise.
+//__
+bool triggerEventQuickChatMessage(int from, int to, WzQuickChatMessage message, bool teamSpecific)
+{
+	if (!scriptsReady)
+	{
+		// just ignore chat messages before scripts are ready / initialized
+		return false;
+	}
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == to || (receiveAll && to == from))
+		{
+			instance->handle_eventQuickChat(from, to, static_cast<int>(message), teamSpecific);
+		}
+	}
+	return true;
+}
+
+//__ ## eventBeacon(x, y, from, to[, message])
+//__
+//__ An event that is run whenever a beacon message is received. The ```from``` parameter is the
+//__ player sending the beacon. For the moment, the ```to``` parameter is always the script player.
+//__ Message may be undefined.
+//__
+bool triggerEventBeacon(int from, int to, const char *message, int x, int y)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	optional<const char *> opt_message = (message) ? optional<const char *>(message) : nullopt;
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == to || receiveAll)
+		{
+			instance->handle_eventBeacon(map_coord(x), map_coord(y), from, to, opt_message);
+		}
+	}
+	return true;
+}
+
+//__ ## eventBeaconRemoved(from, to)
+//__
+//__ An event that is run whenever a beacon message is removed. The ```from``` parameter is the
+//__ player sending the beacon. For the moment, the ```to``` parameter is always the script player.
+//__
+bool triggerEventBeaconRemoved(int from, int to)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		int me = instance->player();
+		bool receiveAll = instance->isReceivingAllEvents();
+		if (me == to || receiveAll)
+		{
+			instance->handle_eventBeaconRemoved(from, to);
+		}
+	}
+	return true;
+}
+
+//__ ## eventSelectionChanged(objects)
+//__
+//__ An event that is triggered whenever the host player selects one or more game objects.
+//__ The ```objects``` parameter contains an array of the currently selected game objects.
+//__ Keep in mind that the player may drag and drop select many units at once, select one
+//__ unit specifically, or even add more selections to a current selection one at a time.
+//__ This event will trigger once for each user action, not once for each selected or
+//__ deselected object. If all selected game objects are deselected, ```objects``` will
+//__ be empty.
+//__
+bool triggerEventSelected()
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	selectionChanged = true;
+	return true;
+}
+
+//__ ## eventGroupLoss(object, groupId, newSize)
+//__
+//__ An event that is run whenever a group becomes empty. Input parameter
+//__ is the about to be killed object, the group's id, and the new group size.
+//__
+// Since groups are entities local to one context, we do not iterate over them here.
+bool triggerEventGroupLoss(const BASE_OBJECT *psObj, int group, int size, wzapi::scripting_instance *instance)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	return instance->handle_eventGroupLoss(psObj, group, size);
+}
+
+// This is not a trigger yet.
+bool triggerEventDroidMoved(DROID *psDroid, int oldx, int oldy)
+{
+	return scripting_engine::instance().areaLabelCheck(psDroid);
+}
+
+//__ ## eventArea<label>(droid)
+//__
+//__ An event that is run whenever a droid enters an area label. The area is then
+//__ deactived. Call resetArea() to reactivate it. The name of the event is
+//__ `eventArea${label}`.
+//__
+bool triggerEventArea(const std::string& label, DROID *psDroid)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventArea(label, psDroid);
+	}
+	return true;
+}
+
+//__ ## eventDesignCreated(template)
+//__
+//__ An event that is run whenever a new droid template is created. It is only
+//__ run on the client of the player designing the template.
+//__
+bool triggerEventDesignCreated(DROID_TEMPLATE *psTemplate)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventDesignCreated(psTemplate);
+	}
+	return true;
+}
+
+//__ ## eventAllianceOffer(from, to)
+//__
+//__ An event that is called whenever an alliance offer is requested.
+//__
+bool triggerEventAllianceOffer(uint8_t from, uint8_t to)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventAllianceOffer(from, to);
+	}
+	return true;
+}
+
+//__ ## eventAllianceAccepted(from, to)
+//__
+//__ An event that is called whenever an alliance is accepted.
+//__
+bool triggerEventAllianceAccepted(uint8_t from, uint8_t to)
+{
+	if (!scriptsReady)
+	{
+		return false; //silently ignore
+	}
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventAllianceAccepted(from, to);
+	}
+	return true;
+}
+
+//__ ## eventAllianceBroken(from, to)
+//__
+//__ An event that is called whenever an alliance is broken.
+//__
+bool triggerEventAllianceBroken(uint8_t from, uint8_t to)
+{
+	if (!scriptsReady)
+	{
+		return false; //silently ignore
+	}
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventAllianceBroken(from, to);
+	}
+	return true;
+}
+
+//__ ## eventSyncRequest(req_id, x, y, obj_id, obj_id2)
+//__
+//__ An event that is called from a script and synchronized with all other scripts and hosts
+//__ to prevent desync from happening. Sync requests must be carefully validated to prevent
+//__ cheating!
+//__
+bool triggerEventSyncRequest(int from, int req_id, int x, int y, BASE_OBJECT *psObj, BASE_OBJECT *psObj2)
+{
+	ASSERT(scriptsReady, "Scripts not initialized yet");
+	for (auto *instance : scripts)
+	{
+		instance->handle_eventSyncRequest(from, req_id, x, y, psObj, psObj2);
+	}
+	return true;
+}
+
+// ----
+
+#define ALL_PLAYERS -1
+#define ALLIES -2
+#define ENEMIES -3
+
+scripting_engine& scripting_engine::instance()
+{
+	static scripting_engine engine = scripting_engine();
+	return engine;
+}
+
+std::vector<scripting_engine::LabelInfo> scripting_engine::debug_GetLabelInfo() const
+{
+	std::vector<scripting_engine::LabelInfo> results;
+	// 'scope' is the owning script for an owned label, or "global" for a map-authored / legacy label
+	auto addLabelInfo = [&](const std::string& name, const LABEL& l, const WzString& scope)
+	{
+		scripting_engine::LabelInfo labelInfo;
+		labelInfo.label = WzString::fromUtf8(name);
+		const char *c = "?";
+		switch (l.type)
+		{
+		case OBJ_DROID: c = "DROID"; break;
+		case OBJ_FEATURE: c = "FEATURE"; break;
+		case OBJ_STRUCTURE: c = "STRUCTURE"; break;
+		case SCRIPT_POSITION: c = "POSITION"; break;
+		case SCRIPT_AREA: c = "AREA"; break;
+		case SCRIPT_RADIUS: c = "RADIUS"; break;
+		case SCRIPT_GROUP: c = "GROUP"; break;
+		case SCRIPT_PLAYER:
+		case SCRIPT_RESEARCH:
+		case OBJ_PROJECTILE:
+		case SCRIPT_COUNT: c = "ERROR"; break;
+		}
+		labelInfo.type = WzString::fromUtf8(c);
+		switch (l.triggered)
+		{
+		case -1: labelInfo.trigger = "N/A"; break;
+		case 0: labelInfo.trigger = "Active"; break;
+		default: labelInfo.trigger = "Done"; break;
+		}
+		labelInfo.owner = (l.player == ALL_PLAYERS) ? WzString("ALL") : WzString::number(l.player);
+		labelInfo.subscriber = (l.subscriber == ALL_PLAYERS) ? WzString("ALL") : WzString::number(l.subscriber);
+		labelInfo.scope = scope;
+		results.push_back(std::move(labelInfo));
+	};
+	for (const auto &it : globalLabels)
+	{
+		addLabelInfo(it.first, it.second, WzString("global"));
+	}
+	for (const auto &bucket : ownedLabels)
+	{
+		WzString scope = WzString::fromUtf8(bucket.first->scriptName());
+		for (const auto &it : bucket.second)
+		{
+			addLabelInfo(it.first, it.second, scope);
+		}
+	}
+	return results;
+}
+
+void clearMarks()
+{
+	for (int y = 0; y < gameWorld.map.height; y++)
+	{
+		for (int x = 0; x < gameWorld.map.width; x++) // clear old marks
+		{
+			MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+			psTile->tileInfoBits &= ~BITS_MARKED;
+		}
+	}
+}
+
+void scripting_engine::markAllLabels(bool only_active)
+{
+	auto markBucket = [&](const LABELMAP& bucket)
+	{
+		for (const auto &it : bucket)
+		{
+			if (!only_active || it.second.triggered <= 0)
+			{
+				showLabel(it.first, false, false);
+			}
+		}
+	};
+	markBucket(globalLabels);
+	for (const auto &bucket : ownedLabels)
+	{
+		markBucket(bucket.second);
+	}
+}
+
+#include "display3d.h"
+
+void scripting_engine::showLabel(const std::string &key, bool clear_old, bool jump_to)
+{
+	// Search all scopes (global, then any owned bucket) for the label by name
+	const LABEL *pLabel = nullptr;
+	auto globalIt = globalLabels.find(key);
+	if (globalIt != globalLabels.end())
+	{
+		pLabel = &globalIt->second;
+	}
+	else
+	{
+		for (const auto &bucket : ownedLabels)
+		{
+			auto ownedIt = bucket.second.find(key);
+			if (ownedIt != bucket.second.end())
+			{
+				pLabel = &ownedIt->second;
+				break;
+			}
+		}
+	}
+	if (pLabel == nullptr)
+	{
+		debug(LOG_ERROR, "label %s not found", key.c_str());
+		return;
+	}
+	const LABEL &l = *pLabel;
+	if (clear_old)
+	{
+		clearMarks();
+	}
+	if (l.type == SCRIPT_AREA || l.type == SCRIPT_POSITION)
+	{
+		if (jump_to)
+		{
+			setViewPos(map_coord(l.p1.x), map_coord(l.p1.y), false); // move camera position
+		}
+		int maxx = map_coord(l.p2.x);
+		int maxy = map_coord(l.p2.y);
+		if (l.type == SCRIPT_POSITION)
+		{
+			maxx = MIN(gameWorld.map.width, maxx + 1);
+			maxy = MIN(gameWorld.map.height, maxy + 1);
+		}
+		for (int x = map_coord(l.p1.x); x < maxx; x++) // make new ones
+		{
+			for (int y = map_coord(l.p1.y); y < maxy; y++)
+			{
+				MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+				psTile->tileInfoBits |= BITS_MARKED;
+			}
+		}
+	}
+	else if (l.type == SCRIPT_RADIUS)
+	{
+		if (jump_to)
+		{
+			setViewPos(map_coord(l.p1.x), map_coord(l.p1.y), false); // move camera position
+		}
+		for (int x = MAX(map_coord(l.p1.x - l.p2.x), 0); x < MIN(map_coord(l.p1.x + l.p2.x), gameWorld.map.width); x++)
+		{
+			for (int y = MAX(map_coord(l.p1.y - l.p2.x), 0); y < MIN(map_coord(l.p1.y + l.p2.x), gameWorld.map.height); y++) // l.p2.x is radius, not a bug
+			{
+				if (iHypot(map_coord(l.p1) - Vector2i(x, y)) < map_coord(l.p2.x))
+				{
+					MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+					psTile->tileInfoBits |= BITS_MARKED;
+				}
+			}
+		}
+	}
+	else if (l.type == OBJ_DROID || l.type == OBJ_FEATURE || l.type == OBJ_STRUCTURE)
+	{
+		BASE_OBJECT *psObj = IdToObject((OBJECT_TYPE)l.type, l.id, l.player);
+		if (psObj)
+		{
+			if (jump_to)
+			{
+				setViewPos(map_coord(psObj->pos.x), map_coord(psObj->pos.y), false); // move camera position
+			}
+			MAPTILE *psTile = mapTile(gameWorld.map, map_coord(psObj->pos.x), map_coord(psObj->pos.y));
+			psTile->tileInfoBits |= BITS_MARKED;
+		}
+	}
+	else if (l.type == SCRIPT_GROUP)
+	{
+		bool cameraMoved = false;
+		for (ENGINEMAP::iterator i = groups.begin(); i != groups.end(); ++i)
+		{
+			const GROUPMAP *pGroupMap = i->second;
+			for (auto iter = pGroupMap->map().cbegin(); iter != pGroupMap->map().cend(); ++iter)
+			{
+				if (iter->second == l.id)
+				{
+					const BASE_OBJECT *psObj = iter->first;
+					if (!cameraMoved && jump_to)
+					{
+						setViewPos(map_coord(psObj->pos.x), map_coord(psObj->pos.y), false); // move camera position
+						cameraMoved = true;
+					}
+					MAPTILE *psTile = mapTile(gameWorld.map, map_coord(psObj->pos.x), map_coord(psObj->pos.y));
+					psTile->tileInfoBits |= BITS_MARKED;
+				}
+			}
+		}
+	}
+}
+
+// The bool return value is true when an object callback needs to be called.
+// The int return value holds group id when a group callback needs to be called, 0 otherwise.
+std::pair<bool, int> scripting_engine::seenLabelCheck(wzapi::scripting_instance *instance, const BASE_OBJECT *seen, const BASE_OBJECT *viewer)
+{
+	GROUPMAP *psMap = getGroupMap(instance);
+	ASSERT_OR_RETURN(std::make_pair(false, 0), psMap != nullptr, "Non-existent groupmap for engine");
+	auto seenObjIt = psMap->map().find(seen);
+	int groupId = (seenObjIt != psMap->map().end()) ? seenObjIt->second : 0;
+	bool foundObj = false, foundGroup = false;
+	// Only union(this instance's own, global) labels - never another instance's owned labels
+	forEachScopedLabel(instance, [&](const std::string& /*name*/, LABEL& l) -> bool
+	{
+		if (l.triggered != 0 || !(l.subscriber == ALL_PLAYERS || l.subscriber == viewer->player))
+		{
+			return true; // not a candidate - keep enumerating
+		}
+
+		// Don't let a seen game object ID which matches a group label ID to prematurely
+		// trigger a group label.
+		if (l.type != SCRIPT_GROUP && l.id == seen->id)
+		{
+			l.triggered = viewer->id; // record who made the discovery
+			foundObj = true;
+		}
+		else if (l.type == SCRIPT_GROUP && l.id == groupId)
+		{
+			l.triggered = viewer->id; // record who made the discovery
+			foundGroup = true;
+		}
+		return true; // check every visible label
+	});
+	if (foundObj || foundGroup)
+	{
+		jsDebugUpdateLabels();
+	}
+	return std::make_pair(foundObj, foundGroup ? groupId : 0);
+}
+
+bool scripting_engine::areaLabelCheck(DROID *psDroid)
+{
+	int x = psDroid->pos.x;
+	int y = psDroid->pos.y;
+	bool activated = false;
+	// Trip any untriggered area/radius label the droid has entered
+	// - A global (map-authored) label fires eventArea to every instance (triggerEventArea)
+	// - An owned label fires only to its owner
+	std::vector<std::pair<std::string, wzapi::scripting_instance*>> triggeredLabels;
+	auto checkBucket = [&](LABELMAP& bucket, wzapi::scripting_instance* owner)
+	{
+		for (auto& it : bucket)
+		{
+			LABEL& l = it.second;
+			if (l.triggered == 0 && (l.subscriber == ALL_PLAYERS || l.subscriber == psDroid->player)
+			    && ((l.type == SCRIPT_AREA && l.p1.x < x && l.p1.y < y && l.p2.x > x && l.p2.y > y)
+			        || (l.type == SCRIPT_RADIUS && iHypot(l.p1 - psDroid->pos.xy()) < l.p2.x)))
+			{
+				// We're inside an untriggered area
+				activated = true;
+				l.triggered = psDroid->id;
+				triggeredLabels.emplace_back(it.first, owner);
+			}
+		}
+	};
+	checkBucket(globalLabels, nullptr);
+	// Iterate owners in `scripts` order (deterministic across clients)
+	for (auto* instance : scripts)
+	{
+		auto bucketIt = ownedLabels.find(instance);
+		if (bucketIt != ownedLabels.end())
+		{
+			checkBucket(bucketIt->second, instance);
+		}
+	}
+	for (const auto& triggered : triggeredLabels)
+	{
+		if (triggered.second)
+		{
+			triggered.second->handle_eventArea(triggered.first, psDroid); // owned label - only its creating instance
+		}
+		else
+		{
+			triggerEventArea(triggered.first, psDroid); // global/map label - all instances
+		}
+	}
+	if (activated)
+	{
+		jsDebugUpdateLabels();
+	}
+	return activated;
+}
+
+// ----------------------------------------------------------------------------------------
+// Label scoping helpers
+//
+// Resolve own-first, then global
+// (ownedLabels is not yet populated, so these currently reduce to the global bucket - i.e. identical to the previous single-map behavior)
+
+LABEL* scripting_engine::findScopedLabel(wzapi::scripting_instance *instance, const std::string &name)
+{
+	if (instance)
+	{
+		auto bucketIt = ownedLabels.find(instance);
+		if (bucketIt != ownedLabels.end())
+		{
+			auto labelIt = bucketIt->second.find(name);
+			if (labelIt != bucketIt->second.end())
+			{
+				return &labelIt->second;
+			}
+		}
+	}
+	auto globalIt = globalLabels.find(name);
+	if (globalIt != globalLabels.end())
+	{
+		return &globalIt->second;
+	}
+	return nullptr;
+}
+
+size_t scripting_engine::eraseScopedLabel(wzapi::scripting_instance *instance, const std::string &name)
+{
+	if (instance)
+	{
+		auto bucketIt = ownedLabels.find(instance);
+		if (bucketIt != ownedLabels.end())
+		{
+			size_t erased = bucketIt->second.erase(name);
+			if (erased > 0)
+			{
+				return erased;
+			}
+		}
+	}
+	return globalLabels.erase(name);
+}
+
+scripting_engine::LABELMAP& scripting_engine::labelCreationBucket(wzapi::scripting_instance *instance)
+{
+	// A script-created label is owned by its creating instance
+	// (No instance context - which should not happen for addLabel - falls back to the global bucket)
+	if (instance)
+	{
+		return ownedLabels[instance];
+	}
+	return globalLabels;
+}
+
+void scripting_engine::forEachScopedLabel(wzapi::scripting_instance *instance, const std::function<bool(const std::string&, LABEL&)>& fn)
+{
+	LABELMAP *ownBucket = nullptr;
+	if (instance)
+	{
+		auto bucketIt = ownedLabels.find(instance);
+		if (bucketIt != ownedLabels.end())
+		{
+			ownBucket = &bucketIt->second;
+		}
+	}
+	if (ownBucket)
+	{
+		for (auto &it : *ownBucket)
+		{
+			if (!fn(it.first, it.second))
+			{
+				return; // fn requested early stop
+			}
+		}
+	}
+	for (auto &it : globalLabels)
+	{
+		// own-shadows-global: skip a global label whose name the instance overrides with its own
+		if (ownBucket && ownBucket->count(it.first) > 0)
+		{
+			continue;
+		}
+		if (!fn(it.first, it.second))
+		{
+			return; // fn requested early stop
+		}
+	}
+}
+
+// ----------------------------------------------------------------------------------------
+// Group system
+//
+
+scripting_engine::GROUPMAP* scripting_engine::getGroupMap(wzapi::scripting_instance *instance)
+{
+	auto groupIt = groups.find(instance);
+	GROUPMAP *psMap = (groupIt != groups.end()) ? groupIt->second : nullptr;
+	return psMap;
+}
+
+void scripting_engine::removeFromGroup(wzapi::scripting_instance *instance, GROUPMAP *psMap, const BASE_OBJECT *psObj)
+{
+	auto result = psMap->removeObjectFromGroup(psObj);
+	if (result.has_value())
+	{
+		int groupId = result.value();
+		const int newGroupSize = psMap->groupSize(groupId);
+		instance->updateGroupSizes(groupId, newGroupSize);
+		triggerEventGroupLoss(psObj, groupId, newGroupSize, instance);
+	}
+}
+
+void scripting_engine::groupRemoveObject(const BASE_OBJECT *psObj)
+{
+	for (ENGINEMAP::iterator i = groups.begin(); i != groups.end(); ++i)
+	{
+		removeFromGroup(i->first, i->second, psObj);
+	}
+}
+
+bool scripting_engine::groupAddObject(const BASE_OBJECT *psObj, int groupId, wzapi::scripting_instance *instance)
+{
+	ASSERT_OR_RETURN(false, psObj && instance, "Bad parameter");
+	GROUPMAP *psMap = getGroupMap(instance);
+	removeFromGroup(instance, psMap, psObj);
+	psMap->insertObjectIntoGroup(psObj, groupId);
+	instance->updateGroupSizes(groupId, psMap->groupSize(groupId));
+	return true; // inserted
+}
+
+bool scripting_engine::loadGroup(wzapi::scripting_instance *instance, int groupId, int objId)
+{
+	BASE_OBJECT *psObj = IdToPointer(objId, ANYPLAYER);
+	ASSERT_OR_RETURN(false, psObj, "Non-existent object %d in group %d in savegame", objId, groupId);
+	return groupAddObject(psObj, groupId, instance);
+}
+
+bool scripting_engine::saveGroups(nlohmann::ordered_json &result, wzapi::scripting_instance *instance)
+{
+	// Save group info as a list of group memberships for each droid
+	GROUPMAP *psMap = getGroupMap(instance);
+	ASSERT_OR_RETURN(false, psMap, "Non-existent groupmap for engine");
+	result["lastNewGroupId"] = psMap->getLastNewGroupId();
+	// m_map is keyed by BASE_OBJECT* and iterates in hash-of-pointer order, which is not stable across a
+	// save/restore (objects re-allocate at new addresses). Collect the per-droid group lists keyed by
+	// object id (std::map, sorted) so the serialized key order is deterministic and round-trips; group
+	// membership semantics are unaffected by the key order.
+	std::map<UDWORD, std::vector<WzString>> byId;
+	for (auto i = psMap->map().begin(); i != psMap->map().end(); ++i)
+	{
+		const BASE_OBJECT *psObj = i->first;
+		ASSERT(!isDead(psObj), "Wanted to save dead %s to savegame!", objInfo(psObj));
+		byId[psObj->id].push_back(WzString::number(i->second));
+	}
+	for (const auto &kv : byId)
+	{
+		result[WzString::number(kv.first).toUtf8()] = kv.second;
+	}
+	return true;
+}
+
+// ----------------------------------------------------------------------------------------
+// Label system (function defined in qtscript.h header)
+//
+
+bool loadLabels(const char *filename, const std::unordered_map<UDWORD, UDWORD>& fixedMapIdToGeneratedId, std::array<std::unordered_map<UDWORD, UDWORD>, MAX_PLAYER_SLOTS>& moduleToBuilding, bool UserSaveGame)
+{
+	return scripting_engine::instance().loadLabels(filename, fixedMapIdToGeneratedId, moduleToBuilding, UserSaveGame);
+}
+
+bool loadLabels(const nlohmann::json &result, const std::unordered_map<UDWORD, UDWORD>& fixedMapIdToGeneratedId, std::array<std::unordered_map<UDWORD, UDWORD>, MAX_PLAYER_SLOTS>& moduleToBuilding, bool UserSaveGame)
+{
+	return scripting_engine::instance().loadLabels(result, fixedMapIdToGeneratedId, moduleToBuilding, UserSaveGame);
+}
+
+// Load labels from a file - reads the JSON document and delegates to the in-memory loader.
+bool scripting_engine::loadLabels(const char *filename, const std::unordered_map<UDWORD, UDWORD>& fixedMapIdToGeneratedId, std::array<std::unordered_map<UDWORD, UDWORD>, MAX_PLAYER_SLOTS>& moduleToBuilding, bool UserSaveGame)
+{
+	if (!PHYSFS_exists(filename))
+	{
+		debug(LOG_SAVE, "No %s found -- not adding any labels", filename);
+		return false;
+	}
+	WzConfig ini(filename, WzConfig::ReadOnly);
+	return loadLabels(ini.currentJsonValue(), fixedMapIdToGeneratedId, moduleToBuilding, UserSaveGame);
+}
+
+// A label's player/subscriber must be a real player slot or ALL_PLAYERS
+// The upper bound is MAX_PLAYER_SLOTS (see: PLAYER_FEATURE, scavenger player slot)
+static bool isValidLabelPlayer(int v)
+{
+	return v == ALL_PLAYERS || (v >= 0 && v < MAX_PLAYER_SLOTS);
+}
+
+// Loader A: load flat labels.json (map/scenario data or an old v1 savegame) from an in-memory JSON object
+// - The object's keys are section names ("position_<n>" / "area_<n>" / "radius_<n>" / "object_<n>" / "group_<n>")
+// - All labels are global (this format has no ownership)
+// - Object/group ids are remapped via the map-load tables
+bool scripting_engine::loadLabels(const nlohmann::json &result, const std::unordered_map<UDWORD, UDWORD>& fixedMapIdToGeneratedId, std::array<std::unordered_map<UDWORD, UDWORD>, MAX_PLAYER_SLOTS>& moduleToBuilding, bool UserSaveGame)
+{
+	ASSERT_OR_RETURN(false, result.is_object(), "Labels JSON is not an object");
+	globalLabels.clear();
+	ownedLabels.clear();
+	debug(LOG_SAVE, "Loading %zu labels... (fixedMapToGeneratedId.count = %zu)", result.size(), fixedMapIdToGeneratedId.size());
+
+	// matches WzConfig::vector2i: a [x, y] array, defaulting to (0, 0) if missing / malformed
+	auto jsonVector2i = [](const nlohmann::json &section, const char *key) -> Vector2i {
+		Vector2i r(0, 0);
+		auto it = section.find(key);
+		if (it == section.end() || !it->is_array() || it->size() != 2) { return r; }
+		try {
+			r.x = (*it)[0].get<int>();
+			r.y = (*it)[1].get<int>();
+		} catch (const std::exception &) { /* leave as (0, 0) */ }
+		return r;
+	};
+	auto startsWith = [](const std::string &s, const char *prefix) -> bool {
+		return s.rfind(prefix, 0) == 0;
+	};
+
+	// Group labels carry a persisted "id" (new saves). Those that don't (legacy saves / map files) fall back
+	// to a synthetic negative id assigned positionally.
+	// Pre-scan so the fallback counter starts below the most-negative persisted id and can't collide with one.
+	int groupidx = -1;
+	for (auto it = result.begin(); it != result.end(); ++it)
+	{
+		if (!it->is_object() || !startsWith(it.key(), "group")) { continue; }
+		auto idIt = it->find("id");
+		if (idIt != it->end() && idIt->is_number_integer())
+		{
+			groupidx = std::min(groupidx, idIt->get<int>() - 1);
+		}
+	}
+
+	// Iterate section objects (matches WzConfig::childGroups, which only returns object-valued keys)
+	for (auto it = result.begin(); it != result.end(); ++it)
+	{
+		if (!it->is_object())
+		{
+			continue;
+		}
+		const std::string &sectionName = it.key();
+		const nlohmann::json &section = it.value();
+		LABEL p;
+		std::string label = jsonValueOr(section, "label", std::string());
+		if (!isValidLabelPlayer(jsonValueOr(section, "player", ALL_PLAYERS)) || !isValidLabelPlayer(jsonValueOr(section, "subscriber", ALL_PLAYERS)))
+		{
+			debug(LOG_ERROR, "Invalid player/subscriber for label '%s' - skipping", label.c_str());
+			continue;
+		}
+
+		// The flat labels.json format (map/scenario data and old v1 savegames) has no concept of
+		// per-instance ownership - every label is global. (Owned labels are a v2 feature and travel
+		// inside the script state, loaded by loadLabelMap, not here)
+		if (globalLabels.count(label) > 0)
+		{
+			debug(LOG_ERROR, "Duplicate label found: \"%s\"", label.c_str());
+		}
+		else if (startsWith(sectionName, "position"))
+		{
+			p.p1 = jsonVector2i(section, "pos");
+			p.p2 = p.p1;
+			p.type = SCRIPT_POSITION;
+			p.player = ALL_PLAYERS;
+			p.id = -1;
+			p.triggered = jsonValueOr(section, "triggered", -1); // deactivated by default
+			p.subscriber = ALL_PLAYERS;
+			globalLabels[label] = p;
+		}
+		else if (startsWith(sectionName, "area"))
+		{
+			p.p1 = jsonVector2i(section, "pos1");
+			p.p2 = jsonVector2i(section, "pos2");
+			p.type = SCRIPT_AREA;
+			p.player = jsonValueOr(section, "player", ALL_PLAYERS);
+			p.triggered = jsonValueOr(section, "triggered", 0); // activated by default
+			p.id = -1;
+			p.subscriber = jsonValueOr(section, "subscriber", ALL_PLAYERS);
+			globalLabels[label] = p;
+		}
+		else if (startsWith(sectionName, "radius"))
+		{
+			p.p1 = jsonVector2i(section, "pos");
+			p.p2.x = jsonValueOr(section, "radius", 0);
+			p.p2.y = 0; // unused
+			p.type = SCRIPT_RADIUS;
+			p.player = jsonValueOr(section, "player", ALL_PLAYERS);
+			p.triggered = jsonValueOr(section, "triggered", 0); // activated by default
+			p.subscriber = jsonValueOr(section, "subscriber", ALL_PLAYERS);
+			p.id = -1;
+			globalLabels[label] = p;
+		}
+		else if (startsWith(sectionName, "object"))
+		{
+			auto id = jsonValueOr(section, "id", 0);
+			ASSERT(id > 0, "Unexpected id %d for object label", id);
+			auto itr = fixedMapIdToGeneratedId.find(static_cast<uint32_t>(id));
+			if (itr != fixedMapIdToGeneratedId.end())
+			{
+				// replace fixed hard-coded map-load id with its new generated (synchronized) id
+				// note: must come *before* the moduleToBuilding call below
+				debug(LOG_MAP, "replaced fixed map id %d with %d", id, itr->second);
+				id = itr->second;
+			}
+			const auto player = jsonValueOr(section, "player", 0);
+			if (player < 0)
+			{
+				debug(LOG_ERROR, "Invalid player %d for object label '%s' - skipping", player, label.c_str());
+				continue;
+			}
+			const auto it_modulemap = moduleToBuilding[player].find(id);
+			if (it_modulemap != moduleToBuilding[player].end())
+			{
+				// replace moduleId with its building id
+				debug(LOG_MAP, "replaced with %i;%i", id, it_modulemap->second);
+				id = it_modulemap->second;
+			}
+			p.id = id;
+			p.type = jsonValueOr(section, "type", 0);
+			p.player = player;
+			p.triggered = jsonValueOr(section, "triggered", -1); // deactivated by default
+			p.subscriber = jsonValueOr(section, "subscriber", ALL_PLAYERS);
+			auto checkFoundObject = IdToObject((OBJECT_TYPE)p.type, p.id, p.player);
+			if (!UserSaveGame)
+			{
+				ASSERT(checkFoundObject != nullptr, "Failed to find object that label references: %s", label.c_str());
+			}
+			else if (checkFoundObject == nullptr)
+			{
+				debug(LOG_SAVEGAME, "Failed to find object that label references (probably destroyed before save): %s", label.c_str());
+			}
+			globalLabels[label] = p;
+		}
+		else if (startsWith(sectionName, "group"))
+		{
+			// Use the persisted id if present (so it matches the saved group memberships),
+			// otherwise fall back to a synthetic negative id (legacy saves / map files)
+			auto idIt = section.find("id");
+			if (idIt != section.end() && idIt->is_number_integer())
+			{
+				p.id = idIt->get<int>();
+			}
+			else
+			{
+				p.id = groupidx--;
+			}
+			p.type = SCRIPT_GROUP;
+			p.player = jsonValueOr(section, "player", 0);
+			// 'members' is a map-load seed consumed by prepareLabels()
+			// - For savegame loads prepareLabels does not run and the live membership is restored
+			//   from the saved groups, so the seed is dead data - skip it (keeping savegame
+			//   group-label idlist empty) to handle the case of v1 saves that still wrote it
+			auto membersIt = section.find("members");
+			if (!UserSaveGame && membersIt != section.end() && membersIt->is_array())
+			{
+				for (const auto &j : *membersIt)
+				{
+					int id = 0;
+					if (j.is_string()) { id = WzString::fromUtf8(j.get<std::string>()).toInt(); }
+					else if (j.is_number_integer()) { id = j.get<int>(); }
+					ASSERT(id > 0, "Unexpected id %d for group member", id);
+					auto itr = fixedMapIdToGeneratedId.find(static_cast<uint32_t>(id));
+					if (itr != fixedMapIdToGeneratedId.end())
+					{
+						// replace fixed hard-coded map-load id with its new generated (synchronized) id
+						debug(LOG_NEVER, "replaced fixed map id %d with %d", id, itr->second);
+						id = itr->second;
+					}
+					BASE_OBJECT *psObj = IdToPointer(id, p.player);
+					ASSERT(psObj, "Unit %d belonging to player %d not found from label %s",
+					       id, p.player, sectionName.c_str());
+					p.idlist.push_back(id);
+				}
+			}
+			p.triggered = jsonValueOr(section, "triggered", -1); // deactivated by default
+			p.subscriber = jsonValueOr(section, "subscriber", ALL_PLAYERS);
+			globalLabels[label] = p;
+		}
+		else
+		{
+			debug(LOG_ERROR, "Misnamed group in labels (section: %s)", sectionName.c_str());
+		}
+	}
+	return true;
+}
+
+// Loader for the script-state v2 embedded label format: a JSON array of label objects, each
+// self-described by a "type" field
+//
+// Loaded into a single, caller-chosen bucket (does *not* clear it), so it can be called once
+// per bucket (top-level globals, then each instance's owned labels)
+//
+// Unlike loadLabels (Loader A, for map/scenario + old v1 labels.json) there is deliberately:
+// - no map->id remapping (a v2 save stores already-synchronized runtime ids)
+// Object/group ids are resolved as-is, tolerating an object destroyed before save
+// (v2 labels only ever come from savegames)
+bool scripting_engine::loadLabelMap(const nlohmann::ordered_json &labelArray, LABELMAP &target)
+{
+	ASSERT_OR_RETURN(false, labelArray.is_array(), "v2 labels is not an array");
+
+	auto jsonVector2i = [](const nlohmann::ordered_json &entry, const char *key) -> Vector2i {
+		Vector2i r(0, 0);
+		auto it = entry.find(key);
+		if (it == entry.end() || !it->is_array() || it->size() != 2) { return r; }
+		try {
+			r.x = (*it)[0].get<int>();
+			r.y = (*it)[1].get<int>();
+		} catch (const std::exception &) { /* leave as (0, 0) */ }
+		return r;
+	};
+	for (const auto& entry : labelArray)
+	{
+		if (!entry.is_object()) { continue; }
+		LABEL p;
+		std::string label = jsonValueOr(entry, "label", std::string());
+		std::string type = jsonValueOr(entry, "type", std::string());
+
+		// Sanity-check player/subscriber up-front (Absent keys default to ALL_PLAYERS, which is valid)
+		int entryPlayer = jsonValueOr(entry, "player", ALL_PLAYERS);
+		int entrySubscriber = jsonValueOr(entry, "subscriber", ALL_PLAYERS);
+		if (!isValidLabelPlayer(entryPlayer) || !isValidLabelPlayer(entrySubscriber))
+		{
+			debug(LOG_ERROR, "Invalid player/subscriber (%d/%d) for label '%s' - skipping", entryPlayer, entrySubscriber, label.c_str());
+			continue;
+		}
+
+		if (target.count(label) > 0)
+		{
+			debug(LOG_ERROR, "Duplicate label found: %s", label.c_str());
+		}
+		else if (type == "position")
+		{
+			p.p1 = jsonVector2i(entry, "pos");
+			p.p2 = p.p1;
+			p.type = SCRIPT_POSITION;
+			p.player = ALL_PLAYERS;
+			p.id = -1;
+			p.triggered = jsonValueOr(entry, "triggered", -1); // deactivated by default
+			p.subscriber = ALL_PLAYERS;
+			target[label] = p;
+		}
+		else if (type == "area")
+		{
+			p.p1 = jsonVector2i(entry, "pos1");
+			p.p2 = jsonVector2i(entry, "pos2");
+			p.type = SCRIPT_AREA;
+			p.player = entryPlayer;
+			p.triggered = jsonValueOr(entry, "triggered", 0); // activated by default
+			p.id = -1;
+			p.subscriber = entrySubscriber;
+			target[label] = p;
+		}
+		else if (type == "radius")
+		{
+			p.p1 = jsonVector2i(entry, "pos");
+			p.p2.x = jsonValueOr(entry, "radius", 0);
+			p.p2.y = 0; // unused
+			p.type = SCRIPT_RADIUS;
+			p.player = entryPlayer;
+			p.triggered = jsonValueOr(entry, "triggered", 0); // activated by default
+			p.subscriber = entrySubscriber;
+			p.id = -1;
+			target[label] = p;
+		}
+		else if (type == "object")
+		{
+			int objectType = jsonValueOr(entry, "objectType", -1); // the OBJECT_TYPE
+			if (objectType < 0 || objectType >= OBJ_NUM_TYPES)
+			{
+				debug(LOG_ERROR, "Invalid objectType %d for object label '%s' - skipping", objectType, label.c_str());
+				continue;
+			}
+			auto id = jsonValueOr(entry, "id", 0);
+			ASSERT(id > 0, "Unexpected id %d for object label", id);
+			p.id = id; // already a runtime id - no map remapping for savegame labels
+			p.type = objectType;
+			p.player = entryPlayer;
+			p.triggered = jsonValueOr(entry, "triggered", -1); // deactivated by default
+			p.subscriber = ALL_PLAYERS; // object labels do not carry a subscriber
+			if (IdToObject((OBJECT_TYPE)p.type, p.id, p.player) == nullptr)
+			{
+				debug(LOG_SAVEGAME, "Failed to find object that label references (probably destroyed before save): %s", label.c_str());
+			}
+			target[label] = p;
+		}
+		else if (type == "group")
+		{
+			// v2 always persists the group id (writeLabelMap), so the label matches the saved group memberships
+			auto idIt = entry.find("id");
+			ASSERT(idIt != entry.end() && idIt->is_number_integer(), "Group label '%s' missing persisted id", label.c_str());
+			p.id = (idIt != entry.end() && idIt->is_number_integer()) ? idIt->get<int>() : 0;
+			p.type = SCRIPT_GROUP;
+			p.player = entryPlayer;
+			// NOTE: No members to read - a group label's idlist is only a map-load seed for prepareLabels
+			// (which does not run for savegames), and the live membership is restored from the saved groups
+			p.triggered = jsonValueOr(entry, "triggered", -1); // deactivated by default
+			p.subscriber = entrySubscriber;
+			target[label] = p;
+		}
+		else
+		{
+			debug(LOG_ERROR, "Unknown label type '%s' (label: %s)", type.c_str(), label.c_str());
+		}
+	}
+	return true;
+}
+
+// Serialize one bucket of labels into a JSON array (one object per label), each self-described by a
+// "type" field ("position" / "area" / "radius" / "group" / "object").
+// Ownership is conveyed by which bucket is serialized and where the caller places the array in the
+// v2 script state (top-level "labels" for globals, an instance's "labels" for its owned labels)
+bool scripting_engine::writeLabelMap(const LABELMAP& labels, nlohmann::ordered_json& result)
+{
+	for (const auto& it : labels)
+	{
+		const std::string& key = it.first;
+		const LABEL& l = it.second;
+		nlohmann::ordered_json entry = nlohmann::ordered_json::object();
+		entry["label"] = key;
+		if (l.type == SCRIPT_POSITION)
+		{
+			entry["type"] = "position";
+			entry["pos"] = nlohmann::json::array({ l.p1.x, l.p1.y });
+			entry["triggered"] = l.triggered;
+		}
+		else if (l.type == SCRIPT_AREA)
+		{
+			entry["type"] = "area";
+			entry["pos1"] = nlohmann::json::array({ l.p1.x, l.p1.y });
+			entry["pos2"] = nlohmann::json::array({ l.p2.x, l.p2.y });
+			entry["player"] = l.player;
+			entry["triggered"] = l.triggered;
+			entry["subscriber"] = l.subscriber;
+		}
+		else if (l.type == SCRIPT_RADIUS)
+		{
+			entry["type"] = "radius";
+			entry["pos"] = nlohmann::json::array({ l.p1.x, l.p1.y });
+			entry["radius"] = l.p2.x;
+			entry["player"] = l.player;
+			entry["triggered"] = l.triggered;
+			entry["subscriber"] = l.subscriber;
+		}
+		else if (l.type == SCRIPT_GROUP)
+		{
+			entry["type"] = "group";
+			entry["id"] = l.id; // Persist the group id so it round-trips
+			entry["player"] = l.player;
+			entry["triggered"] = l.triggered;
+			entry["subscriber"] = l.subscriber;
+			// No members:
+			// 1. a group label's idlist is only a map-load seed, consumed (cleared) by prepareLabels
+			// 2. the live membership is persisted separately (saveGroups)
+			// So it must be empty here - assert to catch any future change that leaves stale seed data on a label
+			ASSERT(l.idlist.empty(), "Group label '%s' has %zu stale idlist member(s) at save time (expected prepareLabels to have consumed them)", key.c_str(), l.idlist.size());
+		}
+		else
+		{
+			// Object label: l.type is the OBJECT_TYPE (< OBJ_NUM_TYPES), stored as "objectType"
+			entry["type"] = "object";
+			entry["objectType"] = l.type;
+			entry["id"] = l.id;
+			entry["player"] = l.player;
+			entry["triggered"] = l.triggered;
+		}
+		result.push_back(std::move(entry));
+	}
+	return true;
+}
+
+//
+
+#if defined(SCRIPT_ASSERT)
+#undef SCRIPT_ASSERT
+#endif
+#define SCRIPT_ASSERT(retval, execution_context, expr, ...) \
+	do { bool _wzeval = (expr); \
+		if (!_wzeval) { debug(LOG_ERROR, __VA_ARGS__); \
+			context.throwError(#expr, __LINE__, __FUNCTION__); \
+			return retval; } } while (0)
+
+#if defined(SCRIPT_ASSERT_PLAYER)
+#undef SCRIPT_ASSERT_PLAYER
+#endif
+#define SCRIPT_ASSERT_PLAYER(retval, _context, _player) \
+	SCRIPT_ASSERT(retval, _context, _player >= 0 && _player < MAX_PLAYERS, "Invalid player index %d", _player);
+
+//-- ## resetLabel(labelName[, playerFilter])
+//--
+//-- Reset the trigger on an label. Next time a unit enters the area, it will trigger
+//-- an area event. Next time an object or a group is seen, it will trigger a seen event.
+//-- Optionally add a filter on it in the second parameter, which can
+//-- be a specific player to watch for, or ```ALL_PLAYERS``` by default.
+//-- This is a fast operation of O(log n) algorithmic complexity. (3.2+ only)
+//--
+//-- ## resetArea(labelName[, playerFilter])
+//--
+//-- Reset the trigger on an area. Next time a unit enters the area, it will trigger
+//-- an area event. Optionally add a filter on it in the second parameter, which can
+//-- be a specific player to watch for, or ```ALL_PLAYERS``` by default.
+//-- This is a fast operation of O(log n) algorithmic complexity. DEPRECATED - use resetLabel instead. (3.2+ only)
+//--
+wzapi::no_return_value scripting_engine::resetLabel(WZAPI_PARAMS(std::string labelName, optional<int> playerFilter))
+{
+	// own-first, then global (so a script can still reset map/global labels - campaign relies on this)
+	LABEL *label = scripting_engine::instance().findScopedLabel(context.currentInstance(), labelName);
+	SCRIPT_ASSERT({}, context, label != nullptr, "Label %s not found", labelName.c_str());
+	SCRIPT_ASSERT({}, context, isValidLabelPlayer(playerFilter.value_or(ALL_PLAYERS)), "Invalid player filter %d", playerFilter.value_or(ALL_PLAYERS));
+	label->triggered = 0; // make active again
+	label->subscriber = playerFilter.value_or(ALL_PLAYERS);
+	return {};
+}
+
+//-- ## enumLabels([filterLabelType])
+//--
+//-- Returns a string list of labels that exist for this map. The optional filter
+//-- parameter can be used to only return labels of one specific type. (3.2+ only)
+//--
+std::vector<std::string> scripting_engine::enumLabels(WZAPI_PARAMS(optional<int> filterLabelType))
+{
+	// Enumerate union(the caller's own, global) labels (own-shadows-global handled by forEachScopedLabel)
+	optional<SCRIPT_TYPE> filter = filterLabelType.has_value() ? optional<SCRIPT_TYPE>((SCRIPT_TYPE)filterLabelType.value()) : nullopt;
+	std::vector<std::string> matches;
+	scripting_engine::instance().forEachScopedLabel(context.currentInstance(), [&](const std::string& name, LABEL& label) -> bool
+	{
+		if (!filter.has_value() || label.type == filter.value())
+		{
+			matches.push_back(name);
+		}
+		return true; // collect every visible label
+	});
+	return matches;
+}
+
+generic_script_object::generic_script_object()
+: p1(Vector2i(0,0))
+, p2(Vector2i(0,0))
+, id(-1)
+, player(-1)
+, type(-1)
+{ }
+
+generic_script_object generic_script_object::Null()
+{
+	return generic_script_object();
+}
+
+generic_script_object generic_script_object::fromRadius(int x, int y, int radius)
+{
+	generic_script_object result;
+	result.type = SCRIPT_RADIUS;
+	result.p1.x = x;
+	result.p1.y = y;
+	result.p2.x = radius;
+	return result;
+}
+
+scr_radius generic_script_object::getRadius() const // if type == SCRIPT_RADIUS, returns the radius
+{
+	ASSERT(isRadius(), "generic_script_object is not a radius; type: %d", type);
+	return scr_radius {p1.x, p1.y, p2.x};
+}
+
+generic_script_object generic_script_object::fromArea(int x, int y, int x2, int y2)
+{
+	generic_script_object result;
+	result.type = SCRIPT_AREA;
+	result.p1.x = x;
+	result.p1.y = y;
+	result.p2.x = x2;
+	result.p2.y = y2;
+	return result;
+}
+
+scr_area generic_script_object::getArea() const // if type == SCRIPT_AREA, returns the area
+{
+	ASSERT(isArea(), "generic_script_object is not an area; type: %d", type);
+	return scr_area {p1.x, p1.y, p2.x, p2.y};
+}
+
+generic_script_object generic_script_object::fromPosition(int x, int y)
+{
+	generic_script_object result;
+	result.type = SCRIPT_POSITION;
+	result.p1.x = x;
+	result.p1.y = y;
+	return result;
+}
+
+scr_position generic_script_object::getPosition() const // if type == SCRIPT_POSITION, returns the position
+{
+	ASSERT(isPosition(), "generic_script_object is not a position; type: %d", type);
+	return scr_position {p1.x, p1.y};
+}
+
+generic_script_object generic_script_object::fromGroup(int groupId)
+{
+	generic_script_object result;
+	result.type = SCRIPT_GROUP;
+	result.id = groupId;
+	return result;
+}
+
+int generic_script_object::getGroupId() const // if type == SCRIPT_GROUP, returns the groupId
+{
+	ASSERT(isGroup(), "generic_script_object is not a group; type: %d", type);
+	return id;
+}
+
+generic_script_object generic_script_object::fromObject(const BASE_OBJECT *psObj)
+{
+	generic_script_object result;
+	if (psObj == nullptr)
+	{
+		return generic_script_object::Null();
+	}
+	result.type = psObj->type;
+	result.id = psObj->id;
+	result.player = psObj->player;
+	return result;
+}
+
+BASE_OBJECT * generic_script_object::getObject() const // if type == OBJ_DROID, OBJ_FEATURE, OBJ_STRUCTURE, returns the game object
+{
+	ASSERT(isObject(), "generic_script_object is not an object; type: %d", type);
+	return IdToObject((OBJECT_TYPE)type, id, player);
+}
+
+LABEL generic_script_object::toNewLabel() const
+{
+	LABEL value;
+	value.type = type;
+	value.id = id;
+	value.player = player;
+	value.subscriber = ALL_PLAYERS;
+	value.p1.x = world_coord(p1.x);
+	value.p1.y = world_coord(p1.y);
+	if (type == SCRIPT_AREA)
+	{
+		value.p2.x = world_coord(p2.x);
+		value.p2.y = world_coord(p2.y);
+	}
+	else if (type == SCRIPT_RADIUS)
+	{
+		value.p2.x = world_coord(p2.x);
+	}
+
+	value.triggered = -1; // default off
+
+	return value;
+}
+
+//-- ## addLabel(object, label[, triggered])
+//--
+//-- Add a label to a game object. If there already is a label by that name, it is overwritten.
+//-- This is a fast operation of O(log n) algorithmic complexity. (3.2+ only)
+//-- Can optionally specify an initial "triggered" value for the label. (3.4+ only)
+//--
+wzapi::no_return_value scripting_engine::addLabel(WZAPI_PARAMS(generic_script_object object, std::string label, optional<int> _triggered))
+{
+	LABEL value = object.toNewLabel();
+
+	if (value.type == OBJ_DROID || value.type == OBJ_STRUCTURE || value.type == OBJ_FEATURE)
+	{
+		BASE_OBJECT *psObj = IdToObject((OBJECT_TYPE)value.type, value.id, value.player);
+		SCRIPT_ASSERT({}, context, psObj, "Object id %d not found belonging to player %d", value.id, value.player);
+	}
+
+	value.triggered = -1; // default off
+	if (_triggered.has_value())
+	{
+		SCRIPT_ASSERT({}, context, value.type != SCRIPT_POSITION, "Cannot assign a trigger to a position");
+		value.triggered = _triggered.value();
+	}
+
+	// Store the label in the creating instance's own bucket (scoped to that script)
+	scripting_engine::instance().labelCreationBucket(context.currentInstance())[label] = value;
+	jsDebugUpdateLabels();
+	return {};
+}
+
+//-- ## removeLabel(label)
+//--
+//-- Remove a label from the game. Returns the number of labels removed, which should normally be
+//-- either 1 (label found) or 0 (label not found). (3.2+ only)
+//--
+int scripting_engine::removeLabel(WZAPI_PARAMS(std::string label))
+{
+	// own-first, then global (so a script can still remove a global/map label if it has no own one)
+	int result = static_cast<int>(scripting_engine::instance().eraseScopedLabel(context.currentInstance(), label));
+	jsDebugUpdateLabels();
+	return result;
+}
+
+//-- ## getLabel(object)
+//--
+//-- Get a label string belonging to a game object. If the object has multiple labels, only the first
+//-- label found will be returned. If the object has no labels, undefined is returned.
+//-- This is a relatively slow operation of O(n) algorithmic complexity. (3.2+ only)
+//--
+optional<std::string> scripting_engine::getLabel(WZAPI_PARAMS(const BASE_OBJECT *psObj))
+{
+	ASSERT_OR_RETURN(nullopt, psObj, "No valid object provided");
+	wzapi::game_object_identifier tmp;
+	tmp.id = psObj->id;
+	tmp.player = psObj->player;
+	tmp.type = psObj->type;
+	return _findMatchingLabel(context.currentInstance(), tmp);
+}
+optional<std::string> scripting_engine::getLabelJS(WZAPI_PARAMS(wzapi::game_object_identifier obj_id))
+{
+	return _findMatchingLabel(context.currentInstance(), obj_id);
+}
+optional<std::string> scripting_engine::_findMatchingLabel(wzapi::scripting_instance *instance, wzapi::game_object_identifier obj_id)
+{
+	// Search union(the caller's own, global) labels (own-first), returning the first matching label name
+	LABEL value;
+	value.id = obj_id.id;
+	value.player = obj_id.player;
+	value.type = obj_id.type;
+	debug(LOG_NEVER, "looking for label %i;%i;%i", obj_id.id, obj_id.player, obj_id.type);
+	std::string label;
+	scripting_engine::instance().forEachScopedLabel(instance, [&](const std::string& name, LABEL& l) -> bool
+	{
+		if (l == value)
+		{
+			label = name; // own labels are visited first, so they take priority
+			return false; // first match found - stop enumerating
+		}
+		return true;
+	});
+
+	optional<std::string> retLabel;
+	if (!label.empty())
+	{
+		retLabel = std::string(label);
+	}
+	return retLabel;
+}
+
+//-- ## getObject(label | x, y | type, player, id)
+//--
+//-- Fetch something denoted by a label, a map position or its object ID. A label refers to an area,
+//-- a position or a **game object** on the map defined using the map editor and stored
+//-- together with the map. In this case, the only argument is a text label. The function
+//-- returns an object that has a type variable defining what it is (in case this is
+//-- unclear). This type will be one of DROID, STRUCTURE, FEATURE, AREA, GROUP or POSITION.
+//-- The AREA has defined 'x', 'y', 'x2', and 'y2', while POSITION has only defined 'x' and 'y'.
+//-- The GROUP type has defined 'type' and 'id' of the group, which can be passed to enumGroup().
+//-- This is a fast operation of O(log n) algorithmic complexity. If the label is not found, an
+//-- undefined value is returned. If whatever object the label should point at no longer exists,
+//-- a null value is returned.
+//--
+//-- You can also fetch a STRUCTURE or FEATURE type game object from a given map position (if any).
+//-- This is a very fast operation of O(1) algorithmic complexity. Droids cannot be fetched in this
+//-- manner, since they do not have a unique placement on map tiles. Finally, you can fetch an object using
+//-- its ID, in which case you need to pass its type, owner and unique object ID. This is an
+//-- operation of O(n) algorithmic complexity. (3.2+ only)
+//--
+generic_script_object scripting_engine::getObject(WZAPI_PARAMS(wzapi::object_request request))
+{
+	if (request.requestType == wzapi::object_request::RequestType::MAPPOS_REQUEST)
+	{
+		auto pos = request.getMapPosition();
+		int x = pos.x;
+		int y = pos.y;
+		SCRIPT_ASSERT({}, context, tileOnMap(gameWorld.map, x, y), "Map position (%d, %d) not on the map!", x, y);
+		const MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+		return generic_script_object::fromObject(psTile->psObject);
+	}
+	else if (request.requestType == wzapi::object_request::RequestType::OBJECTID_REQUEST)
+	{
+		auto type_player_id = request.getObjectIDRequest();
+		OBJECT_TYPE type = std::get<0>(type_player_id);
+		int player = std::get<1>(type_player_id);
+		int id = std::get<2>(type_player_id);
+		if (type != OBJ_FEATURE)
+		{
+			SCRIPT_ASSERT_PLAYER({}, context, player);
+		}
+		return generic_script_object::fromObject(IdToObject(type, id, player));
+	}
+	else if (request.requestType == wzapi::object_request::RequestType::LABEL_REQUEST)
+	{
+		return scripting_engine::instance().getObjectFromLabel(context, request.getLabel());
+	}
+	return {};
+}
+
+generic_script_object scripting_engine::getObjectFromLabel(WZAPI_PARAMS(const std::string& label))
+{
+	// get by label case (own-first, then global)
+	BASE_OBJECT *psObj = nullptr;
+	const LABEL *pLabel = findScopedLabel(context.currentInstance(), label);
+	if (pLabel != nullptr)
+	{
+		const LABEL &p = *pLabel;
+		switch (p.type)
+		{
+		case SCRIPT_RADIUS:
+			return generic_script_object::fromRadius(map_coord(p.p1.x), map_coord(p.p1.y), map_coord(p.p2.x));
+			break;
+		case SCRIPT_AREA:
+			return generic_script_object::fromArea(map_coord(p.p1.x), map_coord(p.p1.y), map_coord(p.p2.x), map_coord(p.p2.y));
+			break;
+		case SCRIPT_POSITION:
+			return generic_script_object::fromPosition(map_coord(p.p1.x), map_coord(p.p1.y));
+			break;
+		case SCRIPT_GROUP:
+			return generic_script_object::fromGroup(p.id);
+			break;
+		case OBJ_DROID:
+		case OBJ_FEATURE:
+		case OBJ_STRUCTURE:
+			psObj = IdToObject((OBJECT_TYPE)p.type, p.id, p.player);
+			if (!psObj)
+			{
+				return generic_script_object::Null();
+			}
+			return generic_script_object::fromObject(psObj);
+		default:
+			SCRIPT_ASSERT({}, context, false, "Bad object label type found for label %s!", label.c_str());
+			break;
+		}
+	}
+	return generic_script_object::Null();
+}
+
+//-- ## enumArea(<x1, y1, x2, y2 | label>[, playerFilter[, seen]])
+//--
+//-- Returns an array of game objects seen within the given area that passes the optional filter
+//-- which can be one of a player index, ```ALL_PLAYERS```, ```ALLIES``` or ```ENEMIES```. By default, filter is
+//-- ```ALL_PLAYERS```. Finally an optional parameter can specify whether only visible objects should be
+//-- returned; by default only visible objects are returned. The label can either be actual
+//-- positions or a label to an AREA. Calling this function is much faster than iterating over all
+//-- game objects using other enum functions. (3.2+ only)
+//--
+std::vector<const BASE_OBJECT *> scripting_engine::enumAreaByLabel(WZAPI_PARAMS(std::string label, optional<int> _playerFilter, optional<bool> _seen))
+{
+	const LABEL *pLabel = instance().findScopedLabel(context.currentInstance(), label); // own-first, then global
+	SCRIPT_ASSERT({}, context, pLabel != nullptr, "Label %s not found", label.c_str());
+	const LABEL &p = *pLabel;
+	SCRIPT_ASSERT({}, context, p.type == SCRIPT_AREA, "Wrong label type for %s", label.c_str());
+	int x1 = p.p1.x;
+	int y1 = p.p1.y;
+	int x2 = p.p2.x;
+	int y2 = p.p2.y;
+	return _enumAreaWorldCoords(context, x1, y1, x2, y2, _playerFilter, _seen);
+}
+
+typedef std::vector<BASE_OBJECT *> GridList;
+#include "mapgrid.h"
+
+std::vector<const BASE_OBJECT *> scripting_engine::enumArea(WZAPI_PARAMS(scr_area area, optional<int> _playerFilter, optional<bool> _seen))
+{
+	int x1 = world_coord(area.x1);
+	int y1 = world_coord(area.y1);
+	int x2 = world_coord(area.x2);
+	int y2 = world_coord(area.y2);
+	return _enumAreaWorldCoords(context, x1, y1, x2, y2, _playerFilter, _seen);
+}
+
+std::vector<const BASE_OBJECT *> scripting_engine::_enumAreaWorldCoords(WZAPI_PARAMS(int x1, int y1, int x2, int y2, optional<int> _playerFilter, optional<bool> _seen))
+{
+	int player = context.player();
+	int playerFilter = _playerFilter.value_or(ALL_PLAYERS);
+	bool seen = _seen.value_or(true);
+
+	std::vector<const BASE_OBJECT *> list;
+	for (BASE_OBJECT *psObj : gridStartIterateArea(x1, y1, x2, y2))
+	{
+		if ((!seen || (player >= 0 && player < MAX_PLAYERS && psObj->visible[player])) && !psObj->died)
+		{
+			if ((playerFilter >= 0 && psObj->player == playerFilter) || playerFilter == ALL_PLAYERS
+			    || (playerFilter == ALLIES && psObj->type != OBJ_FEATURE && aiCheckAlliancesInRange(psObj->player, player))
+			    || (playerFilter == ENEMIES && psObj->type != OBJ_FEATURE && !aiCheckAlliancesInRange(psObj->player, player)))
+			{
+				list.push_back(psObj);
+			}
+		}
+	}
+	return list;
+}
+
+std::vector<const BASE_OBJECT *> scripting_engine::enumAreaJS(WZAPI_PARAMS(scripting_engine::area_by_values_or_area_label_lookup area_lookup, optional<int> playerFilter, optional<bool> seen))
+{
+	if (area_lookup.isLabel())
+	{
+		auto optLabel = area_lookup.label();
+		ASSERT(optLabel.has_value(), "optional label is null");
+		return enumAreaByLabel(context, optLabel.value(), playerFilter, seen);
+	}
+	else
+	{
+		auto optArea = area_lookup.area();
+		ASSERT(optArea.has_value(), "optional area is null");
+		return enumArea(context, optArea.value(), playerFilter, seen);
+	}
+}
+
+//-- ## enumGroup(groupId)
+//--
+//-- Return an array containing all the members of a given group.
+//--
+std::vector<const BASE_OBJECT *> scripting_engine::enumGroup(WZAPI_PARAMS(int groupId))
+{
+	std::vector<const BASE_OBJECT *> matches;
+	GROUPMAP *psMap = instance().getGroupMap(context.currentInstance());
+
+	if (psMap != nullptr)
+	{
+		matches = psMap->getGroupObjects(groupId);
+	}
+	return matches;
+}
+
+//-- ## newGroup()
+//--
+//-- Allocate a new group. Returns its numerical ID. Deprecated since 3.2 - you should now
+//-- use your own number scheme for groups.
+//--
+int scripting_engine::newGroup(WZAPI_NO_PARAMS)
+{
+	GROUPMAP *psMap = instance().getGroupMap(context.currentInstance());
+	int i = psMap->newGroupID();
+	// NOTE: group zero is reserved
+	SCRIPT_ASSERT(1, context, i != 0, "Group 0 is reserved - error in WZ code");
+	return i;
+}
+
+//-- ## groupAddArea(groupId, x1, y1, x2, y2)
+//--
+//-- Add any droids inside the given area to the given group. (3.2+ only)
+//--
+wzapi::no_return_value scripting_engine::groupAddArea(WZAPI_PARAMS(int groupId, int _x1, int _y1, int _x2, int _y2))
+{
+	int player = context.player();
+	int x1 = world_coord(_x1);
+	int y1 = world_coord(_y1);
+	int x2 = world_coord(_x2);
+	int y2 = world_coord(_y2);
+
+	if (player < 0 || player >= MAX_PLAYERS)
+	{
+		return {};
+	}
+	for (DROID *psDroid : gameWorld.objects.droids[player])
+	{
+		if (psDroid->pos.x >= x1 && psDroid->pos.x <= x2 && psDroid->pos.y >= y1 && psDroid->pos.y <= y2)
+		{
+			scripting_engine::instance().groupAddObject(psDroid, groupId, context.currentInstance());
+		}
+	}
+	return {};
+}
+
+//-- ## groupAddDroid(groupId, droid)
+//--
+//-- Add given droid to given group. Deprecated since 3.2 - use groupAdd() instead.
+//--
+wzapi::no_return_value scripting_engine::groupAddDroid(WZAPI_PARAMS(int groupId, const DROID *psDroid))
+{
+	SCRIPT_ASSERT({}, context, psDroid, "No valid droid provided");
+	scripting_engine::instance().groupAddObject(psDroid, groupId, context.currentInstance());
+	return {};
+}
+
+//-- ## groupAdd(groupId, object)
+//--
+//-- Add given game object to the given group.
+//--
+wzapi::no_return_value scripting_engine::groupAdd(WZAPI_PARAMS(int groupId, const BASE_OBJECT *psObj))
+{
+	SCRIPT_ASSERT({}, context, psObj, "No valid object provided");
+	scripting_engine::instance().groupAddObject(psObj, groupId, context.currentInstance());
+	return {};
+}
+
+//-- ## groupSize(groupId)
+//--
+//-- Return the number of droids currently in the given group. Note that you can use groupSizes[] instead.
+//--
+int scripting_engine::groupSize(WZAPI_PARAMS(int groupId))
+{
+	auto groupMap = instance().getGroupMap(context.currentInstance());
+	ASSERT_OR_RETURN(0, groupMap, "Failed to obtain groupMap");
+	return groupMap->groupSize(groupId);
+}
+
+// ----------------------------------------------------------------------------------------
+// Register functions with scripting system
+
+bool scripting_engine::unregisterFunctions(wzapi::scripting_instance *instance)
+{
+	int num = 0;
+	auto it = groups.find(instance);
+	if (it != groups.end())
+	{
+		GROUPMAP *psMap = groups.at(instance);
+		groups.erase(it);
+		delete psMap;
+		num = 1;
+	}
+	ASSERT(num == 1, "Number of engines removed from group map is %d!", num);
+	// TODO: erase only this instance's owned bucket - clear globalLabels on the last teardown
+	// For now this preserves the existing blanket clear (ownedLabels is empty anyway, currently)
+	globalLabels.clear();
+	ownedLabels.erase(instance);
+	return true;
+}
+
+// Call this just before launching game; we can't do everything in registerFunctions()
+// since all game state may not be fully loaded by then
+void scripting_engine::prepareLabels()
+{
+	// Load the group-label seed data into every scripting context, with the same negative group id
+	//
+	// Only map-authored (global) group labels exist at this point - owned labels are created later
+	// via runtime addLabel - so iterating globalLabels is the full set (unchanged behavior)
+	//
+	// idlist is a one-time seed: once its members are materialized into the per-instance group maps
+	// (which saveGroups persists), it is consumed (cleared). It would otherwise go stale (it never
+	// tracks units added/removed during play) and be redundantly re-serialized by writeLabelMap.
+	for (LABELMAP::iterator i = globalLabels.begin(); i != globalLabels.end(); ++i)
+	{
+		LABEL &l = i->second;
+		if (l.type != SCRIPT_GROUP)
+		{
+			continue;
+		}
+		for (ENGINEMAP::iterator iter = groups.begin(); iter != groups.end(); ++iter)
+		{
+			wzapi::scripting_instance *instance = iter->first;
+			for (std::vector<int>::const_iterator j = l.idlist.begin(); j != l.idlist.end(); j++)
+			{
+				int id = (*j);
+				BASE_OBJECT *psObj = IdToPointer(id, l.player);
+				ASSERT(psObj, "Unit %d belonging to player %d not found", id, l.player);
+				if (psObj)
+				{
+					groupAddObject(psObj, l.id, instance);
+				}
+			}
+		}
+		l.idlist.clear(); // consume the seed - the live membership now lives in the group maps
+	}
+	jsDebugUpdateLabels();
+}
+
+wzapi::no_return_value scripting_engine::hackMarkTiles_ByLabel(WZAPI_PARAMS(const std::string& label))
+{
+	const LABEL *pLabel = findScopedLabel(context.currentInstance(), label); // own-first, then global
+	SCRIPT_ASSERT({}, context, pLabel != nullptr, "Label %s not found", label.c_str());
+
+	const LABEL &l = *pLabel;
+	if (l.type == SCRIPT_AREA)
+	{
+		for (int x = map_coord(l.p1.x); x < map_coord(l.p2.x); x++)
+		{
+			for (int y = map_coord(l.p1.y); y < map_coord(l.p2.y); y++)
+			{
+				MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+				psTile->tileInfoBits |= BITS_MARKED;
+			}
+		}
+	}
+	else if (l.type == SCRIPT_RADIUS)
+	{
+		for (int x = map_coord(l.p1.x - l.p2.x); x < map_coord(l.p1.x + l.p2.x); x++)
+		{
+			for (int y = map_coord(l.p1.y - l.p2.x); y < map_coord(l.p1.y + l.p2.x); y++)
+			{
+				if (x >= -1 && x < gameWorld.map.width + 1 && y >= -1 && y < gameWorld.map.width + 1 && iHypot(map_coord(l.p1) - Vector2i(x, y)) < map_coord(l.p2.x))
+				{
+					MAPTILE *psTile = mapTile(gameWorld.map, x, y);
+					psTile->tileInfoBits |= BITS_MARKED;
+				}
+			}
+		}
+	}
+
+	return {};
+}
+
+void scripting_engine::logFunctionPerformance(wzapi::scripting_instance *instance, const std::string &function, int ticks)
+{
+	MONITOR *monitor = monitors.at(instance); // pick right one for this instance
+	MONITOR_BIN m;
+	MONITOR::iterator it = monitor->find(function);
+	if (it != monitor->end())
+	{
+		m = it->second;
+	}
+	if (ticks > MAX_US)
+	{
+		debug(LOG_SCRIPT, "%s took %dus at time %d", function.c_str(), ticks, wzGetTicks());
+		m.overMaxTimeCalls++;
+	}
+	else if (ticks > HALF_MAX_US)
+	{
+		m.overHalfMaxTimeCalls++;
+	}
+	m.calls++;
+	if (ticks > m.worst)
+	{
+		m.worst = ticks;
+		m.worstGameTime = gameTime;
+	}
+	m.time += ticks;
+	(*monitor)[function] = m;
+}
+
+// MARK: - DebugInterface
+
+std::unordered_map<wzapi::scripting_instance *, nlohmann::json> scripting_engine::DebugInterface::debug_GetGlobalsSnapshot() const
+{
+	return scripting_engine::instance().debug_GetGlobalsSnapshot();
+}
+std::vector<scripting_engine::timerNodeSnapshot> scripting_engine::DebugInterface::debug_GetTimersSnapshot() const
+{
+	return scripting_engine::instance().debug_GetTimersSnapshot();
+}
+std::vector<scripting_engine::LabelInfo> scripting_engine::DebugInterface::debug_GetLabelInfo() const
+{
+	return scripting_engine::instance().debug_GetLabelInfo();
+}
+/// Show all labels or all currently active labels
+void scripting_engine::DebugInterface::markAllLabels(bool only_active)
+{
+	return scripting_engine::instance().markAllLabels(only_active);
+}
+/// Mark and show label
+void scripting_engine::DebugInterface::showLabel(const std::string &key, bool clear_old /*= true*/, bool jump_to /*= true*/)
+{
+	return scripting_engine::instance().showLabel(key, clear_old, jump_to);
+}

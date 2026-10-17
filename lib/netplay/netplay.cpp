@@ -1,0 +1,5519 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 1999-2004  Eidos Interactive
+	Copyright (C) 2005-2024  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+/**
+ * @file netplay.c
+ *
+ * Basic netcode.
+ */
+
+#include "lib/framework/frame.h"
+#include "lib/framework/wzapp.h"
+#include "lib/framework/string_ext.h"
+#include "lib/framework/crc.h"
+#include "lib/framework/file.h"
+#include "lib/gamelib/gtime.h"
+#include "lib/exceptionhandler/dumpinfo.h"
+#include "src/console.h"
+#include "src/component.h"		// FIXME: we need to handle this better
+#include "src/modding.h"		// FIXME: we need to handle this better
+#include "src/multilobbycommands.h"
+
+#include <time.h>			// for stats
+#include <physfs.h>
+#include "lib/framework/physfs_ext.h"
+#include <string.h>
+#include <memory>
+#include <thread>
+#include <atomic>
+#include <limits>
+#include <sodium.h>
+#include <chrono>
+
+#include "netplay.h"
+#include "netlog.h"
+#include "netreplay.h"
+#include "lib/netplay/byteorder_funcs_wrapper.h"
+#include "lib/netplay/client_connection.h"
+#include "lib/netplay/listen_socket.h"
+#include "lib/netplay/connection_poll_group.h"
+#include "lib/netplay/connection_provider_registry.h"
+#include "lib/netplay/pending_writes_manager.h"
+#include "lib/netplay/pending_writes_manager_map.h"
+#include "netpermissions.h"
+#include "sync_debug.h"
+#include "port_mapping_manager.h"
+#include "netlobby.h"
+#include "ip_helpers.h"
+
+#include "src/multistat.h"
+#include "src/multijoin.h"
+#include "src/multiint.h"
+#include "src/multiplay.h"
+#include "src/multivote.h"
+#include "src/hci/quickchat.h"
+#include "src/warzoneconfig.h"
+#include "src/version.h"
+#include "src/loadsave.h"
+#include "src/activity.h"
+#include "src/stdinreader.h"
+
+#include <LRUCache11/LRUCache11.hpp>
+#include <tl/expected.hpp>
+
+#if defined (WZ_OS_MAC)
+# include "lib/framework/cocoa_wrapper.h"
+#endif
+
+#ifndef WZ_OS_WIN
+static const int SOCKET_ERROR = -1;
+#else
+# include <WinSock2.h> // SOCKET_ERROR
+#endif
+
+// WARNING !!! This is initialised via configuration.c !!!
+std::string masterserver_name;
+static unsigned int gameserver_port = 0;
+static bool bJoinPrefTryIPv6First = true;
+static bool bDefaultHostFreeChatEnabled = true;
+static bool bEnableTCPNoDelay = true;
+
+// This is for command line argument override
+// Disables port saving and reading from/to config
+bool netGameserverPortOverride = false;
+
+static std::shared_ptr<WzConnectionProvider> activeConnProvider = nullptr;
+
+#define NET_TIMEOUT_DELAY	2500		// we wait this amount of time for socket activity
+constexpr std::chrono::milliseconds NET_READ_TIMEOUT{ 0 };
+/*
+*	=== Using new socket code, this might not hold true any longer ===
+*	NOTE /rant:  If the buffer size isn't big enough, it will invalidate the socket.
+*	Which means that we need to allocate a buffer big enough to handle worst case
+*	situations.
+*	reference: MaxMsgSize in netplay.h  (currently set to 32K)
+*
+*/
+constexpr size_t NET_BUFFER_SIZE = (MaxMsgSize * 8);	// Would be 256K
+
+// ////////////////////////////////////////////////////////////////////////
+// Function prototypes
+static void NETplayerCloseSocket(UDWORD index, bool quietSocketClose);
+static void NETplayerLeaving(UDWORD player, bool quietSocketClose = false);		// Cleanup sockets on player leaving (nicely).
+static void NETplayerDropped(UDWORD player);		// Broadcast NET_PLAYER_DROPPED & cleanup
+static void NETallowJoining();
+static void NETfixPlayerCount();
+static void NETclientHandleHostDisconnected();
+static void NETupdateLobbyGameListing();
+/*
+ * Network globals, these are part of the new network API
+ */
+SYNC_COUNTER sync_counter;		// keeps track on how well we are in sync
+// ////////////////////////////////////////////////////////////////////////
+// Types
+
+struct Statistic
+{
+	size_t sent;
+	size_t received;
+};
+
+struct NETSTATS  // data regarding the last one second or so.
+{
+	Statistic       rawBytes;               // Number of actual bytes, in about 1 sec.
+	Statistic       uncompressedBytes;      // Number of bytes sent, before compression, in about 1 sec.
+	Statistic       packets;                // Number of calls to writeAll, in about 1 sec.
+};
+
+struct NET_PLAYER_DATA
+{
+	uint16_t        size;
+	void           *data;
+	size_t          buffer_size;
+};
+
+#define SERVER_UPDATE_MIN_INTERVAL 7 * GAME_TICKS_PER_SEC
+#define SERVER_UPDATE_MAX_INTERVAL 25 * GAME_TICKS_PER_SEC
+
+class PlayerManagementRecord
+{
+public:
+	void clear()
+	{
+		identitiesMovedToSpectatorsByHost.clear();
+		ipsMovedToSpectatorsByHost.clear();
+	}
+	// player to spectators
+	void movedPlayerToSpectators(const std::string& ipAddress, const EcKey::Key& publicIdentity, bool byHost)
+	{
+		if (!byHost) { return; }
+		ipsMovedToSpectatorsByHost.insert(ipAddress);
+		identitiesMovedToSpectatorsByHost.insert(base64Encode(publicIdentity));
+	}
+	void movedPlayerToSpectators(const PLAYER& player, const EcKey::Key& publicIdentity, bool byHost)
+	{
+		if (!byHost) { return; }
+		ipsMovedToSpectatorsByHost.insert(player.IPtextAddress);
+		identitiesMovedToSpectatorsByHost.insert(base64Encode(publicIdentity));
+	}
+	// spectator to players
+	void movedSpectatorToPlayers(const std::string& ipAddress, const EcKey::Key& publicIdentity, bool byHost)
+	{
+		if (!byHost) { return; }
+		ipsMovedToSpectatorsByHost.erase(ipAddress);
+		identitiesMovedToSpectatorsByHost.erase(base64Encode(publicIdentity));
+	}
+	void movedSpectatorToPlayers(const PLAYER& player, const EcKey::Key& publicIdentity, bool byHost)
+	{
+		if (!byHost) { return; }
+		ipsMovedToSpectatorsByHost.erase(player.IPtextAddress);
+		identitiesMovedToSpectatorsByHost.erase(base64Encode(publicIdentity));
+	}
+	bool hostMovedPlayerToSpectators(const std::string& ipAddress)
+	{
+		return ipsMovedToSpectatorsByHost.count(ipAddress) > 0;
+	}
+	bool hostMovedPlayerToSpectators(const EcKey::Key& publicIdentity)
+	{
+		return identitiesMovedToSpectatorsByHost.count(base64Encode(publicIdentity)) > 0;
+	}
+private:
+	std::unordered_set<std::string> identitiesMovedToSpectatorsByHost;
+	std::unordered_set<std::string> ipsMovedToSpectatorsByHost;
+};
+
+// ////////////////////////////////////////////////////////////////////////
+// Variables
+
+NETPLAY	NetPlay;
+static bool allow_joining = false;
+static bool server_not_there = false;
+static bool lobby_disabled = false;
+static std::string lobby_disabled_info_link_url;
+
+static netlobby::GameDetails gameDetails;
+static netlobby::HostJoinOptions hostJoinOptions;
+static LobbyHostDirectJoinOption lobbyDirectJoinOption = LobbyHostDirectJoinOption::Local;
+
+struct KnownExternalConnInfo
+{
+	std::string host;
+	uint16_t port = 0;
+};
+static KnownExternalConnInfo knownExternalIPv4Info;
+
+static std::vector<WZFile> DownloadingWzFiles;
+
+// update flags
+bool netPlayersUpdated;
+
+// Server-side socket (host-only) which is used to listen for client connections.
+// There's also `rs_socket` held by `LobbyServerConnectionHandler`, which is used to communicate with the lobby server.
+static IListenSocket* server_listen_socket = nullptr;
+
+static IClientConnection* bsocket = nullptr;                  ///< Socket used to talk to the host (clients only). If bsocket != NULL, then client_transient_socket == NULL.
+static optional<std::string> lastHostAddress = nullopt;
+static IClientConnection* connected_bsocket[MAX_CONNECTED_PLAYERS] = { nullptr };  ///< Sockets used to talk to clients (host only).
+// Client-side socket set. Contains of only 1 socket at most: `bsocket` (which is a stable client connection to the host).
+static IConnectionPollGroup* client_socket_set = nullptr;
+// Server-side socket set. Contains up to `MAX_CONNECTED_PLAYERS` sockets:
+// `connected_bsocket[i]` - sockets used to communicate with clients during a game session.
+static IConnectionPollGroup* server_socket_set = nullptr;
+
+/**
+ * Used for connections with clients.
+ */
+#define NET_PING_TMP_PING_CHALLENGE_SIZE 128
+
+struct TmpSocketInfo
+{
+	std::string ip;
+	std::chrono::steady_clock::time_point connectTime;
+	char buffer[10] = {'\0'};
+	size_t usedBuffer = 0;
+	std::vector<uint8_t> connectChallenge;
+	enum class TmpConnectState
+	{
+		None,
+		PendingInitialConnect,
+		PendingLobbyConnectCheckRequest, // used by the lobby server to check connection
+		PendingLobbyConnectCheckResponse, // waiting for the connection check response to be ready to send
+		PendingJoinRequest,
+		PendingLobbyJoinCheckResult,
+		PendingAsyncApproval,
+		ProcessJoin
+	};
+	TmpConnectState connectState;
+
+	netlobby::LobbyServerHostingHandlerProtocol::PendingConnectionCheckResponse pendingConnectCheckResponse;
+
+	struct ReceivedJoinInfo
+	{
+		// Information received from a join request - needed for later stages
+		char name[64] = {'\0'};
+		uint8_t playerType = 0;
+		EcKey identity;
+		std::unique_ptr<SessionKeys> connectionAuthSessionKeys;
+		std::vector<uint8_t> challengeForHost;
+
+		void reset()
+		{
+			name[0] = '\0';
+			playerType = 0;
+			identity.clear();
+			connectionAuthSessionKeys.reset();
+			challengeForHost.clear();
+		}
+	};
+	ReceivedJoinInfo receivedJoinInfo;
+
+	// async join approval
+	std::string uniqueJoinID;
+	optional<AsyncJoinApprovalAction> asyncJoinApprovalResult = nullopt;
+	optional<uint8_t> asyncJoinApprovalExplicitPlayerIdx = nullopt;
+	LOBBY_ERROR_TYPES asyncJoinRejectCode = ERROR_NOERROR;
+	std::string asyncJoinRejectCustomMessage;
+
+	void reset()
+	{
+		ip.clear();
+		connectTime = std::chrono::steady_clock::time_point();
+		memset(buffer, 0, sizeof(buffer));
+		usedBuffer = 0;
+		connectChallenge.clear();
+		connectState = TmpConnectState::None;
+		if (pendingConnectCheckResponse.cancelFlag)
+		{
+			pendingConnectCheckResponse.cancelFlag->store(true);
+		}
+		pendingConnectCheckResponse = {};
+		receivedJoinInfo.reset();
+		uniqueJoinID.clear();
+		asyncJoinApprovalResult = nullopt;
+		asyncJoinApprovalExplicitPlayerIdx = nullopt;
+		asyncJoinRejectCode = ERROR_NOERROR;
+		asyncJoinRejectCustomMessage.clear();
+	}
+};
+
+static IClientConnection* tmp_socket[MAX_TMP_SOCKETS] = { nullptr };  ///< Sockets used to talk to clients which have not yet been assigned a player number (host only).
+static std::array<TmpSocketInfo, MAX_TMP_SOCKETS> tmp_connectState;
+static bool bAsyncJoinApprovalEnabled = false;
+static std::unordered_map<std::string, size_t> tmp_pendingIPs;
+
+struct TmpBadIPInfo
+{
+	std::chrono::steady_clock::time_point expiry;
+	size_t attempts = 0;
+};
+static lru11::Cache<std::string, TmpBadIPInfo> tmp_badIPs(512, 64);
+
+static IConnectionPollGroup* tmp_socket_set = nullptr;
+static int32_t          NetGameFlags[4] = { 0, 0, 0, 0 };
+char iptoconnect[PATH_MAX] = "\0"; // holds IP/hostname from command line
+bool cliConnectAsSpectator = false; // for cli option
+
+static NETSTATS nStats              = {{0, 0}, {0, 0}, {0, 0}};
+static NETSTATS nStatsLastSec       = {{0, 0}, {0, 0}, {0, 0}};
+static NETSTATS nStatsSecondLastSec = {{0, 0}, {0, 0}, {0, 0}};
+static const NETSTATS nZeroStats    = {{0, 0}, {0, 0}, {0, 0}};
+static int nStatsLastUpdateTime = 0;
+
+unsigned NET_PlayerConnectionStatus[CONNECTIONSTATUS_NORMAL][MAX_CONNECTED_PLAYERS];
+std::vector<optional<uint32_t>>	NET_waitingForIndexChangeAckSince = std::vector<optional<uint32_t>>(MAX_CONNECTED_PLAYERS, nullopt);	///< If waiting for the client to acknowledge a player index change, this is the realTime we started waiting
+
+static std::array<bool, MAX_CONNECTED_PLAYERS> NET_playerKicked = {};
+struct KickedConnection
+{
+	IClientConnection* conn;
+	std::chrono::steady_clock::time_point closeAfter;
+};
+static std::vector<KickedConnection> NET_kickedConnections;
+#define KICKED_CONNECTION_CLOSE_DELAY std::chrono::milliseconds(1000)
+
+static std::shared_ptr<netlobby::LobbyServerHostingHandlerProtocol> lobbyHostingHandler;
+static PlayerManagementRecord playerManagementRecord;
+
+PortMappingAsyncRequestHandle ipv4MappingRequest;
+
+// ////////////////////////////////////////////////////////////////////////////
+/************************************************************************************
+ **  NOTE (!)  Increment NETCODE_VERSION_MINOR on each release.
+ **
+ ************************************************************************************
+**/
+static char const *versionString = version_getVersionString();
+
+#include "lib/netplay/netplay_config.h"
+
+const std::vector<WZFile>& NET_getDownloadingWzFiles()
+{
+	return DownloadingWzFiles;
+}
+
+void NET_addDownloadingWZFile(WZFile&& newFile)
+{
+	DownloadingWzFiles.push_back(std::move(newFile));
+}
+
+void NET_clearDownloadingWZFiles()
+{
+	// if we were in a middle of transferring a file, then close the file handle
+	for (auto &file : DownloadingWzFiles)
+	{
+		debug(LOG_NET, "closing aborted file");
+		file.closeFile();
+		ASSERT(!file.filename.empty(), "filename must not be empty");
+		PHYSFS_delete(file.filename.c_str()); 		// delete incomplete (map) file
+	}
+	DownloadingWzFiles.clear();
+}
+
+NETPLAY::NETPLAY()
+{
+	players.resize(MAX_CONNECTED_PLAYERS);
+	scriptSetPlayerDataStrings.resize(MAX_PLAYERS);
+	playerReferences.resize(MAX_CONNECTED_PLAYERS);
+	for (auto i = 0; i < MAX_CONNECTED_PLAYERS; i++)
+	{
+		playerReferences[i] = std::make_shared<PlayerReference>(i);
+	}
+}
+
+bool NETisCorrectVersion(uint32_t game_version_major, uint32_t game_version_minor)
+{
+	return (uint32_t)NETCODE_VERSION_MAJOR == game_version_major && (uint32_t)NETCODE_VERSION_MINOR == game_version_minor;
+}
+
+bool NETisGreaterVersion(uint32_t game_version_major, uint32_t game_version_minor)
+{
+	return (game_version_major > NETCODE_VERSION_MAJOR) || ((game_version_major == NETCODE_VERSION_MAJOR) && (game_version_minor > NETCODE_VERSION_MINOR));
+}
+
+uint32_t NETGetMajorVersion()
+{
+	return NETCODE_VERSION_MAJOR;
+}
+
+uint32_t NETGetMinorVersion()
+{
+	return NETCODE_VERSION_MINOR;
+}
+
+bool NETGameIsLocked()
+{
+	return NetPlay.GamePassworded;
+}
+
+bool NET_getLobbyDisabled()
+{
+	return lobby_disabled;
+}
+
+const std::string& NET_getLobbyDisabledInfoLinkURL()
+{
+	return lobby_disabled_info_link_url;
+}
+
+void NET_setLobbyDisabled(const std::string& infoLinkURL)
+{
+	lobby_disabled = true;
+	lobby_disabled_info_link_url = infoLinkURL;
+}
+
+std::string NET_getCurrentHostedLobbyGameId()
+{
+	return (lobbyHostingHandler) ? lobbyHostingHandler->getCurrentGameId().value_or(std::string()) : std::string();
+}
+
+optional<bool> NET_getHostJoinOptionSupportedByLobby(netlobby::HostJoinOptionType optType)
+{
+	return (lobbyHostingHandler) ? lobbyHostingHandler->isHostJoinOptionSupportedByLobby(optType) : nullopt;
+}
+
+//	Sets if the game is password protected or not
+void NETGameLocked(bool flag)
+{
+	NetPlay.GamePassworded = flag;
+	bool flagChanged = gameDetails.isPrivate != flag;
+	gameDetails.isPrivate = flag;
+	if (allow_joining && NetPlay.isHost && flagChanged)
+	{
+		debug(LOG_NET, "Updating game locked status.");
+		NETupdateLobbyGameListing();
+	}
+	if (flagChanged)
+	{
+		ActivityManager::instance().updateMultiplayGameData(game, ingame, NETGameIsLocked());
+	}
+	NETlogEntry("Password is", SYNC_FLAG, NetPlay.GamePassworded);
+	debug(LOG_NET, "Passworded game is %s", NetPlay.GamePassworded ? "TRUE" : "FALSE");
+}
+
+SpectatorInfo SpectatorInfo::currentNetPlayState()
+{
+	SpectatorInfo latestSpecInfo;
+	for (const auto& slot : NetPlay.players)
+	{
+		if (slot.isSpectator)
+		{
+			latestSpecInfo.totalSpectatorSlots++;
+			if (slot.allocated)
+			{
+				latestSpecInfo.spectatorsJoined++;
+			}
+		}
+	}
+	return latestSpecInfo;
+}
+
+SpectatorInfo NETGameGetSpectatorInfo()
+{
+	return SpectatorInfo::currentNetPlayState();
+}
+
+void NETsetLobbyOptField(const char *Value, const NET_LOBBY_OPT_FIELD Field)
+{
+	switch (Field)
+	{
+		case NET_LOBBY_OPT_FIELD::GNAME:
+			gameDetails.name = Value;
+			break;
+		case NET_LOBBY_OPT_FIELD::MAPNAME:
+			gameDetails.map.name = formatGameName(Value);
+			gameDetails.map.hash = (!game.hash.isZero()) ? game.hash.toString() : "";
+			break;
+		case NET_LOBBY_OPT_FIELD::HOSTNAME:
+			gameDetails.host.name = Value;
+			gameDetails.host.publicIdentity = base64Encode(getMultiStats(realSelectedPlayer).identity.toBytes(EcKey::Public));
+			break;
+		default:
+			debug(LOG_WARNING, "Invalid field specified for NETsetGameOptField()");
+			return;
+	}
+
+	NETupdateLobbyGameListing();
+}
+
+const netlobby::HostJoinOptions& NETgetLobbyHostJoinOptions()
+{
+	return hostJoinOptions;
+}
+
+void NETsetLobbyHostJoinOptions(const netlobby::HostJoinOptions& newOpts)
+{
+	hostJoinOptions = newOpts;
+	NETupdateLobbyGameListing();
+}
+
+LobbyHostDirectJoinOption NETgetLobbyHostDirectJoinOption()
+{
+	return lobbyDirectJoinOption;
+}
+
+void NETsetLobbyHostDirectJoinOption(LobbyHostDirectJoinOption newValue)
+{
+	lobbyDirectJoinOption = newValue;
+}
+
+//	Sets the game password
+void NETsetGamePassword(const char *password)
+{
+	sstrcpy(NetPlay.gamePassword, password);
+	debug(LOG_NET, "Password entered is: [%s]", NetPlay.gamePassword);
+	NETGameLocked(true);
+}
+
+//	Resets the game password
+void NETresetGamePassword()
+{
+	NetPlay.gamePassword[0] = '\0';
+	debug(LOG_NET, "password was reset");
+	NETGameLocked(false);
+}
+
+void NETsetAsyncJoinApprovalRequired(bool enabled)
+{
+	bAsyncJoinApprovalEnabled = enabled;
+	if (bAsyncJoinApprovalEnabled)
+	{
+		debug(LOG_INFO, "Async join approval is required");
+	}
+}
+
+bool NETgetAsyncJoinApprovalRequired()
+{
+	return bAsyncJoinApprovalEnabled;
+}
+
+//	NOTE: *MUST* be called from the main thread!
+bool NETsetAsyncJoinApprovalResult(const std::string& uniqueJoinID, AsyncJoinApprovalAction action, optional<uint8_t> explicitPlayerIdx, LOBBY_ERROR_TYPES rejectedReason, optional<std::string> customRejectionMessage)
+{
+	if (action == AsyncJoinApprovalAction::Reject && rejectedReason == ERROR_NOERROR)
+	{
+		debug(LOG_INFO, "Rejecting join with NOERROR reason changed to ERROR_KICKED");
+		rejectedReason = ERROR_KICKED;
+	}
+	for (auto& tmp_info : tmp_connectState)
+	{
+		if (tmp_info.connectState == TmpSocketInfo::TmpConnectState::PendingAsyncApproval
+			&& tmp_info.uniqueJoinID == uniqueJoinID)
+		{
+			// found a match
+			tmp_info.asyncJoinApprovalResult = action;
+			tmp_info.asyncJoinApprovalExplicitPlayerIdx = (action == AsyncJoinApprovalAction::Approve) ? explicitPlayerIdx : nullopt;
+			tmp_info.asyncJoinRejectCode = (action != AsyncJoinApprovalAction::Reject) ? ERROR_NOERROR : rejectedReason;
+			if (customRejectionMessage.has_value())
+			{
+				tmp_info.asyncJoinRejectCustomMessage = customRejectionMessage.value();
+			}
+			return true;
+		}
+	}
+
+	// no matching pending join - may have dropped in the interim, etc
+	return false;
+}
+
+// *********** Socket with buffer that read NETMSGs ******************
+
+static size_t NET_fillBuffer(IClientConnection** pSocket, IConnectionPollGroup* pSocketSet, uint8_t *bufstart, int bufsize)
+{
+	IClientConnection* socket = *pSocket;
+
+	if (!socket->readReady())
+	{
+		return 0;
+	}
+
+	size_t rawBytes;
+	const auto readResult = socket->readNoInt(bufstart, bufsize, &rawBytes);
+
+	if (readResult.has_value())
+	{
+		const auto size = readResult.value();
+
+		nStats.rawBytes.received          += rawBytes;
+		nStats.uncompressedBytes.received += static_cast<size_t>(size);
+		nStats.packets.received           += 1;
+
+		return size;
+	}
+	else
+	{
+		if (readResult.error() == std::errc::timed_out || readResult.error() == std::errc::connection_reset)
+		{
+			debug(LOG_NET, "Connection closed from the other side");
+			NETlogEntry("Connection closed from the other side..", SYNC_FLAG, selectedPlayer);
+		}
+		else
+		{
+			const auto readErrMsg = readResult.error().message();
+			debug(LOG_NET, "%s socket %p is now invalid", readErrMsg.c_str(), static_cast<void*>(socket));
+		}
+
+		// an error occurred, or the remote host has closed the connection.
+		if (pSocketSet != nullptr)
+		{
+			pSocketSet->remove(socket);
+		}
+		if (bsocket == socket)
+		{
+			debug(LOG_NET, "Host connection was lost!");
+			NETlogEntry("Host connection was lost!", SYNC_FLAG, selectedPlayer);
+			//Game is pretty much over --should just end everything when HOST dies.
+			NETclientHandleHostDisconnected();
+			bsocket = nullptr;
+			ingame.localJoiningInProgress = false;
+			NETclose();
+			return 0;
+		}
+		socket->close();
+		*pSocket = nullptr;
+	}
+
+	return 0;
+}
+
+static int playersPerTeam()
+{
+	for (int v = game.maxPlayers - 1; v > 1; --v)
+	{
+		if (game.maxPlayers%v == 0)
+		{
+			return v;
+		}
+	}
+	return 1;
+}
+
+/**
+ * Resets network properties of a player to safe defaults. Player slots should always be in this state
+ * before attemtping to assign a connectign player to it.
+ *
+ * Used to reset the player slot in NET_InitPlayer and to reset players slot without modifying ai/team/
+ * position configuration for the players.
+ */
+static void initPlayerNetworkProps(int playerIndex)
+{
+	NetPlay.players[playerIndex].allocated = false;
+	NetPlay.players[playerIndex].autoGame = false;
+	NetPlay.players[playerIndex].heartattacktime = 0;
+	NetPlay.players[playerIndex].heartbeat = false;
+	NetPlay.players[playerIndex].ready = false;
+
+	if (NetPlay.players[playerIndex].wzFiles)
+	{
+		NetPlay.players[playerIndex].wzFiles->clear();
+	}
+	else
+	{
+		ASSERT(false, "PLAYERS.wzFiles is uninitialized??");
+	}
+	NetPlay.players[playerIndex].wzFileUploadCounts.clear();
+	if (playerIndex < MAX_CONNECTED_PLAYERS)
+	{
+		ingame.JoiningInProgress[playerIndex] = false;
+		ingame.PendingDisconnect[playerIndex] = false;
+		ingame.joinTimes[playerIndex].reset();
+		ingame.lastReadyTimes[playerIndex].reset();
+		ingame.lastNotReadyTimes[playerIndex].reset();
+		ingame.secondsNotReady[playerIndex] = 0;
+		ingame.playerLeftGameTime[playerIndex].reset();
+		ingame.hostChatPermissions[playerIndex] = (NetPlay.bComms) ? NETgetDefaultMPHostFreeChatPreference() : true;
+	}
+}
+
+void NET_InitPlayer(uint32_t i, bool initPosition, bool initTeams, bool initSpectator)
+{
+	ASSERT_OR_RETURN(, i < NetPlay.players.size(), "Invalid player_id: (%" PRIu32")",  i);
+
+	initPlayerNetworkProps(i);
+
+	NetPlay.players[i].difficulty = AIDifficulty::DISABLED;
+	if (ingame.localJoiningInProgress)
+	{
+		// only clear name outside of games.
+		clearPlayerName(i);
+	}
+	if (initPosition)
+	{
+		setPlayerColour(i, i);
+		NetPlay.players[i].position = i;
+		NetPlay.players[i].team = initTeams && i < game.maxPlayers? i/playersPerTeam() : i;
+	}
+	if (NetPlay.bComms)
+	{
+		NetPlay.players[i].ai = AI_OPEN;
+	}
+	else
+	{
+		NetPlay.players[i].ai = 0;
+	}
+	NetPlay.players[i].faction = FACTION_NORMAL;
+	if (initSpectator)
+	{
+		NetPlay.players[i].isSpectator = false;
+	}
+	NetPlay.players[i].isAdmin = false;
+}
+
+uint8_t NET_numHumanPlayers(void)
+{
+	uint8_t RetVal = 0;
+	for (uint8_t Inc = 0; Inc < MAX_PLAYERS; ++Inc)
+	{
+		if (NetPlay.players[Inc].allocated && !NetPlay.players[Inc].isSpectator) ++RetVal;
+	}
+
+	return RetVal;
+}
+
+std::vector<uint8_t> NET_getHumanPlayers(void)
+{
+	std::vector<uint8_t> RetVal;
+	RetVal.reserve(MAX_PLAYERS);
+
+	for (uint8_t Inc = 0; Inc < MAX_PLAYERS; ++Inc)
+	{
+		if (NetPlay.players[Inc].allocated && !NetPlay.players[Inc].isSpectator) RetVal.push_back(Inc);
+	}
+
+	return RetVal;
+}
+
+void NET_InitPlayers(bool initTeams, bool initSpectator)
+{
+	for (unsigned i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		NET_InitPlayer(i, true, initTeams, initSpectator);
+		ingame.muteChat[i] = false;
+		playerSpamMuteReset(i);
+		clearPlayerName(i);
+		NETinitQueue(NETnetQueue(i));
+	}
+	resetRecentScoreData();
+	NETinitQueue(NETbroadcastQueue());
+
+	NetPlay.hostPlayer = NET_HOST_ONLY;	// right now, host starts always at index zero
+	NetPlay.playercount = 0;
+	DownloadingWzFiles.clear();
+	NET_waitingForIndexChangeAckSince = std::vector<optional<uint32_t>>(MAX_CONNECTED_PLAYERS, nullopt);
+	NET_playerKicked.fill(false);
+	debug(LOG_NET, "Players initialized");
+}
+
+static void NETSendNPlayerInfoTo(uint32_t *index, uint32_t indexLen, unsigned to)
+{
+	ASSERT_HOST_ONLY(return);
+
+	uint32_t validCount = 0;
+	for (unsigned n = 0; n < indexLen; ++n)
+	{
+		ASSERT(index[n] < MAX_CONNECTED_PLAYERS, "Invalid player index: %u", index[n]);
+		if (index[n] < MAX_CONNECTED_PLAYERS)
+		{
+			++validCount;
+		}
+	}
+
+	auto w = NETbeginEncode(NETnetQueue(to), NET_PLAYER_INFO);
+	NETcount(w, validCount, MAX_CONNECTED_PLAYERS);
+	for (unsigned n = 0; n < indexLen; ++n)
+	{
+		if (index[n] >= MAX_CONNECTED_PLAYERS)
+		{
+			continue;
+		}
+		debug(LOG_NET, "sending player's (%u) info to all players", index[n]);
+		NETlogEntry("Sending player's info to all players", SYNC_FLAG, index[n]);
+		NETuint32_t(w, index[n]);
+		NETbool(w, NetPlay.players[index[n]].allocated);
+		NETbool(w, NetPlay.players[index[n]].heartbeat);
+		NETbool(w, false); // to maintain message format, send false in place of old "kick" variable // FUTURE TODO: Remove
+		if (isBlindPlayerInfoState() // if in blind player info state
+			&& index[n] < MAX_PLAYER_SLOTS) // and an actual player slot (not a spectator slot)
+		{
+			// send a generic player name
+			const char* genericName = getPlayerGenericName(index[n]);
+			NETstring(w, genericName, static_cast<uint16_t>(strlen(genericName) + 1));
+		}
+		else
+		{
+			// send the actual player name
+			NETstring(w, NetPlay.players[index[n]].name, static_cast<uint16_t>(sizeof(NetPlay.players[index[n]].name)));
+		}
+		NETuint32_t(w, NetPlay.players[index[n]].heartattacktime);
+		NETint32_t(w, NetPlay.players[index[n]].colour);
+		NETint32_t(w, NetPlay.players[index[n]].position);
+		NETint32_t(w, NetPlay.players[index[n]].team);
+		NETbool(w, NetPlay.players[index[n]].ready);
+		NETint8_t(w, NetPlay.players[index[n]].ai);
+		NETint8_t(w, static_cast<int8_t>(NetPlay.players[index[n]].difficulty));
+		NETuint8_t(w, static_cast<uint8_t>(NetPlay.players[index[n]].faction));
+		NETbool(w, NetPlay.players[index[n]].isSpectator);
+		NETbool(w, NetPlay.players[index[n]].isAdmin);
+	}
+	NETend(w);
+	ActivityManager::instance().updateMultiplayGameData(game, ingame, NETGameIsLocked());
+}
+
+static void NETSendPlayerInfoTo(uint32_t index, unsigned to)
+{
+	NETSendNPlayerInfoTo(&index, 1, to);
+}
+
+void NETSendAllPlayerInfoTo(unsigned to)
+{
+	static uint32_t indices[MAX_CONNECTED_PLAYERS];
+	for (int i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		indices[i] = i;
+	}
+	ASSERT_OR_RETURN(, NetPlay.isHost == true, "Invalid call for non-host");
+
+	NETSendNPlayerInfoTo(indices, ARRAY_SIZE(indices), to);
+}
+
+void NETBroadcastTwoPlayerInfo(uint32_t index1, uint32_t index2)
+{
+	ASSERT_HOST_ONLY(return);
+	uint32_t indices[2] = {index1, index2};
+	NETSendNPlayerInfoTo(indices, 2, NET_ALL_PLAYERS);
+}
+
+void NETBroadcastPlayerInfo(uint32_t index)
+{
+	if (!NetPlay.isHost)
+	{
+		return;
+	}
+	NETSendPlayerInfoTo(index, NET_ALL_PLAYERS);
+}
+
+// Checks if there are *any* open slots (player *OR* spectator) for an incoming connection
+static bool NET_HasAnyOpenSlots()
+{
+	for (int i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		if (i == scavengerSlot())
+		{
+			// do not offer up the scavenger slot (this really needs to be refactored later - why is this a variable slot index?!?)
+			continue;
+		}
+		if (i == PLAYER_FEATURE)
+		{
+			// do not offer up this "player feature" slot - TODO: maybe remove the need for this slot?
+			continue;
+		}
+		PLAYER const &p = NetPlay.players[i];
+		if (!p.allocated && p.ai == AI_OPEN)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+static inline bool NET_IsSlotOpenForPlayerJoin(int i, bool forceTakeLowestAvailablePlayerNumber = false, optional<bool> asSpectator = false)
+{
+	if (i < 0 || i >= MAX_CONNECTED_PLAYERS)
+	{
+		return false;
+	}
+	if (!forceTakeLowestAvailablePlayerNumber && !asSpectator.value_or(false) && (i >= game.maxPlayers || i >= MAX_PLAYERS || NetPlay.players[i].position >= game.maxPlayers))
+	{
+		// Player slots are only supported where the player index and the player position is <= game.maxPlayers
+		// Skip otherwise
+		return false;
+	}
+	if (i == scavengerSlot())
+	{
+		// do not offer up the scavenger slot (this really needs to be refactored later - why is this a variable slot index?!?)
+		return false;
+	}
+	if (i == PLAYER_FEATURE)
+	{
+		// do not offer up this "player feature" slot - TODO: maybe remove the need for this slot?
+		return false;
+	}
+
+	PLAYER const &p = NetPlay.players[i];
+	if (p.allocated || p.ai != AI_OPEN)
+	{
+		// not an open slot
+		return false;
+	}
+	if (asSpectator.has_value() && asSpectator.value() != p.isSpectator)
+	{
+		return false;
+	}
+	return true;
+}
+
+static optional<uint32_t> NET_FindOpenSlotForPlayer(bool forceTakeLowestAvailablePlayerNumber = false, optional<bool> asSpectator = false)
+{
+	int index = -1;
+	int position = INT_MAX;
+	for (int i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		if (!NET_IsSlotOpenForPlayerJoin(i, forceTakeLowestAvailablePlayerNumber, asSpectator))
+		{
+			continue;
+		}
+		// find the lowest "position" slot that is available (unless forceTakeLowestAvailablePlayerNumber is set, in which case just take the first available)
+		PLAYER const &p = NetPlay.players[i];
+		if (p.position < position)
+		{
+			index = i;
+			position = p.position;
+			if (forceTakeLowestAvailablePlayerNumber)
+			{
+				break;
+			}
+		}
+	}
+
+	if (index == -1)
+	{
+		return nullopt;
+	}
+
+	return static_cast<uint32_t>(index);
+}
+
+static bool NET_CreatePlayerAtIdx(uint32_t index, char const *name)
+{
+	ASSERT_OR_RETURN(false, index < MAX_CONNECTED_PLAYERS, "Invalid player index: %" PRIu32, index);
+	ASSERT_OR_RETURN(false, !NetPlay.players[index].allocated, "Player index (%" PRIu32 ")already allocated!", index);
+
+	char buf[250] = {'\0'};
+
+	ssprintf(buf, "A new player has been created. Player, %s, is set to slot %u", name, index);
+	debug(LOG_NET, "%s", buf);
+	NETlogEntry(buf, SYNC_FLAG, index);
+	NET_InitPlayer(index, false);  // re-init everything
+	NetPlay.players[index].allocated = true;
+	NetPlay.players[index].difficulty = AIDifficulty::HUMAN;
+	NetPlay.players[index].heartbeat = true;
+	setPlayerName(index, name);
+	if (!NetPlay.players[index].isSpectator)
+	{
+		++NetPlay.playercount;
+	}
+	++sync_counter.joins;
+	return true;
+}
+
+static optional<uint32_t> NET_CreatePlayer(char const *name, bool forceTakeLowestAvailablePlayerNumber = false, optional<bool> asSpectator = false)
+{
+	optional<uint32_t> index = NET_FindOpenSlotForPlayer(forceTakeLowestAvailablePlayerNumber, asSpectator);
+	if (!index.has_value())
+	{
+		debug(LOG_INFO, "Could not find place for %s %s", (!asSpectator.value_or(false)) ? "player" : "spectator", name);
+		NETlogEntry((!asSpectator.value_or(false)) ? "Could not find a place for player!" : "Could not find a place for spectator!", SYNC_FLAG, -1);
+		return nullopt;
+	}
+
+	if (!NET_CreatePlayerAtIdx(index.value(), name))
+	{
+		// should not happen
+		return nullopt;
+	}
+	return index;
+}
+
+static void NET_DestroyPlayer(unsigned int index, bool suppressActivityUpdates = false)
+{
+	ASSERT_OR_RETURN(, index < NetPlay.players.size(), "Invalid player_id: (%" PRIu32")",  index);
+	debug(LOG_NET, "Freeing slot %u for a new player", index);
+	NETlogEntry("Freeing slot for a new player.", SYNC_FLAG, index);
+	bool wasAllocated = NetPlay.players[index].allocated;
+	if (NetPlay.players[index].allocated)
+	{
+		NetPlay.players[index].allocated = false;
+		if (!NetPlay.players[index].isSpectator)
+		{
+			NetPlay.playercount--;
+		}
+		gameDetails.players.current = NetPlay.playercount;
+		if (allow_joining && NetPlay.isHost)
+		{
+			// Update player count in the lobby by disconnecting
+			// and reconnecting
+			NETupdateLobbyGameListing();
+		}
+	}
+	NET_InitPlayer(index, false);  // reinitialize
+	if (wasAllocated && !suppressActivityUpdates)
+	{
+		ActivityManager::instance().updateMultiplayGameData(game, ingame, NETGameIsLocked());
+	}
+}
+
+bool NETplayerHasConnection(uint32_t index)
+{
+	ASSERT_HOST_ONLY(return false);
+	ASSERT_OR_RETURN(false, index < MAX_CONNECTED_PLAYERS, "Invalid index: %" PRIu32, index);
+	return connected_bsocket[index] != nullptr;
+}
+
+/**
+ * @note Connection dropped. Handle it gracefully.
+ * \param index
+ */
+static void NETplayerClientsDisconnect(const std::set<uint32_t>& indexes)
+{
+	if (!NetPlay.isHost)
+	{
+		ASSERT(false, "Host only routine detected for client!");
+		return;
+	}
+
+	if (indexes.empty())
+	{
+		return;
+	}
+
+	// 1.) Do a pass just closing the sockets (in case multiple players involved)
+	std::vector<uint32_t> playersActuallyDisconnected;
+	for (auto index : indexes)
+	{
+		if (index >= MAX_CONNECTED_PLAYERS)
+		{
+			ASSERT(index < MAX_CONNECTED_PLAYERS, "Invalid player index: %" PRIu32, index);
+			continue;
+		}
+
+		if (connected_bsocket[index])
+		{
+			debug(LOG_NET, "Player (%u) has left unexpectedly, closing socket %p", index, static_cast<void *>(connected_bsocket[index]));
+
+			NETplayerCloseSocket(index, false);
+			playersActuallyDisconnected.push_back(index);
+		}
+		else
+		{
+			debug(LOG_ERROR, "Player (%u) has left unexpectedly - but socket already closed?", index);
+		}
+	}
+
+	// 2.) Notify other players about which players were disconnected
+	for (auto index : playersActuallyDisconnected)
+	{
+		if (index >= MAX_CONNECTED_PLAYERS)
+		{
+			continue;
+		}
+
+		NETplayerLeaving(index, true);
+
+		NETlogEntry("Player has left unexpectedly.", SYNC_FLAG, index);
+		// Announce to the world. This was really icky, because we may have been calling the send
+		// function recursively. We really ought to have had a send queue, and now we finally do...
+		if (ingame.localJoiningInProgress)  // Only if game hasn't actually started yet.
+		{
+			auto w = NETbeginEncode(NETbroadcastQueue(), NET_PLAYER_DROPPED);
+			NETuint32_t(w, index);
+			NETend(w);
+		}
+	}
+}
+
+static void NETplayerCloseSocket(UDWORD index, bool quietSocketClose)
+{
+	ASSERT_OR_RETURN(, index < MAX_CONNECTED_PLAYERS, "Invalid index: %" PRIu32, index);
+	if (connected_bsocket[index])
+	{
+		debug(LOG_NET, "Player (%u) has left, closing socket %p", index, static_cast<void *>(connected_bsocket[index]));
+		NETlogEntry("Player has left nicely.", SYNC_FLAG, index);
+
+		// Although we can get a error result from DelSocket, it don't really matter here.
+		server_socket_set->remove(connected_bsocket[index]);
+		connected_bsocket[index]->close();
+		connected_bsocket[index] = nullptr;
+	}
+	else
+	{
+		debug(LOG_NET, "Player (%u) has left nicely, socket already closed?", index);
+	}
+
+	NetPlay.players[index].heartbeat = false; // mark client as dead
+}
+
+/**
+ * @note When a player leaves nicely (ie, we got a NET_PLAYER_LEAVING
+ *       message), we clean up the socket that we used.
+ * \param index
+ */
+static void NETplayerLeaving(UDWORD index, bool quietSocketClose)
+{
+	ASSERT_OR_RETURN(, index < MAX_CONNECTED_PLAYERS, "Invalid index: %" PRIu32, index);
+	bool previousPlayersShouldCheckReadyValue = multiplayPlayersShouldCheckReady();
+	NETplayerCloseSocket(index, quietSocketClose);
+	sync_counter.left++;
+	bool wasSpectator = NetPlay.players[index].isSpectator;
+	MultiPlayerLeave(index);		// more cleanup
+	if (ingame.localJoiningInProgress)  // Only if game hasn't actually started yet.
+	{
+		NET_DestroyPlayer(index);       // sets index player's array to false
+		if (!wasSpectator)
+		{
+			resetReadyStatus(false, shouldSkipReadyResetOnPlayerJoinLeaveEvent());		// reset ready status for all players
+		}
+		handlePossiblePlayersShouldCheckReadyChange(previousPlayersShouldCheckReadyValue);
+
+		wz_command_interface_output_room_status_json(true);
+	}
+}
+
+/**
+ * @note When a player's connection is broken we broadcast the NET_PLAYER_DROPPED
+ *       message.
+ * \param index
+ */
+static void NETplayerDropped(UDWORD index)
+{
+	ASSERT_OR_RETURN(, index < NetPlay.players.size(), "Invalid index: %" PRIu32, index);
+	uint32_t id = index;
+
+	if (!NetPlay.isHost)
+	{
+		ASSERT(false, "Host only routine detected for client!");
+		return;
+	}
+
+	bool previousPlayersShouldCheckReadyValue = multiplayPlayersShouldCheckReady();
+
+	sync_counter.drops++;
+	bool wasSpectator = NetPlay.players[index].isSpectator;
+	MultiPlayerLeave(id);			// more cleanup
+	if (ingame.localJoiningInProgress)  // Only if game hasn't actually started yet.
+	{
+		// Send message type specifically for dropped / disconnects
+		auto w = NETbeginEncode(NETbroadcastQueue(), NET_PLAYER_DROPPED);
+		NETuint32_t(w, id);
+		NETend(w);
+		debug(LOG_INFO, "sending NET_PLAYER_DROPPED for player %d", id);
+		NET_DestroyPlayer(id);          // just clears array
+		if (!wasSpectator)
+		{
+			resetReadyStatus(false, shouldSkipReadyResetOnPlayerJoinLeaveEvent());		// reset ready status for all players
+		}
+		handlePossiblePlayersShouldCheckReadyChange(previousPlayersShouldCheckReadyValue);
+
+		wz_command_interface_output_room_status_json(true);
+	}
+
+	NETsetPlayerConnectionStatus(CONNECTIONSTATUS_PLAYER_DROPPED, id);
+}
+
+/**
+ * @note Cleanup for when a player is kicked.
+ * \param index
+ */
+void NETplayerKicked(UDWORD index, bool quiet)
+{
+	ASSERT_OR_RETURN(, index < MAX_CONNECTED_PLAYERS, "NETplayerKicked invalid player_id: (%" PRIu32")", index);
+	ASSERT_OR_RETURN(, !NetPlay.isHost || index != NetPlay.hostPlayer, "Can't kick the host");
+
+	// kicking a player counts as "leaving nicely", since "nicely" in this case
+	// simply means "there wasn't a connection error."
+	debug((!quiet) ? LOG_INFO : LOG_NET, "Player %u was kicked.", index);
+	sync_counter.kicks++;
+	NETlogEntry("Player was kicked.", SYNC_FLAG, index);
+	if (NetPlay.isHost)
+	{
+		NET_playerKicked[index] = true;
+		if (connected_bsocket[index])
+		{
+			server_socket_set->remove(connected_bsocket[index]);
+			NET_kickedConnections.push_back({connected_bsocket[index], std::chrono::steady_clock::now() + KICKED_CONNECTION_CLOSE_DELAY});
+			connected_bsocket[index] = nullptr;
+		}
+	}
+	NETplayerLeaving(index);		// need to close socket for the player that left.
+	NETsetPlayerConnectionStatus(CONNECTIONSTATUS_PLAYER_LEAVING, index);
+}
+
+bool NETplayerWasKicked(uint32_t index)
+{
+	ASSERT_OR_RETURN(false, index < MAX_CONNECTED_PLAYERS, "Invalid index: %" PRIu32, index);
+	return NetPlay.isHost && NET_playerKicked[index];
+}
+
+static void NETcloseKickedConnections(bool closeAll)
+{
+	const auto now = std::chrono::steady_clock::now();
+	auto it = std::remove_if(NET_kickedConnections.begin(), NET_kickedConnections.end(), [&](const KickedConnection& kicked) {
+		if (!closeAll && now < kicked.closeAfter)
+		{
+			return false;
+		}
+		kicked.conn->close();
+		return true;
+	});
+	NET_kickedConnections.erase(it, NET_kickedConnections.end());
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// rename the local player
+bool NETchangePlayerName(UDWORD index, char *newName)
+{
+	if (!NetPlay.bComms)
+	{
+		setPlayerName(0, newName);
+		return true;
+	}
+	debug(LOG_NET, "Requesting a change of player name for pid=%u to %s", index, newName);
+	NETlogEntry("Player wants a name change.", SYNC_FLAG, index);
+	ASSERT_OR_RETURN(false, index < MAX_CONNECTED_PLAYERS, "invalid index: %" PRIu32 "", index);
+
+	setPlayerName(index, newName);
+	if (NetPlay.isHost)
+	{
+		NETSendAllPlayerInfoTo(NET_ALL_PLAYERS);
+	}
+	else
+	{
+		ASSERT_OR_RETURN(false, index <= static_cast<uint32_t>(std::numeric_limits<uint8_t>::max()), "index (%" PRIu32 ") exceeds supported bounds", index);
+		ASSERT_OR_RETURN(false, index == selectedPlayer, "Clients can only change their own name!");
+		uint8_t player = static_cast<uint8_t>(index);
+		WzString newNameStr = NetPlay.players[index].name;
+		auto w = NETbeginEncode(NETnetQueue(NetPlay.hostPlayer), NET_PLAYERNAME_CHANGEREQUEST);
+		NETuint8_t(w, player);
+		NETwzstring(w, newNameStr);
+		NETend(w);
+	}
+
+	return true;
+}
+
+void NETfixDuplicatePlayerNames(optional<uint32_t> changedPlayer)
+{
+	// The host keeps its name, and a player who just joined or changed name gives way to everyone else
+	std::vector<uint32_t> order;
+	order.reserve(MAX_CONNECTED_PLAYERS);
+	if (NetPlay.hostPlayer < MAX_CONNECTED_PLAYERS)
+	{
+		order.push_back(NetPlay.hostPlayer);
+	}
+	for (uint32_t i = 0; i != MAX_CONNECTED_PLAYERS; ++i)
+	{
+		if (i != NetPlay.hostPlayer && i != changedPlayer.value_or(MAX_CONNECTED_PLAYERS))
+		{
+			order.push_back(i);
+		}
+	}
+	if (changedPlayer.value_or(MAX_CONNECTED_PLAYERS) < MAX_CONNECTED_PLAYERS && changedPlayer.value() != NetPlay.hostPlayer)
+	{
+		order.push_back(changedPlayer.value());
+	}
+
+	char name[StringSize];
+	unsigned pass;
+	for (size_t k = 1; k < order.size(); ++k)
+	{
+		const uint32_t i = order[k];
+		sstrcpy(name, NetPlay.players[i].name);
+		if (name[0] == '\0' || !NetPlay.players[i].allocated)
+		{
+			continue;  // Ignore empty names.
+		}
+		for (pass = 0; pass != 101; ++pass)
+		{
+			if (pass != 0)
+			{
+				ssprintf(name, "%s_%X", NetPlay.players[i].name, pass + 1);
+			}
+
+			size_t j;
+			for (j = 0; j != k; ++j)
+			{
+				if (strcmp(name, NetPlay.players[order[j]].name) == 0)
+				{
+					break;  // Duplicate name.
+				}
+			}
+
+			if (j == k)
+			{
+				break;  // Unique name.
+			}
+		}
+		if (pass != 0)
+		{
+			NETchangePlayerName(i, name);
+		}
+	}
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// return one of the four user flags in the current sessiondescription.
+SDWORD NETgetGameFlags(UDWORD flag)
+{
+	if (flag < 1 || flag > 4)
+	{
+		return 0;
+	}
+	else
+	{
+		return NetGameFlags[flag - 1];
+	}
+}
+
+static void NETsendGameFlags()
+{
+	ASSERT_HOST_ONLY(return);
+	debug(LOG_NET, "sending game flags");
+	auto w = NETbeginEncode(NETbroadcastQueue(), NET_GAME_FLAGS);
+	{
+		// Send the amount of game flags we're about to send
+		uint8_t i, count = ARRAY_SIZE(NetGameFlags);
+		NETuint8_t(w, count);
+
+		// Send over all game flags
+		for (i = 0; i < count; ++i)
+		{
+			NETint32_t(w, NetGameFlags[i]);
+		}
+	}
+	NETend(w);
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// Set a game flag
+bool NETsetGameFlags(UDWORD flag, SDWORD value)
+{
+	if (!NetPlay.bComms)
+	{
+		return true;
+	}
+
+	if (flag > 0 && flag < 5)
+	{
+		return (NetGameFlags[flag - 1] = value);
+	}
+
+	NETsendGameFlags();
+
+	return true;
+}
+
+static PortMappingInternetProtocol getPreferredPortMappingProtocol(WzConnectionProvider& connProvider)
+{
+	// We currently support creating only IPV4 port mappings.
+	constexpr auto IPV4_PROTOCOL_KINDS = static_cast<PortMappingInternetProtocolMask>(PortMappingInternetProtocol::TCP_IPV4) | static_cast<PortMappingInternetProtocolMask>(PortMappingInternetProtocol::UDP_IPV4);
+
+	const auto supportedProtocolTypes = connProvider.portMappingProtocolTypes();
+	const PortMappingInternetProtocol res = static_cast<PortMappingInternetProtocol>(supportedProtocolTypes & IPV4_PROTOCOL_KINDS);
+	ASSERT(res == PortMappingInternetProtocol::TCP_IPV4 || res == PortMappingInternetProtocol::UDP_IPV4, "Unexpected port mapping protocol");
+	return res;
+}
+
+void NETaddRedirects()
+{
+	ASSERT_OR_RETURN(, activeConnProvider != nullptr, "No active connection provider");
+	auto& pmm = PortMappingManager::instance();
+	ipv4MappingRequest = pmm.create_port_mapping(gameserver_port, getPreferredPortMappingProtocol(*activeConnProvider));
+	if (!ipv4MappingRequest)
+	{
+		debug(LOG_NET, "Failed to create port mapping!");
+		// Workaround: Delay console message until next main loop iteration, to ensure it gets displayed in the chat box
+		wzAsyncExecOnMainThread([](){
+			std::string msg = _("Failed to create port mapping");
+			msg += "\n";
+			msg += astringf(_("Manually configure your router/firewall to open port %d!"), NETgetGameserverPort());
+			addConsoleMessage(msg.c_str(), DEFAULT_JUSTIFY, NOTIFY_MESSAGE);
+		});
+		return;
+	}
+	debug(LOG_NET, "Port mapping creation is in progress...");
+	// Report the user-visible status once the discovery is finished.
+	pmm.attach_callback(ipv4MappingRequest, [](std::string extIp, uint16_t extPort) // success callback
+	{
+		std::string msg = astringf(_("Port mapping opened external port: %u"), static_cast<unsigned>(extPort));
+		msg += "\n";
+		msg += astringf(_("Your external IP is: %s"), extIp.c_str());
+		addConsoleMessage(msg.c_str(), DEFAULT_JUSTIFY, NOTIFY_MESSAGE);
+	}, [](PortMappingDiscoveryStatus status) // failure callback
+	{
+		std::string msg;
+		if (status == PortMappingDiscoveryStatus::TIMEOUT)
+		{
+			msg = _("Failed to create port mapping (timeout)");
+		}
+		else
+		{
+			msg = _("Failed to create port mapping");
+		}
+		msg += "\n";
+		msg += astringf(_("Manually configure your router/firewall to open port %d!"), NETgetGameserverPort());
+		addConsoleMessage(msg.c_str(), DEFAULT_JUSTIFY, NOTIFY_MESSAGE);
+	});
+}
+
+void NETremRedirects()
+{
+	if (!ipv4MappingRequest)
+	{
+		return;
+	}
+	if (!PortMappingManager::instance().destroy_port_mapping(ipv4MappingRequest))
+	{
+		debug(LOG_ERROR, "Failed to remove IPv4 port mapping for the game. You must manually remove it from your router.");
+		return;
+	}
+	debug(LOG_NET, "Removed port mapping for port %d (IPv4).", gameserver_port);
+	ipv4MappingRequest = nullptr;
+}
+
+void NETinitPortMapping()
+{
+	if (!NetPlay.isPortMappingEnabled)
+	{
+		debug(LOG_INFO, "Automatic port mapping setup disabled by user.");
+		return;
+	}
+	PortMappingManager::instance().init();
+	NETaddRedirects();
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// setup stuff
+int NETinit(ConnectionProviderType pt)
+{
+	debug(LOG_NET, "NETinit");
+	NETlogEntry("NETinit!", SYNC_FLAG, selectedPlayer);
+	NET_InitPlayers(true, true);
+
+	ConnectionProviderRegistry::Instance().Register(pt);
+	auto connProvider = ConnectionProviderRegistry::Instance().Get(pt);
+	ASSERT_OR_RETURN(1, connProvider != nullptr, "Null connectionProvider");
+	connProvider->initialize();
+	PendingWritesManagerMap::instance().get(*connProvider).initialize(*connProvider);
+
+	ASSERT(activeConnProvider == nullptr || activeConnProvider == connProvider,
+		"Active connection provider is already set. Call NETshutdown() first!");
+	activeConnProvider = connProvider;
+
+	debug(LOG_NET, "NETPLAY: Init called, MORNIN'");
+
+	wzAsyncExecOnMainThread([pt]() {
+		const auto strPt = to_string(pt);
+		std::string msg = astringf(_("Using %s network backend."), strPt.c_str());
+		addConsoleMessage(msg.c_str(), DEFAULT_JUSTIFY, NOTIFY_MESSAGE);
+	});
+
+	// NOTE NetPlay.isPortMappingEnabled is already set in configuration.c!
+	NetPlay.bComms = true;
+	NetPlay.GamePassworded = false;
+	NetPlay.isHostAlive = false;
+	NetPlay.gamePassword[0] = '\0';
+	NETstartLogging();
+
+	NetPlay.GamePassworded = false;
+	memset(&sync_counter, 0x0, sizeof(sync_counter));	//clear counters
+
+	return 0;
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// shutdown state related to the active connection
+int NETshutdown()
+{
+	debug(LOG_NET, "NETshutdown");
+	NETlogEntry("NETshutdown", SYNC_FLAG, selectedPlayer);
+	if (NetPlay.bComms && NetPlay.isPortMappingEnabled)
+	{
+		NETremRedirects();
+		PortMappingManager::instance().shutdown();
+	}
+	NETstopLogging();
+	NETpermissionsShutdown();
+	NETdeleteQueue();
+
+	activeConnProvider = nullptr;
+
+	// Reset net usage statistics.
+	nStats = nZeroStats;
+	nStatsLastSec = nZeroStats;
+	nStatsSecondLastSec = nZeroStats;
+
+	return 0;
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// shutdown netplay (to be called at app shutdown only)
+bool netplayShutDown()
+{
+	NETshutdown();
+
+	PendingWritesManagerMap::instance().Shutdown();
+	ConnectionProviderRegistry::Instance().Shutdown();
+	return true;
+}
+
+// ////////////////////////////////////////////////////////////////////////
+//close the open game..
+int NETclose()
+{
+	unsigned int i;
+
+	NEThaltJoining(false);
+
+	debug(LOG_NET, "Terminating sockets.");
+
+	NetPlay.isHost = false;
+	server_not_there = false;
+	allow_joining = false;
+
+	knownExternalIPv4Info = KnownExternalConnInfo();
+
+	NETcloseKickedConnections(true);
+
+	for (i = 0; i < MAX_CONNECTED_PLAYERS; i++)
+	{
+		if (connected_bsocket[i])
+		{
+			debug(LOG_NET, "Closing connected_bsocket[%u], %p", i, static_cast<void *>(connected_bsocket[i]));
+			connected_bsocket[i]->close();
+			connected_bsocket[i] = nullptr;
+		}
+		NET_DestroyPlayer(i, true);
+	}
+
+	if (tmp_socket_set)
+	{
+		debug(LOG_NET, "Freeing tmp_socket_set %p", static_cast<void *>(tmp_socket_set));
+		delete tmp_socket_set;
+		tmp_socket_set = nullptr;
+	}
+
+	for (i = 0; i < MAX_TMP_SOCKETS; i++)
+	{
+		if (tmp_socket[i])
+		{
+			// FIXME: need SocketSet_DelSocket() as well, socket_set or tmp_socket_set?
+			debug(LOG_NET, "Closing tmp_socket[%d] %p", i, static_cast<void *>(tmp_socket[i]));
+			tmp_socket[i]->close();
+			tmp_socket[i] = nullptr;
+		}
+	}
+
+	if (client_socket_set)
+	{
+		if (bsocket)
+		{
+			client_socket_set->remove(bsocket);
+		}
+		debug(LOG_NET, "Freeing socket_set %p", static_cast<void *>(client_socket_set));
+		delete client_socket_set;
+		client_socket_set = nullptr;
+	}
+	else if (server_socket_set)
+	{
+		debug(LOG_NET, "Freeing socket_set %p", static_cast<void*>(server_socket_set));
+		delete server_socket_set;
+		server_socket_set = nullptr;
+	}
+	if (server_listen_socket)
+	{
+		debug(LOG_NET, "Closing server_listen_socket %p", static_cast<void *>(server_listen_socket));
+		delete server_listen_socket;
+		server_listen_socket = nullptr;
+	}
+	if (bsocket)
+	{
+		debug(LOG_NET, "Closing bsocket %p", static_cast<void *>(bsocket));
+		bsocket->close();
+		bsocket = nullptr;
+	}
+
+	playerManagementRecord.clear();
+
+	return 0;
+}
+
+
+// ////////////////////////////////////////////////////////////////////////
+// ////////////////////////////////////////////////////////////////////////
+// Send and Recv functions
+
+// ////////////////////////////////////////////////////////////////////////
+// return bytes of data sent recently.
+size_t NETgetStatistic(NetStatisticType type, bool sent, bool isTotal)
+{
+	size_t Statistic::*statisticType = sent ? &Statistic::sent : &Statistic::received;
+	Statistic NETSTATS::*statsType;
+	switch (type)
+	{
+	case NetStatisticRawBytes:          statsType = &NETSTATS::rawBytes;          break;
+	case NetStatisticUncompressedBytes: statsType = &NETSTATS::uncompressedBytes; break;
+	case NetStatisticPackets:           statsType = &NETSTATS::packets;           break;
+	default: ASSERT(false, " "); return 0;
+	}
+
+	int time = wzGetTicks();
+	if ((unsigned)(time - nStatsLastUpdateTime) >= (unsigned)GAME_TICKS_PER_SEC)
+	{
+		nStatsLastUpdateTime = time;
+		nStatsSecondLastSec = nStatsLastSec;
+		nStatsLastSec = nStats;
+	}
+
+	if (isTotal)
+	{
+		return nStats.*statsType.*statisticType;
+	}
+	return nStatsLastSec.*statsType.*statisticType - nStatsSecondLastSec.*statsType.*statisticType;
+}
+
+static std::set<uint32_t> netSendPendingDisconnectPlayerIndexes;
+
+void NETsendProcessDelayedActions()
+{
+	if (netSendPendingDisconnectPlayerIndexes.empty())
+	{
+		return;
+	}
+
+	// "consume" the netSendPendingDisconnectPlayerIndexes up-front, and do *not* reference it again (as NETplayerClientsDisconnect may lead to calls that mutate it)
+	std::set<uint32_t> pendingDisconnectPlayers = netSendPendingDisconnectPlayerIndexes;
+	netSendPendingDisconnectPlayerIndexes.clear();
+
+	for (auto player : pendingDisconnectPlayers)
+	{
+		if (player >= MAX_CONNECTED_PLAYERS)
+		{
+			ASSERT(player < MAX_CONNECTED_PLAYERS, "Invalid player: %" PRIu32, player);
+			continue;
+		}
+		NETlogEntry("client disconnect?", SYNC_FLAG, player);
+	}
+
+	NETplayerClientsDisconnect(pendingDisconnectPlayers);
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// Send a message to a player, option to guarantee message
+bool NETsend(NETQUEUE queue, NetMessage const& message)
+{
+	uint8_t player = queue.index;
+
+	if (!NetPlay.bComms)
+	{
+		return true;
+	}
+
+	IClientConnection** sockets = connected_bsocket;
+	bool isTmpQueue = false;
+	switch (queue.queueType)
+	{
+	case QUEUE_BROADCAST:
+		ASSERT_OR_RETURN(false, player == NET_ALL_PLAYERS, "Wrong queue index.");
+		break;
+	case QUEUE_NET:
+		ASSERT_OR_RETURN(false, player < MAX_CONNECTED_PLAYERS, "Wrong queue index.");
+		break;
+	case QUEUE_TMP:
+		sockets = tmp_socket;
+		isTmpQueue = true;
+
+		ASSERT_OR_RETURN(false, player < MAX_TMP_SOCKETS && NetPlay.isHost, "Wrong queue index.");
+		break;
+	default:
+		ASSERT_OR_RETURN(false, false, "Wrong queue type.");
+	}
+
+	if (NetPlay.isHost)
+	{
+		int firstPlayer = player == NET_ALL_PLAYERS ? 0                         : player;
+		int lastPlayer  = player == NET_ALL_PLAYERS ? MAX_CONNECTED_PLAYERS - 1 : player;
+		for (player = firstPlayer; player <= lastPlayer; ++player)
+		{
+			// We are the host, send directly to player.
+			if (sockets[player] != nullptr && player != queue.exclude)
+			{
+				const auto& rawData = message.rawData();
+				if (rawData.empty())
+				{
+					debug(LOG_FATAL, "Failed to allocate raw data (message type: %" PRIu8 ", player: %d)", message.type(), player);
+					abort();
+				}
+				uint8_t msgType = message.type();
+				ssize_t rawLen = rawData.size();
+				size_t compressedRawLen;
+				const auto writeResult = sockets[player]->writeAll(rawData.data(), rawLen, &compressedRawLen);
+				const auto res = writeResult.value_or(SOCKET_ERROR);
+
+				if (res == rawLen)
+				{
+					nStats.rawBytes.sent          += compressedRawLen;
+					nStats.uncompressedBytes.sent += rawLen;
+					nStats.packets.sent           += 1;
+				}
+				else if (res == SOCKET_ERROR)
+				{
+					const auto writeErrMsg = writeResult.error().message();
+					// Write error, most likely client disconnect.
+					debug(LOG_ERROR, "Failed to send message (type: %" PRIu8 ", rawLen: %zu, compressedRawLen: %zu) to %" PRIu8 ": %s",
+						msgType, rawLen, compressedRawLen, player, writeErrMsg.c_str());
+					if (!isTmpQueue)
+					{
+						netSendPendingDisconnectPlayerIndexes.insert(player);
+					}
+				}
+			}
+		}
+		return true;
+	}
+	else if (player == NetPlay.hostPlayer)
+	{
+		// We are a client, send directly to player, who happens to be the host.
+		if (bsocket && NetPlay.isHostAlive)
+		{
+			const auto& rawData = message.rawData();
+			ssize_t rawLen = rawData.size();
+			size_t compressedRawLen;
+			const auto writeResult = bsocket->writeAll(rawData.data(), rawLen, &compressedRawLen);
+			const auto res = writeResult.value_or(SOCKET_ERROR);
+
+			if (res == rawLen)
+			{
+				nStats.rawBytes.sent          += compressedRawLen;
+				nStats.uncompressedBytes.sent += rawLen;
+				nStats.packets.sent           += 1;
+			}
+			else if (res == SOCKET_ERROR)
+			{
+				const auto writeErrMsg = writeResult.error().message();
+				// Write error, most likely host disconnect.
+				debug(LOG_ERROR, "Failed to send message: %s", writeErrMsg.c_str());
+				debug(LOG_ERROR, "Host connection was broken, socket %p.", static_cast<void *>(bsocket));
+				NETlogEntry("write error--client disconnect.", SYNC_FLAG, NetPlay.hostPlayer);
+				NETclientHandleHostDisconnected();
+			}
+
+			return res == rawLen;
+		}
+	}
+	else
+	{
+		// We are a client and can't send the data directly, ask the host to send the data to the player.
+		uint8_t sender = selectedPlayer;
+		auto w = NETbeginEncode(NETnetQueue(NetPlay.hostPlayer), NET_SEND_TO_PLAYER);
+		NETuint8_t(w, sender);
+		NETuint8_t(w, player);
+		NETnetMessage(w, message);
+		NETend(w);
+		return true;
+	}
+
+	return false;
+}
+
+static void NETcloseTempSocket(unsigned int i)
+{
+	std::string joinerPublicKeyB64;
+	std::string joinerName;
+
+	ASSERT_OR_RETURN(, i < MAX_TMP_SOCKETS, "Invalid temp socket index: %u", i);
+	if (tmp_socket[i] == nullptr)
+	{
+		tmp_connectState[i].reset();
+		return;
+	}
+
+	if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingAsyncApproval
+		|| tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::ProcessJoin)
+	{
+		// If there's any chance we may have issued an async join approval request, ensure we issue a joinFailed event
+		// WZEVENT: joinFailed: <b64pubkey> <b64name> [spec|play] <reason>
+		const auto& joinRequestInfo = tmp_connectState[i].receivedJoinInfo;
+		joinerPublicKeyB64 = base64Encode(joinRequestInfo.identity.toBytes(EcKey::Public));
+		joinerName = joinRequestInfo.name;
+		std::string joinerNameB64 = base64Encode(std::vector<unsigned char>(joinerName.begin(), joinerName.end()));
+		wz_command_interface_output("WZEVENT: joinFailed: %s %s %s %s\n", joinerPublicKeyB64.c_str(), joinerNameB64.c_str(), (joinRequestInfo.playerType == NET_JOIN_SPECTATOR) ? "spec" : "play", "full");
+	}
+
+	std::string rIP = tmp_socket[i]->textAddress();
+	tmp_socket_set->remove(tmp_socket[i]);
+	tmp_socket[i]->close();
+	tmp_socket[i] = nullptr;
+	tmp_connectState[i].reset();
+	auto it = tmp_pendingIPs.find(rIP);
+	if (it != tmp_pendingIPs.end())
+	{
+		if (it->second > 1)
+		{
+			it->second--;
+		}
+		else
+		{
+			tmp_pendingIPs.erase(it);
+		}
+	}
+	else
+	{
+		debug(LOG_INFO, "Did not find in pending IPs list: (IP: %s, Identity: %s, Name: %s)", rIP.c_str(), joinerPublicKeyB64.c_str(), joinerName.c_str());
+	}
+}
+
+static void NETclientHandleHostDisconnected()
+{
+	ASSERT_OR_RETURN(, !NetPlay.isHost, "Should only be called by clients!");
+	// NOTE: Do *not* close the socket or connection group here, as this is called from both send and receiving functions
+	// And if this was detected on a send, we still might have buffered data to read!
+	ASSERT(NetPlay.hostPlayer < NetPlay.players.size(), "Invalid NetPlay.hostPlayer: %" PRIu32, NetPlay.hostPlayer);
+	NetPlay.players[NetPlay.hostPlayer].heartbeat = false;	// mark host as dead
+	//Game is pretty much over --should just end everything when HOST dies.
+	NetPlay.isHostAlive = false;
+}
+
+void NETflush()
+{
+	if (!NetPlay.bComms)
+	{
+		return;
+	}
+
+	NETflushGameQueues();
+
+	size_t compressedRawLen = 0;
+	if (NetPlay.isHost)
+	{
+		// Preliminary check to see if any player sockets are still valid.
+		std::set<uint32_t> invalidPlayerIndices;
+		for (int player = 0; player < MAX_CONNECTED_PLAYERS; ++player)
+		{
+			if (connected_bsocket[player] != nullptr && !connected_bsocket[player]->isValid())
+			{
+				invalidPlayerIndices.emplace(player);
+			}
+		}
+		// Gracefully handle disconnected players.
+		NETplayerClientsDisconnect(invalidPlayerIndices);
+
+		for (int player = 0; player < MAX_CONNECTED_PLAYERS; ++player)
+		{
+			// We are the host, send directly to player.
+			if (!invalidPlayerIndices.count(player) && connected_bsocket[player] != nullptr)
+			{
+				if (!connected_bsocket[player]->flush(&compressedRawLen).has_value())
+				{
+					invalidPlayerIndices.emplace(player);
+					continue;
+				}
+				nStats.rawBytes.sent += compressedRawLen;
+			}
+		}
+
+		// Once again, if any connected client sockets had problems during flush(), consider them disconnected and handle appropriately.
+		NETplayerClientsDisconnect(invalidPlayerIndices);
+
+		for (int player = 0; player < MAX_TMP_SOCKETS; ++player)
+		{
+			// We are the host, send directly to player.
+			if (tmp_socket[player] != nullptr)
+			{
+				if (!tmp_socket[player]->isValid() || !tmp_socket[player]->flush(&compressedRawLen).has_value())
+				{
+					debug(LOG_NET, "Failed to flush temporary socket for player slot %d", player);
+					NETcloseTempSocket(player);
+					continue;
+				}
+				nStats.rawBytes.sent += compressedRawLen;
+			}
+		}
+	}
+	else
+	{
+		if (bsocket != nullptr && NetPlay.isHostAlive)
+		{
+			if (!bsocket->isValid() || !bsocket->flush(&compressedRawLen).has_value())
+			{
+				debug(LOG_NET, "Failed to flush socket for host. Host probably disconnected.");
+				NETlogEntry("flush error--client disconnect.", SYNC_FLAG, NetPlay.hostPlayer);
+				NETclientHandleHostDisconnected();
+				return;
+			}
+			nStats.rawBytes.sent += compressedRawLen;
+		}
+	}
+}
+
+// Player index swapping
+
+// Warning: This should be used with care, and generally should not be called directly.
+// Use higher-level functions like NETmovePlayerToSpectatorOnlySlot & NETrequestSpectatorToPlay instead.
+static bool swapPlayerIndexes(uint32_t playerIndexA, uint32_t playerIndexB)
+{
+	ASSERT_OR_RETURN(false, ingame.localJoiningInProgress, "Only supported in lobby, before game starts");
+	ASSERT_OR_RETURN(false, playerIndexA < MAX_CONNECTED_PLAYERS, "playerIndexA out of bound: %" PRIu32 "", playerIndexA);
+	ASSERT_OR_RETURN(false, playerIndexB < MAX_CONNECTED_PLAYERS, "playerIndexB out of bound: %" PRIu32 "", playerIndexB);
+	ASSERT_OR_RETURN(false, playerIndexA != NetPlay.hostPlayer && playerIndexA != NetPlay.hostPlayer && playerIndexB != NetPlay.hostPlayer && playerIndexB != NetPlay.hostPlayer, "Can't swap host player index: (index A: %" PRIu32 ", index B: %" PRIu32 ")", playerIndexA, playerIndexB);
+
+	// Send the NET_SWAPPING_PLAYER_INDEX message *first*
+	auto w = NETbeginEncode(NETbroadcastQueue(), NET_PLAYER_SWAP_INDEX);
+	NETuint32_t(w, playerIndexA);
+	NETuint32_t(w, playerIndexB);
+	NETend(w);
+
+	// Then swap the networking stuff for these slots
+	std::swap(connected_bsocket[playerIndexA], connected_bsocket[playerIndexB]);
+	// should be no need to call SocketSet_AddSocket, since should already be in the socket_set
+	NETswapQueues(NETnetQueue(playerIndexA), NETnetQueue(playerIndexB));
+	std::swap(NET_playerKicked[playerIndexA], NET_playerKicked[playerIndexB]);
+
+	// Backup the old NETPLAY PLAYERS data
+	std::array<PLAYER, 2> playersData = {std::move(NetPlay.players[playerIndexA]), std::move(NetPlay.players[playerIndexB])};
+
+	// Instead of calling clearPlayer() which has all kinds of unintended effects,
+	// hmmm...
+	std::array<uint32_t, 2> playerIndexes = {playerIndexA, playerIndexB};
+	for (auto playerIndex : playerIndexes)
+	{
+		// From MultiPlayerLeave()
+		//  From clearPlayer() - this is needed to disconnect PlayerReferences so, for example, old chat messages are still associated with the proper player
+		NetPlay.playerReferences[playerIndex]->disconnect();
+		NetPlay.playerReferences[playerIndex] = std::make_shared<PlayerReference>(playerIndex);
+
+		if (playerIndex < MAX_PLAYERS)
+		{
+			resetLobbyChangePlayerVote(playerIndex);
+		}
+	}
+
+	// Swap the player multistats / identity info
+	swapPlayerMultiStatsLocal(playerIndexA, playerIndexB);
+
+	// Swap the NetPlay PLAYER entries
+	NetPlay.players[playerIndexB] = std::move(playersData[0]);
+	NetPlay.players[playerIndexA] = std::move(playersData[1]);
+	// Just like changePosition(), we should *preserve* the team and "position" from the original index
+	std::swap(NetPlay.players[playerIndexA].position, NetPlay.players[playerIndexB].position);
+	std::swap(NetPlay.players[playerIndexA].team, NetPlay.players[playerIndexB].team);
+	// And also swap spectator flag!
+	std::swap(NetPlay.players[playerIndexA].isSpectator, NetPlay.players[playerIndexB].isSpectator);
+	std::swap(NetPlay.players[playerIndexA].colour, NetPlay.players[playerIndexB].colour); // And the color!
+	// (Essentially all of the above are "slot-associated" more than "player-associated" properties, and so should stay with the slot)
+
+	// Swap certain ingame player-associated entries
+	std::swap(ingame.PingTimes[playerIndexA], ingame.PingTimes[playerIndexB]);
+	std::swap(ingame.LagCounter[playerIndexA], ingame.LagCounter[playerIndexB]);
+	std::swap(ingame.DesyncCounter[playerIndexA], ingame.DesyncCounter[playerIndexB]);
+	std::swap(ingame.VerifiedIdentity[playerIndexA], ingame.VerifiedIdentity[playerIndexB]);
+	std::swap(ingame.JoiningInProgress[playerIndexA], ingame.JoiningInProgress[playerIndexB]);
+	std::swap(ingame.PendingDisconnect[playerIndexA], ingame.PendingDisconnect[playerIndexB]);
+	std::swap(ingame.DataIntegrity[playerIndexA], ingame.DataIntegrity[playerIndexB]);
+	std::swap(ingame.hostChatPermissions[playerIndexA], ingame.hostChatPermissions[playerIndexB]);
+
+	std::swap(ingame.joinTimes[playerIndexA], ingame.joinTimes[playerIndexB]);
+	std::swap(ingame.lastReadyTimes[playerIndexA], ingame.lastReadyTimes[playerIndexB]);
+	std::swap(ingame.lastNotReadyTimes[playerIndexA], ingame.lastNotReadyTimes[playerIndexB]);
+	std::swap(ingame.secondsNotReady[playerIndexA], ingame.secondsNotReady[playerIndexB]);
+	std::swap(ingame.playerLeftGameTime[playerIndexA], ingame.playerLeftGameTime[playerIndexB]);
+
+	std::swap(ingame.lastSentPlayerDataCheck2[playerIndexA], ingame.lastSentPlayerDataCheck2[playerIndexB]);
+	std::swap(ingame.muteChat[playerIndexA], ingame.muteChat[playerIndexB]);
+	playerSpamMuteNotifyIndexSwap(playerIndexA, playerIndexB);
+	invalidMessageLogNotifyIndexSwap(playerIndexA, playerIndexB);
+	lobbyRequestRateLimitsNotifyIndexSwap(playerIndexA, playerIndexB);
+	multiSyncPlayerSwap(playerIndexA, playerIndexB);
+	multiOptionPrefValuesSwap(playerIndexA, playerIndexB);
+	multiClearHostRequestMoveToPlayer(playerIndexA);
+	multiClearHostRequestMoveToPlayer(playerIndexB);
+
+	// Ensure we filter messages appropriately waiting for the client ack *at each new index*
+	if (NetPlay.players[playerIndexA].allocated)
+	{
+		NET_waitingForIndexChangeAckSince.at(playerIndexA) = realTime;
+	}
+	if (NetPlay.players[playerIndexB].allocated)
+	{
+		NET_waitingForIndexChangeAckSince.at(playerIndexB) = realTime;
+	}
+
+	// Fix up any AI players - if they get moved to a spectator slot, get rid of the AI
+	for (auto playerIndex : playerIndexes)
+	{
+		if (!NetPlay.players[playerIndex].allocated
+			&& NetPlay.players[playerIndex].ai >= 0
+			&& (NetPlay.players[playerIndex].isSpectator || playerIndex > MAX_PLAYERS))
+		{
+			// remove the AI
+			ASSERT(playerIndex != PLAYER_FEATURE, "Not expecting to see PLAYER_FEATURE here!");
+			NetPlay.players[playerIndex].difficulty =  AIDifficulty::DISABLED;
+			NetPlay.players[playerIndex].ai = AI_OPEN;
+			clearPlayerName(playerIndex);
+		}
+		if (!NetPlay.players[playerIndex].allocated && NetPlay.players[playerIndex].ai < 0)
+		{
+			ASSERT(NetPlay.players[playerIndex].difficulty == AIDifficulty::DISABLED, "Unexpected difficulty (%d) for player (%d)", (int)NetPlay.players[playerIndex].difficulty, playerIndex);
+		}
+
+		if (NetPlay.players[playerIndex].allocated
+			&& playerIndex < MAX_PLAYERS)
+		{
+			if (NetPlay.players[playerIndex].difficulty != AIDifficulty::HUMAN)
+			{
+				debug(LOG_INFO, "Fixing up human difficulty for player: %d", playerIndex);
+				NetPlay.players[playerIndex].difficulty = AIDifficulty::HUMAN;
+			}
+		}
+	}
+
+	if (!NetPlay.players[playerIndexA].allocated || !NetPlay.players[playerIndexB].allocated)
+	{
+		// Recalculate NetPlay.playercount (etc), as it may have changed
+		NETfixPlayerCount();
+	}
+
+	return true;
+}
+
+static inline bool _NET_isSpectatorOnlySlot(UDWORD playerIdx)
+{
+	ASSERT_OR_RETURN(false, playerIdx < NetPlay.players.size(), "Invalid playerIdx: %" PRIu32 "", playerIdx);
+	return playerIdx >= MAX_PLAYERS || NetPlay.players[playerIdx].position >= game.maxPlayers;
+}
+
+static optional<uint32_t> _NET_findSpectatorSlotToOpen()
+{
+	for (uint32_t i = MAX_PLAYER_SLOTS; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		if (!_NET_isSpectatorOnlySlot(i))
+		{
+			continue;
+		}
+		if (NetPlay.players[i].allocated || NetPlay.players[i].isSpectator)
+		{
+			continue;
+		}
+		if (game.mapHasScavengers && NetPlay.players[i].position == scavengerSlot())
+		{
+			continue; // skip it
+		}
+		if (i == PLAYER_FEATURE)
+		{
+			continue; // skip it
+		}
+
+		return i;
+	}
+	return nullopt;
+}
+
+bool NETcanOpenNewSpectatorSlot()
+{
+	return _NET_findSpectatorSlotToOpen().has_value();
+}
+
+static optional<uint32_t> _NET_openNewSpectatorSlot_internal(bool broadcastUpdate)
+{
+	ASSERT_HOST_ONLY(return false);
+	auto newSpecSlot = _NET_findSpectatorSlotToOpen();
+	if (!newSpecSlot.has_value())
+	{
+		return nullopt;
+	}
+
+	uint32_t i = newSpecSlot.value();
+	NetPlay.players[i].ai = AI_OPEN;
+	NetPlay.players[i].isSpectator = true;
+	// common code
+	NetPlay.players[i].difficulty = AIDifficulty::DISABLED; // disable AI for this slot
+	if (broadcastUpdate)
+	{
+		NETBroadcastPlayerInfo(i);
+		netPlayersUpdated = true;
+	}
+	return i;
+}
+
+bool NETopenNewSpectatorSlot()
+{
+	ASSERT_HOST_ONLY(return false);
+	return _NET_openNewSpectatorSlot_internal(true).has_value();
+}
+
+optional<uint32_t> NETmovePlayerToSpectatorOnlySlot(uint32_t playerIdx, bool hostOverride /*= false*/)
+{
+	ASSERT_HOST_ONLY(return nullopt);
+	ASSERT_OR_RETURN(nullopt, playerIdx < MAX_CONNECTED_PLAYERS, "playerIdx out of bounds: %" PRIu32 "", playerIdx);
+	// Verify it's a human player
+	ASSERT_OR_RETURN(nullopt, isHumanPlayer(playerIdx) && !NetPlay.players[playerIdx].isSpectator, "playerIdx is not a currently-connected human player: %" PRIu32 "", playerIdx);
+
+	// Try to grab a new spectator-only slot index
+	optional<uint32_t> availableSpectatorIndex = NET_FindOpenSlotForPlayer(false, true);
+	if (!availableSpectatorIndex.has_value() && hostOverride)
+	{
+		// Attempt to open a new spectator slot just for this player
+		availableSpectatorIndex = _NET_openNewSpectatorSlot_internal(false);
+	}
+	if (!availableSpectatorIndex.has_value())
+	{
+		debug(LOG_ERROR, "No available spectator slots to move player %" PRIu32 " to", playerIdx);
+		return nullopt;
+	}
+
+	// Backup the player's identity for later recording
+	auto playerPublicKeyIdentity = getTruePlayerIdentity(playerIdx).identity.toBytes(EcKey::Privacy::Public);
+
+	// Swap the player indexes
+	if (!swapPlayerIndexes(playerIdx, availableSpectatorIndex.value()))
+	{
+		debug(LOG_ERROR, "Failed to swap player indexes: %" PRIu32 ", %" PRIu32 "", playerIdx, availableSpectatorIndex.value());
+		return nullopt;
+	}
+	ASSERT(NetPlay.players[availableSpectatorIndex.value()].isSpectator, "New slot doesn't have spectator set??");
+
+	playerManagementRecord.movedPlayerToSpectators(NetPlay.players[availableSpectatorIndex.value()], playerPublicKeyIdentity, hostOverride);
+
+	if (wz_command_interface_enabled())
+	{
+		uint32_t newSpecIdx = availableSpectatorIndex.value();
+		const auto& outputIdentity = getOutputPlayerIdentity(newSpecIdx);
+		std::string playerPublicKeyB64 = base64Encode(outputIdentity.toBytes(EcKey::Public));
+		std::string playerIdentityHash = outputIdentity.publicHashString();
+		std::string playerVerifiedStatus = (ingame.VerifiedIdentity[newSpecIdx]) ? "V" : "?";
+		std::string playerName = getPlayerName(newSpecIdx);
+		std::string playerNameB64 = base64Encode(std::vector<unsigned char>(playerName.begin(), playerName.end()));
+		wz_command_interface_output("WZEVENT: movedPlayerToSpec: %" PRIu32 " -> %" PRIu32 " %s %s %s %s %s %s\n", playerIdx, newSpecIdx, playerPublicKeyB64.c_str(), playerIdentityHash.c_str(), playerVerifiedStatus.c_str(), playerNameB64.c_str(), NetPlay.players[newSpecIdx].IPtextAddress, hostOverride?"host":"user");
+	}
+
+	// Broadcast the swapped player info
+	NETBroadcastTwoPlayerInfo(playerIdx, availableSpectatorIndex.value());
+
+	return availableSpectatorIndex;
+}
+
+static bool wasAlreadyMovedToSpectatorsByHost(uint32_t playerIdx)
+{
+	return playerManagementRecord.hostMovedPlayerToSpectators(NetPlay.players[playerIdx].IPtextAddress)
+		|| playerManagementRecord.hostMovedPlayerToSpectators(getTruePlayerIdentity(playerIdx).identity.toBytes(EcKey::Privacy::Public));
+}
+
+SpectatorToPlayerMoveResult NETmoveSpectatorToPlayerSlot(uint32_t playerIdx, optional<uint32_t>& newPlayerIdx, bool hostOverride /*= false*/)
+{
+	ASSERT_HOST_ONLY(return SpectatorToPlayerMoveResult::FAILED);
+	ASSERT_OR_RETURN(SpectatorToPlayerMoveResult::FAILED, playerIdx < MAX_CONNECTED_PLAYERS, "playerIdx out of bounds: %" PRIu32 "", playerIdx);
+	ASSERT_OR_RETURN(SpectatorToPlayerMoveResult::FAILED, newPlayerIdx.value_or(0) < MAX_CONNECTED_PLAYERS, "newPlayerIdx out of bounds: %" PRIu32 "", newPlayerIdx.value_or(0));
+	ASSERT_OR_RETURN(SpectatorToPlayerMoveResult::FAILED, !newPlayerIdx.has_value() || newPlayerIdx.value() != NetPlay.hostPlayer, "newPlayerIdx cannot be host player: %" PRIu32 "", newPlayerIdx.value_or(0));
+	// Verify it's a human player
+	ASSERT_OR_RETURN(SpectatorToPlayerMoveResult::FAILED, isHumanPlayer(playerIdx) && NetPlay.players[playerIdx].isSpectator, "playerIdx is not a currently-connected spectator: %" PRIu32 "", playerIdx);
+
+	bool previousPlayersShouldCheckReadyValue = multiplayPlayersShouldCheckReady();
+
+	// Check if the host has moved this player to a spectator before, if so deny (unless the *host* is the one triggering the move)
+	if (!hostOverride && wasAlreadyMovedToSpectatorsByHost(playerIdx))
+	{
+		return SpectatorToPlayerMoveResult::FAILED;
+	}
+
+	if (!newPlayerIdx.has_value())
+	{
+		// Attempt to find an open slot
+		newPlayerIdx = NET_FindOpenSlotForPlayer(false, false);
+		if (!newPlayerIdx.has_value())
+		{
+			return SpectatorToPlayerMoveResult::NEEDS_SLOT_SELECTION;
+		}
+	}
+
+	// Backup the spectator's identity for later recording
+	auto spectatorPublicKeyIdentity = getTruePlayerIdentity(playerIdx).identity.toBytes(EcKey::Privacy::Public);
+
+	// Swap the player indexes
+	if (!swapPlayerIndexes(playerIdx, newPlayerIdx.value()))
+	{
+		debug(LOG_ERROR, "Failed to swap player indexes: %" PRIu32 ", %" PRIu32 "", playerIdx, newPlayerIdx.value());
+		return SpectatorToPlayerMoveResult::FAILED;
+	}
+	ASSERT(!NetPlay.players[newPlayerIdx.value()].isSpectator, "New slot should not be a spectator??");
+
+	playerManagementRecord.movedSpectatorToPlayers(NetPlay.players[newPlayerIdx.value()], spectatorPublicKeyIdentity, hostOverride);
+
+	if (wz_command_interface_enabled())
+	{
+		const auto& identity = getOutputPlayerIdentity(newPlayerIdx.value());
+		std::string playerPublicKeyB64 = base64Encode(identity.toBytes(EcKey::Public));
+		std::string playerIdentityHash = identity.publicHashString();
+		std::string playerVerifiedStatus = (ingame.VerifiedIdentity[newPlayerIdx.value()]) ? "V" : "?";
+		std::string playerName = getPlayerName(newPlayerIdx.value());
+		std::string playerNameB64 = base64Encode(std::vector<unsigned char>(playerName.begin(), playerName.end()));
+		wz_command_interface_output("WZEVENT: movedSpecToPlayer: %" PRIu32 " -> %" PRIu32 " %s %s %s %s %s\n", playerIdx, newPlayerIdx.value(), playerPublicKeyB64.c_str(), playerIdentityHash.c_str(), playerVerifiedStatus.c_str(), playerNameB64.c_str(), NetPlay.players[newPlayerIdx.value()].IPtextAddress);
+	}
+
+	// Broadcast the swapped player info
+	NETBroadcastTwoPlayerInfo(playerIdx, newPlayerIdx.value());
+
+	handlePossiblePlayersShouldCheckReadyChange(previousPlayersShouldCheckReadyValue);
+
+	return SpectatorToPlayerMoveResult::SUCCESS;
+}
+
+static inline bool NETFilterMessageWhileSwappingPlayer(uint8_t sender, uint8_t type)
+{
+	if (!NetPlay.isHost)
+	{
+		return false; // only host filters these messages
+	}
+
+	if (sender == NetPlay.hostPlayer)
+	{
+		return false; // never filter host messages
+	}
+
+	if (static_cast<size_t>(sender) >= NET_waitingForIndexChangeAckSince.size() || !NET_waitingForIndexChangeAckSince.at(sender).has_value())
+	{
+		return false; // no filtering - not waiting for player to acknowledge index change
+	}
+
+	#define INDEX_CHANGE_ACK_TIMEOUT (5 * GAME_TICKS_PER_SEC)
+	if ((realTime - NET_waitingForIndexChangeAckSince.at(sender).value_or(realTime)) > INDEX_CHANGE_ACK_TIMEOUT)
+	{
+		// this client did not acknowledge the player index change before the timeout - kick them
+		if (NETplayerHasConnection(sender) || NetPlay.players[sender].allocated)
+		{
+			sendHostNotice(WzQuickChatDataContexts::INTERNAL_LOCALIZED_HOST_NOTICE::Context::IndexChangeNotAckedKicked, 0, sender);
+			debug(LOG_INFO, "Client (player: %u) failed to ack player index swap (ignoring message type: %" PRIu8 ")", sender, type);
+			kickPlayer(sender, _("Client failed to ack player index swap"), ERROR_INVALID, false);
+		}
+		return true; // filter original message, of course
+	}
+
+	// Filter certain net messages if player index swap is in progress (until player acknowledges swap)
+
+	switch (type)
+	{
+	case NET_TEXTMSG:
+	case NET_QUICK_CHAT_MSG:
+		// Just send a message to the player that this text message was undelivered and to try again - it's easier and this should be quite rare
+		{
+			WzQuickChatTargeting targeting;
+			targeting.specificPlayers.insert(sender);
+			sendQuickChat(WzQuickChatMessage::INTERNAL_MSG_DELIVERY_FAILURE_TRY_AGAIN, selectedPlayer, targeting);
+			return true; // filter / ignore
+		}
+	case NET_VOTE:
+		// POSSIBLE TODO: Send the player a new VOTE_REQUEST so they can send a new vote? (after they ack the swap)
+		return true; // filter / ignore
+	case NET_PLAYERNAME_CHANGEREQUEST:	///< non-host human player is changing their name.
+		// We can ignore if we force the player to re-send their name when they change slots
+		return true; // filter / ignore
+
+	// Client messages to ignore while waiting for a swap player ACK
+	// (because they may contain the old player index, and also the necessary messages will be resent after the ack)
+	case NET_PING:                       // For now, just drop it - until the player responds with the ack
+	case NET_PLAYER_STATS:
+	case NET_COLOURREQUEST:              ///< player requests a colour change.
+	case NET_FACTIONREQUEST:             ///< player requests a colour change.
+	case NET_TEAMREQUEST:                ///< request team membership
+	case NET_READY_REQUEST:              ///< player ready to start an mp game
+	case NET_POSITIONREQUEST:            ///< position in GUI player list
+	case NET_DATA_CHECK:                 ///< Data integrity check
+	case NET_DATA_CHECK2:
+		return true; // filter / ignore
+
+	// one slot / index change at a time...
+	case NET_PLAYER_SLOTTYPE_REQUEST:
+		return true; // filter / ignore
+
+	// client messages to be processed normally
+	case NET_FILE_REQUESTED:             ///< Player has requested a file (map/mod/?)
+	case NET_FILE_CANCELLED:             ///< Player cancelled a file request
+	case NET_PLAYER_LEAVING:             ///< A player is leaving, (nicely)
+		return false; // process normally (do *not* filter)
+
+	// host-only messages
+	case NET_OPTIONS:                    ///< welcome a player to a game.
+	case NET_KICK:                       ///< kick a player .
+	case NET_FIREUP:                     ///< campaign game has started, we can go too.. Shortcut message, not to be used in dmatch.
+	case NET_PLAYER_INFO:                ///< basic player info
+	case NET_PLAYER_JOINED:              ///< notice about player joining
+	case NET_PLAYER_DROPPED:             ///< notice about player dropped / disconnected
+	case NET_GAME_FLAGS:                 ///< game flags
+	case NET_HOST_DROPPED:               ///< Host has dropped
+	case NET_FILE_PAYLOAD:               ///< sending file to the player that needs it
+	case NET_VOTE_REQUEST:               ///< Setup a vote popup
+	case NET_PLAYER_SWAP_INDEX:
+	case NET_HOST_CONFIG:
+	// only possible with initial join
+	case NET_JOIN:                       ///< join a game
+	case NET_ACCEPTED:                   ///< accepted into game
+	case NET_REJECTED:                   ///< nope, you can't join
+		if (recordInvalidMessage(sender, type))
+		{
+			debug(LOG_INFO, "Ignoring %s from %" PRIu8 " while its player index changes - further invalid ones will not be logged", messageTypeToString(type), sender);
+		}
+		return true; // filter / ignore
+
+	// should only be possible once game has started
+	case NET_PLAYERRESPONDING:           ///< computer that sent this is now playing warzone!
+	case NET_AITEXTMSG:                  ///< chat between AIs
+	case NET_BEACONMSG:                  ///< place beacon
+	case NET_SHARE_GAME_QUEUE:           ///< Message contains a game message, which should be inserted into a queue.
+	case NET_DEBUG_SYNC:                 ///< Synch error messages, so people don't have to use pastebin.
+	case NET_SPECTEXTMSG:                ///< chat between spectators
+	case NET_TEAM_STRATEGY:              ///< Player is sending an updated strategy notice to team members
+		break;
+
+	// just process normally
+	case NET_SEND_TO_PLAYER:             ///< Non-host clients aren't directly connected to each other, so they talk via the host using these messages.
+		return false; // process normally (do *not* filter)
+
+	case NET_SECURED_NET_MESSAGE:        ///< This just wraps another message, so permit this wrapper message
+		return false; // process normally (do *not* filter)
+
+	case NET_PLAYER_SWAP_INDEX_ACK:
+		// **MUST** be permitted
+		return false; // process normally (do *not* filter)
+
+	default:
+		// just process normally
+		break;
+	}
+
+	return false;
+}
+
+static void cmdInterfaceLogChatMsgInternal(const NetworkTextMessage& message, const char* log_prefix, optional<std::string> _senderPublicKeyB64 = nullopt)
+{
+	if (!NetPlay.isHost || !wz_command_interface_enabled() || (NetPlay.hostPlayer < MAX_PLAYER_SLOTS))
+	{
+		return;
+	}
+
+	if (message.sender < 0)
+	{
+		// for now, skip system messages
+		return;
+	}
+
+	ASSERT_OR_RETURN(, message.sender < MAX_CONNECTED_PLAYERS, "Invalid message.sender (%d)", message.sender);
+
+	const auto& identity = getOutputPlayerIdentity(message.sender);
+	std::string senderPublicKeyB64 = _senderPublicKeyB64.value_or(base64Encode(identity.toBytes(EcKey::Public)));
+	std::string senderVerifiedStatus = (ingame.VerifiedIdentity[message.sender]) ? "V" : "?";
+	std::string sendername = getPlayerName(message.sender);
+	std::string sendername64 = base64Encode(std::vector<unsigned char>(sendername.begin(), sendername.end()));
+	std::string messagetext = message.text;
+	std::string messagetext64 = base64Encode(std::vector<unsigned char>(messagetext.begin(), messagetext.end()));
+	wz_command_interface_output("%s: %i %s %s %s %s %s\n", log_prefix, message.sender, senderPublicKeyB64.c_str(), sendername64.c_str(), messagetext64.c_str(), senderVerifiedStatus.c_str(), NetPlay.players[message.sender].IPtextAddress);
+}
+
+// receiver may be a player index or NET_ALL_PLAYERS
+static void LogChatMsg(uint8_t msgType, const NetMessage& message, uint8_t senderIdx, uint8_t receiver)
+{
+	if (!wz_command_interface_enabled())
+	{
+		return;
+	}
+
+	switch (msgType)
+	{
+		case NET_TEXTMSG:
+		{
+			NetworkTextMessage textMsg;
+			if (textMsg.decode(message, senderIdx))
+			{
+				// Process & log
+				cmdInterfaceLogChatMsgInternal(textMsg, "WZCHAT");
+			}
+			break;
+		}
+		case NET_SPECTEXTMSG:
+		{
+			auto r = MessageReader(message);
+			if (auto specMsg = decodeSpecInGameTextMessage(r, senderIdx))
+			{
+				// Process & log
+				cmdInterfaceLogChatMsgInternal(specMsg.value(), "WZCHAT");
+			}
+			break;
+		}
+	}
+}
+
+static void NETkickSenderOfInvalidMessage(NETQUEUE playerQueue, const char *messageName)
+{
+	char msg[256] = {'\0'};
+
+	if (!NetPlay.isHost || playerQueue.index == NetPlay.hostPlayer || !NETplayerHasConnection(playerQueue.index))
+	{
+		ssprintf(msg, "Invalid or corrupt message received from player: %u", (unsigned int)playerQueue.index);
+		NETlogEntry(msg, SYNC_FLAG, playerQueue.index);
+		debug(LOG_ERROR, "%s", msg);
+		return;
+	}
+
+	ssprintf(msg, "Auto-kicking player %u - invalid or corrupt message received: %s", (unsigned int)playerQueue.index, messageName);
+	NETlogEntry(msg, SYNC_FLAG, playerQueue.index);
+
+	sendHostNotice(WzQuickChatDataContexts::INTERNAL_LOCALIZED_HOST_NOTICE::Context::InvalidMessageKicked, 0, playerQueue.index);
+	debug(LOG_ERROR, "Auto-kicking player %u - invalid or corrupt message received.", (unsigned int)playerQueue.index);
+	kickPlayer(playerQueue.index, "Invalid or corrupt message", ERROR_INVALID, true);
+}
+
+///////////////////////////////////////////////////////////////////////////
+// Check if a message is a system message
+static bool NETprocessSystemMessage(NETQUEUE playerQueue, uint8_t *type)
+{
+	if (*type == NET_SECURED_NET_MESSAGE)
+	{
+		const char *failureReason = "nested secured message";
+		if (!NETdecryptSecuredNetMessage(playerQueue, *type, failureReason) || *type == NET_SECURED_NET_MESSAGE) // nested secured messages are not supported
+		{
+			// remove the invalid secured message, and return true to say we "handled it"
+			if (recordInvalidMessage(playerQueue.index, NET_SECURED_NET_MESSAGE))
+			{
+				debug(LOG_INFO, "Ignoring invalid secured message allegedly from player: %u (%s) - further ones will not be logged", static_cast<unsigned>(playerQueue.index), failureReason);
+			}
+			NETpop(playerQueue);
+			return true;
+		}
+	}
+
+	if (NETFilterMessageWhileSwappingPlayer(playerQueue.index, *type))
+	{
+		NETpop(playerQueue);
+		return true;
+	}
+
+	switch (*type)
+	{
+	case NET_SEND_TO_PLAYER:
+		{
+			uint8_t sender;
+			uint8_t receiver;
+			NetMessage* message = nullptr;
+			auto r = NETbeginDecode(playerQueue, NET_SEND_TO_PLAYER);
+			NETuint8_t(r, sender);
+			NETuint8_t(r, receiver);
+			bool validNestedMessage = NETnetMessage(r, &message);  // Must delete message later.
+			std::unique_ptr<NetMessage> deleteLater(message);
+			if (!validNestedMessage)
+			{
+				NETend(r);
+				NETkickSenderOfInvalidMessage(playerQueue, "NET_SEND_TO_PLAYER");
+				break;
+			}
+			if (!NETend(r))
+			{
+				debug(LOG_ERROR, "Invalid NET_SEND_TO_PLAYER.");
+				break;
+			}
+			if (message->type() == NET_SEND_TO_PLAYER)
+			{
+				// Never sent nested
+				NETkickSenderOfInvalidMessage(playerQueue, "NET_SEND_TO_PLAYER");
+				break;
+			}
+			if (sender >= MAX_CONNECTED_PLAYERS || (receiver >= MAX_CONNECTED_PLAYERS && receiver != NET_ALL_PLAYERS))
+			{
+				debug(LOG_ERROR, "Bad NET_SEND_TO_PLAYER.");
+				break;
+			}
+			if ((receiver == selectedPlayer || receiver == NET_ALL_PLAYERS) && playerQueue.index == NetPlay.hostPlayer)
+			{
+				// Message was sent to us via the host.
+				if (sender != selectedPlayer)  // Make sure host didn't send us our own broadcast messages, which shouldn't happen anyway.
+				{
+					NETlogPacket(message->type(), static_cast<uint32_t>(message->rawData().size()), true);
+					if (NetPlay.isHost)
+					{
+						message->setOrigin(NetMessage::Origin::InjectedByHost);
+					}
+					NETinsertMessageFromNet(NETnetQueue(sender), std::move(*message));
+				}
+			}
+			else if (NetPlay.isHost && sender == playerQueue.index)
+			{
+				const auto msgType = message->type();
+				if (((msgType == NET_OPTIONS
+					  || msgType == NET_FIREUP
+				      || msgType == NET_KICK
+				      || msgType == NET_PLAYER_LEAVING
+				      || msgType == NET_PLAYER_DROPPED
+				      || msgType == NET_REJECTED
+					  || msgType == NET_GAME_FLAGS
+				      || msgType == NET_PLAYER_JOINED
+					  || msgType == NET_PLAYER_INFO
+					  || msgType == NET_FILE_PAYLOAD
+					  || msgType == NET_PLAYER_SWAP_INDEX
+					  || msgType == NET_HOST_CONFIG) && sender != NetPlay.hostPlayer)
+				    ||
+				    ((msgType == NET_HOST_DROPPED
+				      || msgType == NET_FILE_REQUESTED
+				      || msgType == NET_READY_REQUEST
+				      || msgType == NET_TEAMREQUEST
+				      || msgType == NET_COLOURREQUEST
+				      || msgType == NET_POSITIONREQUEST
+					  || msgType == NET_FACTIONREQUEST
+				      || msgType == NET_FILE_CANCELLED
+					  || msgType == NET_DATA_CHECK
+				      || msgType == NET_JOIN
+				      || msgType == NET_PLAYERNAME_CHANGEREQUEST
+					  || msgType == NET_PLAYER_SWAP_INDEX_ACK) && receiver != NetPlay.hostPlayer)
+					||
+					((msgType == NET_PLAYER_SLOTTYPE_REQUEST
+					  || msgType == NET_DATA_CHECK2) && (sender != NetPlay.hostPlayer && receiver != NetPlay.hostPlayer)))
+				{
+					char msg[256] = {'\0'};
+
+					ssprintf(msg, "Auto-kicking player %u, lacked the required access level for command(%d).", (unsigned int)sender, (int)message->type());
+					NETlogEntry(msg, SYNC_FLAG, sender);
+
+					if (NETplayerHasConnection(sender))
+					{
+						sendHostNotice(WzQuickChatDataContexts::INTERNAL_LOCALIZED_HOST_NOTICE::Context::AccessLevelKicked, message->type(), sender);
+						debug(LOG_ERROR, "%s", msg);
+						kickPlayer(sender, "Invalid command attempted", ERROR_INVALID, true);
+					}
+					break;
+				}
+
+				// Certain messages should be filtered while we're waiting for the ack of a player index switch
+				if (NETFilterMessageWhileSwappingPlayer(sender, msgType))
+				{
+					break;
+				}
+
+				if ((msgType == NET_SHARE_GAME_QUEUE) && (receiver != NET_ALL_PLAYERS))
+				{
+					debug(LOG_NET, "Ignoring non-broadcast message type (%d) from Player %d", (int)message->type(), (int)playerQueue.index);
+					break;
+				}
+
+				if (msgType == NET_SHARE_GAME_QUEUE && NETshareGameQueueContains(*message, GAME_PLAYER_LEFT))
+				{
+					if (recordInvalidMessage(sender, GAME_PLAYER_LEFT))
+					{
+						debug(LOG_INFO, "Ignoring GAME_PLAYER_LEFT from %" PRIu8 " - further invalid ones will not be logged", sender);
+					}
+					break;
+				}
+
+				// Certain messages should be filtered due to hostChatPermissions
+				if (msgType == NET_TEXTMSG || msgType == NET_SPECTEXTMSG || msgType == NET_AITEXTMSG)
+				{
+					if (!ingame.hostChatPermissions[sender])
+					{
+						// Only allow messages direct to host in this case! (Carve-out to allow /hostmsg commands...)
+						if (receiver != NetPlay.hostPlayer)
+						{
+							break;
+						}
+					}
+
+					LogChatMsg(msgType, *message, sender, receiver);
+				}
+
+				size_t rawLen = message->rawData().size();
+
+				// We are the host, and player is asking us to send the message to receiver.
+				auto w = NETbeginEncode(NETnetQueue(receiver, sender), NET_SEND_TO_PLAYER);
+				NETuint8_t(w, sender);
+				NETuint8_t(w, receiver);
+				NETnetMessage(w, *message);
+				NETend(w);
+
+				if (receiver == NET_ALL_PLAYERS)
+				{
+					NETlogPacket(msgType, static_cast<uint32_t>(rawLen), true);
+					message->setOrigin(NetMessage::Origin::RelayedByHost);
+					NETinsertMessageFromNet(NETnetQueue(sender), std::move(*message));  // Message is also for the host.
+					// Not sure if flushing here can make a difference, maybe it can:
+					//NETflush();  // Send the message to everyone as fast as possible.
+				}
+			}
+			else
+			{
+				if (NetPlay.isHost && NETFilterMessageWhileSwappingPlayer(playerQueue.index, message->type()))
+				{
+					debug(LOG_NET, "Ignoring message type (%d) from Player %d while swapping player index", (int)message->type(), (int)playerQueue.index);
+					break;
+				}
+
+				debug(LOG_INFO, "Report this: Player %d sent us message type (%d) addressed to %d from %d. We are %d.", (int)playerQueue.index, (int)message->type(), (int)receiver, (int)sender, selectedPlayer);
+			}
+
+			break;
+		}
+	case NET_SHARE_GAME_QUEUE:
+		{
+			if (ingame.localJoiningInProgress)
+			{
+				// NET_SHARE_GAME_QUEUE should only be processed after the game has started - the game queues probably aren't yet created!
+				debug(LOG_ERROR, "Ignoring NET_SHARE_GAME_QUEUE message from %" PRIu8 " (only permitted in-game).", playerQueue.index);
+				break;
+			}
+
+			if (NetPlay.isHost && playerQueue.index != NetPlay.hostPlayer && NETgetMessage(playerQueue)->origin() == NetMessage::Origin::Received)
+			{
+				if (recordInvalidMessage(playerQueue.index, NET_SHARE_GAME_QUEUE))
+				{
+					debug(LOG_INFO, "Ignoring unrelayed NET_SHARE_GAME_QUEUE from %" PRIu8 " - further invalid ones will not be logged", playerQueue.index);
+				}
+				break;
+			}
+
+			uint8_t player = 0;
+			uint32_t num = 0, n;
+			NetMessage* message = nullptr;
+
+			// Encoded in NETprocessSystemMessage in nettypes.cpp.
+			auto r = NETbeginDecode(playerQueue, NET_SHARE_GAME_QUEUE);
+			NETuint8_t(r, player);
+			NETuint32_t(r, num);
+			bool isSentByCorrectClient = responsibleFor(playerQueue.index, player);
+			isSentByCorrectClient = isSentByCorrectClient || (playerQueue.index == NetPlay.hostPlayer && playerQueue.index != selectedPlayer);  // Let host spoof other people's NET_SHARE_GAME_QUEUE messages, but not our own. This allows the host to spoof a GAME_PLAYER_LEFT message (but spoofing any message when the player is still there will fail with desynch).
+			if (!isSentByCorrectClient || player >= MAX_CONNECTED_PLAYERS)
+			{
+				NETend(r);
+				break;
+			}
+			bool validMessages = true;
+			for (n = 0; n < num; ++n)
+			{
+				if (!NETnetMessage(r, &message))
+				{
+					validMessages = false;
+					break;
+				}
+				if (!(message->type() > GAME_MIN_TYPE && message->type() < GAME_MAX_TYPE))
+				{
+					delete message;
+					message = nullptr;
+					validMessages = false;
+					break;
+				}
+
+				NETlogPacket(message->type(), static_cast<uint32_t>(message->rawData().size()), true);
+				NETinsertMessageFromNet(NETgameQueue(player), std::move(*message));
+
+				delete message;
+				message = nullptr;
+			}
+			if (!validMessages)
+			{
+				NETend(r);
+				NETkickSenderOfInvalidMessage(playerQueue, "NET_SHARE_GAME_QUEUE");
+				break;
+			}
+			if (!NETend(r))
+			{
+				debug(LOG_ERROR, "Invalid NET_SHARE_GAME_QUEUE message.");
+				break;
+			}
+			break;
+		}
+	case NET_PLAYERNAME_CHANGEREQUEST:
+		{
+			if (!ingame.localJoiningInProgress)
+			{
+				// player name change only permitted in the lobby
+				debug(LOG_ERROR, "Ignoring NET_PLAYERNAME_CHANGEREQUEST message (only permitted in the lobby).");
+				break;
+			}
+			if (!NetPlay.isHost)
+			{
+				// Only the host should receive and process these messages
+				debug(LOG_ERROR, "Ignoring NET_PLAYERNAME_CHANGEREQUEST message (should only be sent to the host).");
+				break;
+			}
+
+			uint8_t player = 0;
+			WzString oldName;
+			WzString newName;
+
+			// Encoded in NETchangePlayerName() in netplay.cpp.
+			auto r = NETbeginDecode(playerQueue, NET_PLAYERNAME_CHANGEREQUEST);
+			NETuint8_t(r, player);
+			NETwzstring(r, newName);
+			NETend(r);
+
+			// Bail out if the given ID number is out of range
+			if (player >= MAX_CONNECTED_PLAYERS || (playerQueue.index != NetPlay.hostPlayer && (playerQueue.index != player || !NetPlay.players[player].allocated)))
+			{
+				debug(LOG_ERROR, "NET_PLAYERNAME_CHANGEREQUEST from %u: Player ID (%u) out of range (max %u)", playerQueue.index, player, (unsigned int)MAX_CONNECTED_PLAYERS);
+				break;
+			}
+
+			if (NetPlay.isHost && (!ingame.hostChatPermissions[player] || getLockedOptions().name))
+			{
+				// Name changes are denied when the host has muted a player (or name changes are locked)
+				// Inform the player that their name is still what it was (resets their local display)
+				if (NetPlay.players[player].allocated)
+				{
+					NETSendPlayerInfoTo(player, player);
+				}
+				break;
+			}
+
+			if (playerQueue.index != NetPlay.hostPlayer && !lobbyNameChangeRequestAllowed(playerQueue.index))
+			{
+				debug(LOG_NET, "Ignoring NET_PLAYERNAME_CHANGEREQUEST from %" PRIu8 ": too many requests", playerQueue.index);
+				if (NetPlay.players[player].allocated)
+				{
+					NETSendPlayerInfoTo(player, player);
+				}
+				break;
+			}
+
+			oldName = NetPlay.players[player].name;
+			setPlayerName(player, newName.toUtf8().c_str());
+			NETfixDuplicatePlayerNames(player);
+
+			if (NetPlay.players[player].allocated && strncmp(oldName.toUtf8().c_str(), NetPlay.players[player].name, sizeof(NetPlay.players[player].name)) != 0)
+			{
+				printConsoleNameChange(oldName.toUtf8().c_str(), NetPlay.players[player].name);
+				// Send the updated data to all other clients as well.
+				NETBroadcastPlayerInfo(player); // ultimately triggers updateMultiplayGameData inside NETSendNPlayerInfoTo
+				netPlayersUpdated = true;
+			}
+
+			break;
+		}
+	case NET_PLAYER_STATS:
+		{
+			recvMultiStats(playerQueue);
+			netPlayersUpdated = true;
+			break;
+		}
+	case NET_PLAYER_INFO:
+		{
+			uint32_t indexLen = 0, n;
+			uint32_t index = MAX_CONNECTED_PLAYERS;
+			int32_t colour = 0;
+			int32_t position = 0;
+			int32_t team = 0;
+			int8_t ai = 0;
+			int8_t difficulty = 0;
+			uint8_t faction = FACTION_NORMAL;
+			bool isSpectator = false;
+			bool isAdmin = false;
+			bool error = false;
+			const bool gameStarted = !ingame.localJoiningInProgress;
+
+			auto r = NETbeginDecode(playerQueue, NET_PLAYER_INFO);
+			if (playerQueue.index != NetPlay.hostPlayer)
+			{
+				if (recordInvalidMessage(playerQueue.index, NET_PLAYER_INFO))
+				{
+					debug(LOG_INFO, "MSG_PLAYER_INFO: Received from non-host player %" PRIu8 " - further ones will not be logged", playerQueue.index);
+				}
+				NETend(r);
+				break;
+			}
+			if (!NETcount(r, indexLen, MAX_CONNECTED_PLAYERS, 1, [&playerQueue](uint32_t badCount) {
+				if (recordInvalidMessage(playerQueue.index, NET_PLAYER_INFO))
+				{
+					debug(LOG_INFO, "MSG_PLAYER_INFO: Bad number of players updated: %" PRIu32 " - further ones will not be logged", badCount);
+				}
+			}))
+			{
+				NETend(r);
+				break;
+			}
+
+			for (n = 0; n < indexLen; ++n)
+			{
+				bool wasAllocated = false;
+				std::string oldName;
+
+				// Retrieve the player's ID
+				NETuint32_t(r, index);
+
+				// Bail out if the given ID number is out of range
+				if (index >= MAX_CONNECTED_PLAYERS || (playerQueue.index != NetPlay.hostPlayer && (playerQueue.index != index || !NetPlay.players[index].allocated)))
+				{
+					if (recordInvalidMessage(playerQueue.index, NET_PLAYER_INFO))
+					{
+						debug(LOG_INFO, "MSG_PLAYER_INFO from %u: Player ID (%u) out of range (max %u) - further ones will not be logged", playerQueue.index, index, (unsigned int)MAX_CONNECTED_PLAYERS);
+					}
+					error = true;
+					break;
+				}
+
+				// Retrieve the rest of the data
+				wasAllocated = NetPlay.players[index].allocated;
+				bool allocated = false;
+				bool heartbeat = false;
+				uint32_t heartattacktime = 0;
+				bool ready = false;
+				NETbool(r, allocated);
+				NETbool(r, heartbeat);
+				bool tmpDiscard = false;
+				NETbool(r, tmpDiscard); // to maintain message format, discard old "kick" variable // FUTURE TODO: Remove
+				oldName.clear();
+				oldName = NetPlay.players[index].name;
+				NETstring(r, NetPlay.players[index].name, sizeof(NetPlay.players[index].name));
+				NETuint32_t(r, heartattacktime);
+				NETint32_t(r, colour);
+				NETint32_t(r, position);
+				NETint32_t(r, team);
+				NETbool(r, ready);
+				NETint8_t(r, ai);
+				NETint8_t(r, difficulty);
+				NETuint8_t(r, faction);
+				NETbool(r, isSpectator);
+				NETbool(r, isAdmin);
+
+				auto newFactionId = uintToFactionID(faction);
+				if (!newFactionId.has_value())
+				{
+					if (recordInvalidMessage(playerQueue.index, NET_PLAYER_INFO))
+					{
+						debug(LOG_INFO, "MSG_PLAYER_INFO from %u: Faction ID (%u) out of range (max %u) - further ones will not be logged", playerQueue.index, (unsigned int)faction, (unsigned int)MAX_FACTION_ID);
+					}
+					error = true;
+					break;
+				}
+				if (position < 0 || position >= MAX_CONNECTED_PLAYERS)
+				{
+					if (recordInvalidMessage(playerQueue.index, NET_PLAYER_INFO))
+					{
+						debug(LOG_INFO, "MSG_PLAYER_INFO from %u: Position (%d) out of range - further ones will not be logged", playerQueue.index, (int)position);
+					}
+					error = true;
+					break;
+				}
+
+				// Don't let anyone except the host change these, otherwise it will end up inconsistent at some point, and the game gets really messed up.
+				if (playerQueue.index == NetPlay.hostPlayer)
+				{
+					NetPlay.players[index].isAdmin = isAdmin;
+					if (!gameStarted)
+					{
+						NetPlay.players[index].allocated = allocated;
+						NetPlay.players[index].heartbeat = heartbeat;
+						NetPlay.players[index].heartattacktime = heartattacktime;
+						NetPlay.players[index].ready = ready;
+						setPlayerColour(index, colour);
+						NetPlay.players[index].position = position;
+						NetPlay.players[index].team = team;
+						NetPlay.players[index].ai = ai;
+						NetPlay.players[index].difficulty = static_cast<AIDifficulty>(difficulty);
+						NetPlay.players[index].faction = newFactionId.value();
+						NetPlay.players[index].isSpectator = isSpectator;
+					}
+					else if (allocated != NetPlay.players[index].allocated || isSpectator != NetPlay.players[index].isSpectator)
+					{
+						debug(LOG_NET, "MSG_PLAYER_INFO for player %u: keeping local state (allocated %d, spectator %d; received %d, %d)", index, (int)NetPlay.players[index].allocated, (int)NetPlay.players[index].isSpectator, (int)allocated, (int)isSpectator);
+					}
+				}
+
+				debug(LOG_NET, "%s for player %u (%s)", n == 0 ? "Receiving MSG_PLAYER_INFO" : "                      and", (unsigned int)index, NetPlay.players[index].allocated ? "human" : "AI");
+
+				if (wasAllocated && NetPlay.players[index].allocated && strncmp(oldName.c_str(), NetPlay.players[index].name, sizeof(NetPlay.players[index].name)) != 0)
+				{
+					printConsoleNameChange(oldName.c_str(), NetPlay.players[index].name);
+				}
+			}
+			NETend(r);
+			// If we're the game host make sure to send the updated
+			// data to all other clients as well.
+			if (NetPlay.isHost && !error && indexLen > 0)
+			{
+				NETBroadcastPlayerInfo(index); // ultimately triggers updateMultiplayGameData inside NETSendNPlayerInfoTo
+				NETfixDuplicatePlayerNames();
+			}
+			else if (!error)
+			{
+				if (index == selectedPlayer)
+				{
+					handleAutoReadyRequest();
+				}
+				ActivityManager::instance().updateMultiplayGameData(game, ingame, NETGameIsLocked());
+			}
+			netPlayersUpdated = true;
+			break;
+		}
+	case NET_PLAYER_JOINED:
+		{
+			uint8_t index;
+
+			auto r = NETbeginDecode(playerQueue, NET_PLAYER_JOINED);
+			NETuint8_t(r, index);
+			NETend(r);
+
+			debug(LOG_NET, "Receiving NET_PLAYER_JOINED for player %u using socket %p",
+			      (unsigned int)index, static_cast<void *>(bsocket));
+
+			if (index >= MAX_CONNECTED_PLAYERS || playerQueue.index != NetPlay.hostPlayer)
+			{
+				debug(LOG_ERROR, "NET_PLAYER_JOINED from %u: invalid (player ID %u, max %u)",
+				      playerQueue.index, (unsigned int)index, (unsigned int)MAX_CONNECTED_PLAYERS);
+				break;
+			}
+
+			MultiPlayerJoin(index, nullopt);
+			netPlayersUpdated = true;
+			break;
+		}
+	// This message type is when player is leaving 'nicely', and socket is still valid.
+	case NET_PLAYER_LEAVING:
+		{
+			uint32_t index;
+
+			auto r = NETbeginDecode(playerQueue, NET_PLAYER_LEAVING);
+			NETuint32_t(r, index);
+			NETend(r);
+
+			if (playerQueue.index != NetPlay.hostPlayer && index != playerQueue.index)
+			{
+				if (NetPlay.isHost && NET_waitingForIndexChangeAckSince[playerQueue.index].has_value())
+				{
+					debug(LOG_NET, "Player %d left before acknowledging its index change (sent %u)", playerQueue.index, (unsigned int)index);
+				}
+				else if (recordInvalidMessage(playerQueue.index, NET_PLAYER_LEAVING))
+				{
+					debug(LOG_INFO, "Player %d left, but set player %u as leaving - further ones will not be logged", playerQueue.index, (unsigned int)index);
+				}
+				index = playerQueue.index;
+			}
+
+			if (index >= MAX_CONNECTED_PLAYERS)
+			{
+				debug(LOG_ERROR, "NET_PLAYER_LEAVING from %u: invalid (player ID %u, max %u)",
+					  playerQueue.index, (unsigned int)index, (unsigned int)MAX_CONNECTED_PLAYERS);
+				break;
+			}
+
+			if (NetPlay.isHost && index != NetPlay.hostPlayer && !connected_bsocket[index])
+			{
+				debug(LOG_NET, "Ignoring NET_PLAYER_LEAVING for player %u without a connection", (unsigned int)index);
+				break;
+			}
+
+			if (connected_bsocket[index])
+			{
+				debug(LOG_NET, "Receiving NET_PLAYER_LEAVING for player %u on socket %p", (unsigned int)index, static_cast<void *>(connected_bsocket[index]));
+			}
+			else
+			{
+				// dropped from join screen most likely
+				debug(LOG_NET, "Receiving NET_PLAYER_LEAVING for player %u (no socket?)", (unsigned int)index);
+			}
+
+			if (NetPlay.isHost)
+			{
+				debug(LOG_NET, "Broadcast leaving message to everyone else");
+				auto w = NETbeginEncode(NETbroadcastQueue(), NET_PLAYER_LEAVING);
+				NETuint32_t(w, index);
+				NETend(w);
+			}
+
+			debug(LOG_INFO, "Player %u has left the game.", index);
+			NETplayerLeaving(index);		// need to close socket for the player that left.
+			NETsetPlayerConnectionStatus(CONNECTIONSTATUS_PLAYER_LEAVING, index);
+			if (NetPlay.isHost && index != NetPlay.hostPlayer)
+			{
+				NET_playerKicked[index] = true;
+			}
+			break;
+		}
+	case NET_GAME_FLAGS:
+		{
+			debug(LOG_NET, "Receiving game flags");
+
+			auto r = NETbeginDecode(playerQueue, NET_GAME_FLAGS);
+
+			if (playerQueue.index != NetPlay.hostPlayer)
+			{
+				debug(LOG_ERROR, "NET_GAME_FLAGS sent by wrong player: %" PRIu32 "", playerQueue.index);
+				NETend(r);
+				break;
+			}
+
+			{
+				static unsigned int max_flags = ARRAY_SIZE(NetGameFlags);
+				// Retrieve the amount of game flags that we should receive
+				uint8_t i, count;
+				NETuint8_t(r, count);
+
+				// Make sure that we won't get buffer overflows by checking that we
+				// have enough space to store the given amount of game flags.
+				if (count > max_flags)
+				{
+					debug(LOG_NET, "NET_GAME_FLAGS: More game flags sent (%u) than our buffer can hold (%u)", (unsigned int)count, max_flags);
+					count = max_flags;
+				}
+
+				// Retrieve all game flags
+				for (i = 0; i < count; ++i)
+				{
+					NETint32_t(r, NetGameFlags[i]);
+				}
+			}
+			NETend(r);
+
+			if (NetPlay.isHost)
+			{
+				NETsendGameFlags();
+			}
+			break;
+		}
+	case NET_DEBUG_SYNC:
+		{
+			recvDebugSync(playerQueue);
+			break;
+		}
+	case NET_PLAYER_SWAP_INDEX_ACK:
+		{
+			ASSERT_HOST_ONLY(break);
+
+			uint32_t oldPlayerIndex;
+			uint32_t newPlayerIndex;
+
+			auto r = NETbeginDecode(playerQueue, NET_PLAYER_SWAP_INDEX_ACK);
+			NETuint32_t(r, oldPlayerIndex);
+			NETuint32_t(r, newPlayerIndex);
+			NETend(r);
+
+			bool isSentByCorrectClient = responsibleFor(playerQueue.index, newPlayerIndex);
+			if (!isSentByCorrectClient)
+			{
+				debug(LOG_ERROR, "NET_PLAYER_SWAP_INDEX_ACK sent by wrong player: %" PRIu32 "", playerQueue.index);
+				break;
+			}
+
+			if (newPlayerIndex >= NET_waitingForIndexChangeAckSince.size() || !NET_waitingForIndexChangeAckSince[newPlayerIndex].has_value())
+			{
+				debug(LOG_ERROR, "NET_PLAYER_SWAP_INDEX_ACK sent despite us not waiting for it (for player: %" PRIu32 ")", newPlayerIndex);
+				break;
+			}
+
+			NET_waitingForIndexChangeAckSince[newPlayerIndex] = nullopt;
+
+			break;
+		}
+
+	default:
+		return false;
+	}
+
+	NETpop(playerQueue);
+	return true;
+}
+
+/*
+*	Checks to see if a human player is still with us.
+*	@note: resuscitation isn't possible with current code, so once we lose
+*	the socket, then we have no way to connect with them again. Future
+*	item to enhance.
+*/
+static void NETcheckPlayers()
+{
+	if (!NetPlay.isHost)
+	{
+		ASSERT(false, "Host only routine detected for client or not hosting yet!");
+		return;
+	}
+
+	for (int i = 0; i < MAX_CONNECTED_PLAYERS ; i++)
+	{
+		if (NetPlay.players[i].allocated == 0)
+		{
+			continue;    // not allocated means that it most likely it is a AI player
+		}
+		if (!NetPlay.players[i].heartbeat && NetPlay.players[i].heartattacktime == 0)	// looks like they are dead
+		{
+			NetPlay.players[i].heartattacktime = realTime;		// mark when this occurred
+		}
+	}
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// Receive a message over the current connection. We return true if there
+// is a message for the higher level code to process, and false otherwise.
+// We should not block here.
+bool NETrecvNet(NETQUEUE *queue, uint8_t *type)
+{
+	if (!NetPlay.bComms)
+	{
+		return false;
+	}
+
+	if (activeConnProvider)
+	{
+		activeConnProvider->processConnectionStateChanges();
+	}
+
+	if (NetPlay.isHost)
+	{
+		NETcloseKickedConnections(false);
+		NETfixPlayerCount();
+		NETacceptIncomingConnections();
+		NETallowJoining();
+		if (lobbyHostingHandler)
+		{
+			lobbyHostingHandler->run();
+		}
+		NETcheckPlayers();		// make sure players are still alive & well
+	}
+
+	IConnectionPollGroup* pollGroup = NetPlay.isHost ? server_socket_set : client_socket_set;
+	if (pollGroup == nullptr || pollGroup->checkConnectionsReadable(NET_READ_TIMEOUT).value_or(0) <= 0)
+	{
+		goto checkMessages;
+	}
+
+	uint32_t current;
+	uint8_t buffer[NET_BUFFER_SIZE];
+	for (current = 0; current < MAX_CONNECTED_PLAYERS; ++current)
+	{
+		IClientConnection** pSocket = NetPlay.isHost ? &connected_bsocket[current] : &bsocket;
+
+		if (!NetPlay.isHost && current != NetPlay.hostPlayer)
+		{
+			continue;  // Don't have a socket open to this player.
+		}
+
+		if (*pSocket == nullptr)
+		{
+			continue;
+		}
+
+		size_t dataLen = NET_fillBuffer(pSocket, pollGroup, buffer, sizeof(buffer));
+		if (dataLen > 0)
+		{
+			// we received some data, add to buffer
+			NETinsertRawData(NETnetQueue(current), buffer, dataLen);
+		}
+		else if (*pSocket == nullptr)
+		{
+			// If there is a error in NET_fillBuffer() then socket is already invalid.
+			// This means that the player dropped / disconnected for whatever reason.
+			debug(LOG_INFO, "Player, (player %u) seems to have dropped/disconnected.", (unsigned)current);
+
+			if (NetPlay.isHost)
+			{
+				// Send message type specifically for dropped / disconnects
+				NETplayerDropped(current);
+				connected_bsocket[current] = nullptr;		// clear their socket
+			}
+		}
+	}
+
+checkMessages:
+	for (current = 0; current < MAX_CONNECTED_PLAYERS; ++current)
+	{
+		*queue = NETnetQueue(current);
+		while (NETisMessageReady(*queue))
+		{
+			if (NetPlay.isHost && NET_playerKicked[current] && NETgetMessage(*queue)->origin() == NetMessage::Origin::Received)
+			{
+				NETpop(*queue);
+				continue;
+			}
+			*type = NETgetMessage(*queue)->type();
+			if (!NETprocessSystemMessage(*queue, type))
+			{
+				return true;  // We couldn't process the message, let the caller deal with it..
+			}
+		}
+	}
+
+	return false;
+}
+
+bool NETrecvGame(NETQUEUE *queue, uint8_t *type)
+{
+	for (unsigned current = 0; current < MAX_GAMEQUEUE_SLOTS; ++current)
+	{
+		*queue = NETgameQueue(current);
+		if (queue->queue == nullptr)
+		{
+			continue;
+		}
+		if (!gtimeShouldWaitForPlayer(current))
+		{
+			while (NETisMessageReady(*queue))
+			{
+				NETpop(*queue);
+			}
+			continue;
+		}
+		while (!checkPlayerGameTime(current))  // Check for any messages that are scheduled to be read now.
+		{
+			if (!NETisMessageReady(*queue))
+			{
+				return false;  // Still waiting for messages from this player, and all players should process messages in the same order. Will have to freeze the game while waiting.
+			}
+
+			NETreplaySaveNetMessage(NETgetMessage(*queue), queue->index);
+			*type = NETgetMessage(*queue)->type();
+
+			if (*type == GAME_GAME_TIME)
+			{
+				recvPlayerGameTime(*queue);
+				NETpop(*queue);
+				continue;
+			}
+
+			return true;  // Have a message ready to read now.
+		}
+	}
+
+	return false;  // No messages sceduled to be read yet. Game can continue.
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// File Transfer programs.
+/** Send file. It returns % of file sent when 100 it's complete. Call until it returns 100.
+*  @TODO: more error checking (?) different file types (?)
+*          Maybe should close file handle, and seek each time?
+*
+*  @NOTE: MAX_FILE_TRANSFER_PACKET is set to 4k per packet since 7*4 = 28K which is pretty
+*         much our limit.  Don't screw with that without having a bigger buffer!
+*         NET_BUFFER_SIZE is at 256k.  (also remember text chat, plus all the other cruff)
+*/
+#define MAX_FILE_TRANSFER_PACKET 4096
+int NETsendFile(WZFile &file, unsigned player)
+{
+	ASSERT_OR_RETURN(100, NetPlay.isHost, "Trying to send a file and we are not the host!");
+	ASSERT_OR_RETURN(100, file.handle() != nullptr, "Null file handle");
+
+	uint8_t inBuff[MAX_FILE_TRANSFER_PACKET];
+	memset(inBuff, 0x0, sizeof(inBuff));
+
+	// read some bytes.
+	PHYSFS_sint64 readBytesResult = WZ_PHYSFS_readBytes(file.handle(), inBuff, MAX_FILE_TRANSFER_PACKET);
+	if (readBytesResult < 0)
+	{
+		ASSERT(readBytesResult >= 0, "Error reading file.");
+		file.closeFile();
+		return 100;
+	}
+	uint32_t bytesToRead = static_cast<uint32_t>(readBytesResult);
+
+	auto w = NETbeginEncode(NETnetQueue(player), NET_FILE_PAYLOAD);
+	NETbin(w, file.hash.bytes, file.hash.Bytes);
+	NETuint32_t(w, file.size);  // total bytes in this file. (we don't support 64bit yet)
+	NETuint32_t(w, file.pos);  // start byte
+	NETuint32_t(w, bytesToRead);  // bytes in this packet
+	NETbin(w, inBuff, bytesToRead);
+	NETend(w);
+
+	file.pos += bytesToRead;  // update position!
+	if (file.pos == file.size)
+	{
+		file.closeFile(); // We are done sending to this client.
+	}
+
+	if (file.size == 0)
+	{
+		return 100;
+	}
+	return static_cast<int>((uint64_t)file.pos * 100 / file.size);
+}
+
+bool validateReceivedFile(const WZFile& file)
+{
+	PHYSFS_file *fileHandle = PHYSFS_openRead(file.filename.c_str());
+	ASSERT_OR_RETURN(false, fileHandle != nullptr, "Could not open downloaded file %s for reading: %s", file.filename.c_str(), WZ_PHYSFS_getLastError());
+
+	PHYSFS_sint64 actualFileSize64 = PHYSFS_fileLength(fileHandle);
+	if (actualFileSize64 < 0)
+	{
+		debug(LOG_ERROR, "Failed to determine file size of the downloaded file!");
+		PHYSFS_close(fileHandle);
+		return false;
+	}
+	if(actualFileSize64 > std::numeric_limits<int32_t>::max())
+	{
+		debug(LOG_ERROR, "Downloaded file is too large!");
+		PHYSFS_close(fileHandle);
+		return false;
+	}
+
+	uint32_t actualFileSize = static_cast<uint32_t>(actualFileSize64);
+	if (actualFileSize != file.size)
+	{
+		debug(LOG_ERROR, "Downloaded map unexpected size! Got %" PRIu32", expected %" PRIu32"!", actualFileSize, file.size);
+		PHYSFS_close(fileHandle);
+		return false;
+	}
+
+	// verify actual downloaded file hash matches expected hash
+
+	Sha256 actualFileHash;
+	crypto_hash_sha256_state state;
+	crypto_hash_sha256_init(&state);
+	size_t bufferSize = std::min<size_t>(actualFileSize, 4 * 1024 * 1024);
+	std::vector<unsigned char> fileChunkBuffer(bufferSize, '\0');
+	PHYSFS_sint64 length_read = 0;
+	do {
+		length_read = WZ_PHYSFS_readBytes(fileHandle, fileChunkBuffer.data(), static_cast<PHYSFS_uint32>(bufferSize));
+		if (length_read != bufferSize)
+		{
+			if (length_read < 0 || !PHYSFS_eof(fileHandle))
+			{
+				// did not read expected amount, but did not reach end of file - some other error reading the file occurred
+				debug(LOG_ERROR, "Failed to read downloaded file: %s", WZ_PHYSFS_getLastError());
+				PHYSFS_close(fileHandle);
+				return false;
+			}
+		}
+		crypto_hash_sha256_update(&state, fileChunkBuffer.data(), static_cast<unsigned long long>(length_read));
+	} while (length_read > 0 && length_read == bufferSize);
+	crypto_hash_sha256_final(&state, actualFileHash.bytes);
+	fileChunkBuffer.clear();
+
+	if (actualFileHash != file.hash)
+	{
+		debug(LOG_ERROR, "Downloaded file hash (%s) does not match requested file hash (%s)", actualFileHash.toString().c_str(), file.hash.toString().c_str());
+		PHYSFS_close(fileHandle);
+		return false;
+	}
+
+	PHYSFS_close(fileHandle);
+	return true;
+}
+
+bool markAsDownloadedFile(const std::string &filename)
+{
+	// Files are written to the PhysFS writeDir
+	const char * current_writeDir = PHYSFS_getWriteDir();
+	ASSERT(current_writeDir != nullptr, "Failed to get PhysFS writeDir: %s", WZ_PHYSFS_getLastError());
+	std::string fullFilePath = std::string(current_writeDir) + PHYSFS_getDirSeparator() + filename;
+
+#if defined(WZ_OS_WIN)
+	// On Windows:
+	//	- Create the Alternate Data Stream required to set the Internet Zone identifier
+	const wchar_t kWindowsZoneIdentifierADSSuffix[] = L":Zone.Identifier";
+
+	// Convert fullFilePath to UTF-16 wchar_t
+	int wstr_len = MultiByteToWideChar(CP_UTF8, 0, fullFilePath.c_str(), -1, NULL, 0);
+	if (wstr_len <= 0)
+	{
+		debug(LOG_ERROR, "Could not convert string from UTF-8; MultiByteToWideChar failed with error %lu: %s\n", GetLastError(), fullFilePath.c_str());
+		return false;
+	}
+	std::vector<wchar_t> wstr_filename(wstr_len, 0);
+	if (MultiByteToWideChar(CP_UTF8, 0, fullFilePath.c_str(), -1, &wstr_filename[0], wstr_len) == 0)
+	{
+		debug(LOG_ERROR, "Could not convert string from UTF-8; MultiByteToWideChar[2] failed with error %lu: %s\n", GetLastError(), fullFilePath.c_str());
+		return false;
+	}
+	std::wstring fullFilePathUTF16(wstr_filename.data());
+	fullFilePathUTF16 += kWindowsZoneIdentifierADSSuffix;
+
+	HANDLE hStream = CreateFileW(fullFilePathUTF16.c_str(), GENERIC_WRITE, FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE, NULL, OPEN_ALWAYS, FILE_ATTRIBUTE_NORMAL, NULL);
+	if(hStream == INVALID_HANDLE_VALUE)
+	{
+		// Failed to open stream
+		debug(LOG_ERROR, "Could not open stream; failed with error %lu: %s\n", GetLastError(), fullFilePath.c_str());
+		return false;
+	}
+
+	// Set it to "downloaded from the Internet Zone" (ZoneId 3)
+	const char kWindowsZoneIdentifierADSDataInternetZone[] = "[ZoneTransfer]\r\nZoneId=3\r\n";
+	DWORD dwNumberOfBytesWritten;
+	if (WriteFile(hStream, kWindowsZoneIdentifierADSDataInternetZone, static_cast<DWORD>(strlen(kWindowsZoneIdentifierADSDataInternetZone)), &dwNumberOfBytesWritten, NULL) == 0)
+	{
+		debug(LOG_ERROR, "Failed to write to stream with error %lu: %s\n", GetLastError(), fullFilePath.c_str());
+		CloseHandle(hStream);
+		return false;
+	}
+
+	FlushFileBuffers(hStream);
+	CloseHandle(hStream);
+
+	return true;
+#elif defined (WZ_OS_MAC)
+	// On macOS:
+	//	- Set the quarantine attribute on the file
+	return cocoaSetFileQuarantineAttribute(fullFilePath.c_str());
+#else
+	// Not currently implemented
+#endif
+	return false;
+}
+
+// recv file. it returns true when a file has been received and validated.
+bool NETrecvFile(NETQUEUE queue)
+{
+	Sha256 hash;
+	hash.setZero();
+	uint32_t size = 0;
+	uint32_t pos = 0;
+	uint32_t bytesToRead = 0;
+	uint8_t buf[MAX_FILE_TRANSFER_PACKET];
+	memset(buf, 0x0, sizeof(buf));
+
+	//read incoming bytes.
+	auto r = NETbeginDecode(queue, NET_FILE_PAYLOAD);
+	NETbin(r, hash.bytes, hash.Bytes);
+	NETuint32_t(r, size);  // total bytes in this file. (we don't support 64bit yet)
+	NETuint32_t(r, pos);  // start byte
+	NETuint32_t(r, bytesToRead);  // bytes in this packet
+	if (bytesToRead <= sizeof(buf))
+	{
+		NETbin(r, buf, bytesToRead);
+	}
+	const bool validMessage = NETend(r) && bytesToRead <= sizeof(buf);
+
+	debug(LOG_NET, "New file position is %u", pos);
+
+	auto file = std::find_if(DownloadingWzFiles.begin(), DownloadingWzFiles.end(), [&](WZFile const &file) { return file.hash == hash; });
+
+	auto sendCancelFileDownload = [](Sha256 &hash) {
+		auto w = NETbeginEncode(NETnetQueue(NetPlay.hostPlayer), NET_FILE_CANCELLED);
+		NETbin(w, hash.bytes, hash.Bytes);
+		NETend(w);
+	};
+
+	if (file == DownloadingWzFiles.end())
+	{
+		debug(LOG_WARNING, "Receiving file data we didn't request.");
+		sendCancelFileDownload(hash);
+		return false;
+	}
+
+	auto terminateFileDownload = [sendCancelFileDownload](std::vector<WZFile>::iterator &file) {
+		if (!file->closeFile())
+		{
+			debug(LOG_ERROR, "Could not close file handle after trying to terminate download: %s", WZ_PHYSFS_getLastError());
+		}
+		PHYSFS_delete(file->filename.c_str());
+		sendCancelFileDownload(file->hash);
+		DownloadingWzFiles.erase(file);
+	};
+
+	if (!validMessage)
+	{
+		debug(LOG_ERROR, "Invalid file data received; (bytes: %" PRIu32")", bytesToRead);
+		terminateFileDownload(file); // 'file' is now an invalidated iterator.
+		return false;
+	}
+
+	//sanity checks
+	if (file->size != size)
+	{
+		if (file->size == 0)
+		{
+			// host does not send the file size until the first recvFile packet
+			file->size = size;
+		}
+		else
+		{
+			// host sent a different file size for this file with this chunk (vs the first chunk)
+			// this should not happen!
+			debug(LOG_ERROR, "Host sent a different file size for this file; (original size: %u, new size: %u)", file->size, size);
+			terminateFileDownload(file); // 'file' is now an invalidated iterator.
+			return false;
+		}
+	}
+
+	if (size == 0 || size > MAX_NET_TRANSFERRABLE_FILE_SIZE)
+	{
+		debug(LOG_ERROR, "Invalid downloaded filesize; (size: %" PRIu32")", size);
+		terminateFileDownload(file); // 'file' is now an invalidated iterator.
+		return false;
+	}
+
+	if (PHYSFS_tell(file->handle()) != static_cast<PHYSFS_sint64>(pos))
+	{
+		// actual position in file does not equal the expected position in the file (sent by the host)
+		debug(LOG_ERROR, "Invalid file position in downloaded file; (desired: %" PRIu32")", pos);
+		terminateFileDownload(file); // 'file' is now an invalidated iterator.
+		return false;
+	}
+
+	// Write packet to the file.
+	WZ_PHYSFS_writeBytes(file->handle(), buf, bytesToRead);
+
+	uint32_t newPos = pos + bytesToRead;
+	file->pos = newPos;
+
+	if (newPos >= size)  // last packet
+	{
+		if (!file->closeFile())
+		{
+			debug(LOG_ERROR, "Could not close file handle after trying to save map: %s", WZ_PHYSFS_getLastError());
+		}
+
+		const bool validFile = validateReceivedFile(*file);
+		if (!validFile)
+		{
+			// Delete the (invalid) downloaded file
+			PHYSFS_delete(file->filename.c_str());
+		}
+		else
+		{
+			// Attach Quarantine / "downloaded" file attribute to file
+			markAsDownloadedFile(file->filename.c_str());
+		}
+
+		DownloadingWzFiles.erase(file);
+		return validFile;
+	}
+
+	return false;
+}
+
+unsigned NETgetDownloadProgress(unsigned player)
+{
+	std::vector<WZFile> const *files = player == selectedPlayer ?
+		&DownloadingWzFiles :  // Check our own download progress.
+		NetPlay.players[player].wzFiles.get();  // Check their download progress (currently only works if we are the host).
+
+	ASSERT_OR_RETURN(100, files != nullptr, "Uninitialized wzFiles? (Player %u)", player);
+
+	uint32_t progress = 100;
+	for (WZFile const &file : *files)
+	{
+		progress = std::min<uint32_t>(progress, (uint32_t)((uint64_t)file.pos * 100 / (uint64_t)std::max<uint32_t>(file.size, 1)));
+	}
+	return static_cast<unsigned>(progress);
+}
+
+template <typename T>
+static net::result<void> ignoreExpectedResultValue(const net::result<T>& res)
+{
+	return res.has_value() ? net::result<void>{} : tl::make_unexpected(res.error());
+}
+
+static void handleLobbyHostingStatusIsKnown(optional<std::string> lobbyGameId)
+{
+	// Now that we know whether a game is listed in the lobby,
+	// send a signal to ActivityManager
+
+	ActivitySink::ListeningInterfaces listeningInterfaces;
+	if (server_listen_socket != nullptr)
+	{
+		const auto supportedProtocols = server_listen_socket->supportedIpVersions();
+		listeningInterfaces.IPv4 = supportedProtocols & static_cast<IListenSocket::IPVersionsMask>(IListenSocket::IPVersions::IPV4);
+		if (listeningInterfaces.IPv4)
+		{
+			listeningInterfaces.ipv4_port = NETgetGameserverPort();
+		}
+		listeningInterfaces.IPv6 = supportedProtocols & static_cast<IListenSocket::IPVersionsMask>(IListenSocket::IPVersions::IPV6);
+		if (listeningInterfaces.IPv6)
+		{
+			listeningInterfaces.ipv6_port = NETgetGameserverPort();
+		}
+	}
+	if (!knownExternalIPv4Info.host.empty())
+	{
+		listeningInterfaces.knownExternalAddresses = {{knownExternalIPv4Info.host, knownExternalIPv4Info.port, ActivitySink::ListeningInterfaces::IPType::IPv4}};
+	}
+	ActivityManager::instance().hostGame(gameDetails.name.toUtf8().c_str(), NetPlay.players[NetPlay.hostPlayer].name, NETgetLobbyserverAddress(), listeningInterfaces, lobbyGameId.value_or(std::string()));
+}
+
+static std::shared_ptr<netlobby::LobbyServerHostingHandlerProtocol> NETcreateLobbyHostingHandler()
+{
+	ASSERT_OR_RETURN(lobbyHostingHandler, lobbyHostingHandler == nullptr, "Already created lobby hosting handler");
+
+	netlobby::LobbyServerHostingHandlerProtocol::EventCallbacks eventCallbacks;
+	eventCallbacks.lobbyGameCreatedCallback = [](std::string gameId) {
+		debug(LOG_NET, "Created lobby game ID: %s - awaiting publish", gameId.c_str());
+	};
+	eventCallbacks.lobbyGamePublishedCallback = [](std::string gameId, std::string motd) {
+		// Messaging the UI / sending wzcmd events that the game is actually listed in the lobby
+		debug(LOG_NET, "Using game ID: %s", gameId.c_str());
+
+		wz_command_interface_output("WZEVENT: lobbyid: %s\n", gameId.c_str());
+		ActivityManager::instance().updateMultiplayGameData(game, ingame, NETGameIsLocked());
+
+		if (motd.empty())
+		{
+			motd = _("Game is listed in the lobby");
+		}
+		std::string gameIdMsg = _("Lobby GameId");
+		gameIdMsg += ": "; // build this manually to ensure that the format always separates the prefix text from the gameId with ": ", without relying on the translation
+		gameIdMsg += gameId;
+		ShowLobbyStatusMessage({motd, gameIdMsg});
+
+		// Signal to the ActivityManager that the lobby hosting status is known
+		handleLobbyHostingStatusIsKnown(gameId);
+	};
+	eventCallbacks.lobbyGameGoneCallback = [](optional<netlobby::LobbyError> error) {
+
+		// Signal to the ActivityManager that the lobby hosting status is known
+		handleLobbyHostingStatusIsKnown(nullopt);
+
+		if (error.has_value())
+		{
+			auto errorMsg = astringf("%s\n%s: %s", _("Game not listed in the lobby."), error.value().errCode.c_str(), error.value().errMessage.c_str());
+			ShowLobbyStatusMessage({errorMsg});
+
+			// this is horrible but message can have 0x0a and other junk in it
+			wz_command_interface_output("WZEVENT: lobbyerror (%s): %s\n", error.value().errCode.c_str(), base64Encode(std::vector<unsigned char>(error.value().errMessage.begin(), error.value().errMessage.end())).c_str());
+		}
+		else
+		{
+			std::string errorMsg = _("Error connecting to the lobby server.");
+			errorMsg += "\n";
+			errorMsg += _("Please check your internet connection, or wait a short while and try hosting again.");
+			errorMsg += "\n";
+			errorMsg += _("Your game will only be accessible via direct connection (or local LAN).");
+			ShowLobbyStatusMessage({errorMsg});
+
+			wz_command_interface_output("WZEVENT: lobbyerror (UNKNOWN): No details\n");
+		}
+	};
+
+	return netlobby::MakeLobbyHostListingHandler(NETgetLobbyserverAddress(), eventCallbacks);
+}
+
+static void NETupdateLobbyGameListing()
+{
+	if (!lobbyHostingHandler)
+	{
+		return;
+	}
+
+	lobbyHostingHandler->updateGameListing(getMultiStats(realSelectedPlayer).identity, gameDetails, hostJoinOptions);
+}
+
+// ////////////////////////////////////////////////////////////////////////
+//  Check player "slots" & update player count if needed.
+void NETfixPlayerCount()
+{
+	ASSERT_HOST_ONLY(return);
+	if (!allow_joining)
+	{
+		return;
+	}
+
+	int maxPlayers = game.maxPlayers;
+	unsigned playercount = 0;
+	for (int index = 0; index < game.maxPlayers; ++index)
+	{
+		if (NetPlay.players[index].ai == AI_CLOSED)
+		{
+			--maxPlayers;
+		}
+		else if (NetPlay.players[index].isSpectator)
+		{
+			--maxPlayers;
+		}
+		else if (NetPlay.players[index].ai != AI_OPEN || NetPlay.players[index].allocated)
+		{
+			++playercount;
+		}
+	}
+
+	SpectatorInfo latestSpecInfo = SpectatorInfo::currentNetPlayState();
+
+	if (NetPlay.playercount != playercount || gameDetails.players.max != maxPlayers || gameDetails.spectators.current != latestSpecInfo.spectatorsJoined || gameDetails.spectators.max != latestSpecInfo.totalSpectatorSlots)
+	{
+		debug(LOG_NET, "Updating player count from %u/%u to %d/%d", NetPlay.playercount, gameDetails.players.max, playercount, maxPlayers);
+
+		gameDetails.players.current = NetPlay.playercount = playercount;
+		gameDetails.players.max = maxPlayers;
+		gameDetails.spectators.current = latestSpecInfo.spectatorsJoined;
+		gameDetails.spectators.max = latestSpecInfo.totalSpectatorSlots;
+
+		NETupdateLobbyGameListing();
+	}
+
+}
+
+void NETsetLobbyConfigFlagsFields(uint8_t alliancesType, uint8_t techLevel, uint8_t powerLevel, uint8_t basesLevel)
+{
+	gameDetails.alliancesMode = alliancesType;
+
+	NETupdateLobbyGameListing();
+}
+
+void NETsetLobbyLimitFlags(uint8_t ingameLimitFlags)
+{
+	auto priorLimits = gameDetails.limits;
+
+	gameDetails.limits = 0;
+
+	if ((ingameLimitFlags & MPFLAGS_NO_TANKS) != 0)
+	{
+		gameDetails.limits |= static_cast<uint8_t>(netlobby::StructureLimits::NO_TANKS);
+	}
+	if ((ingameLimitFlags & MPFLAGS_NO_CYBORGS) != 0)
+	{
+		gameDetails.limits |= static_cast<uint8_t>(netlobby::StructureLimits::NO_BORGS);
+	}
+	if ((ingameLimitFlags & MPFLAGS_NO_VTOLS) != 0)
+	{
+		gameDetails.limits |= static_cast<uint8_t>(netlobby::StructureLimits::NO_VTOLS);
+	}
+
+	if (priorLimits != gameDetails.limits)
+	{
+		NETupdateLobbyGameListing();
+	}
+}
+
+static void NETaddSessionBanBadIP(const std::string& badIP, std::chrono::seconds expiry = std::chrono::seconds(1800))
+{
+	if (isLoopbackIP(badIP.c_str()))
+	{
+		return;
+	}
+	auto now = std::chrono::steady_clock::now();
+	auto *pBadIpInfo = tmp_badIPs.tryGetPt(badIP);
+	if (pBadIpInfo != nullptr)
+	{
+		if (now < pBadIpInfo->expiry)
+		{
+			if (pBadIpInfo->attempts < std::numeric_limits<size_t>::max())
+			{
+				pBadIpInfo->attempts++;
+			}
+		}
+		else
+		{
+			pBadIpInfo->attempts = 1;
+		}
+
+		pBadIpInfo->expiry = std::max(now + expiry, pBadIpInfo->expiry);
+
+		if (pBadIpInfo->attempts == 100)
+		{
+			// add to permanent ban list
+			addIPToBanList(badIP.c_str(), "BAD_USER");
+		}
+	}
+	else
+	{
+		tmp_badIPs.insert(badIP, TmpBadIPInfo{now + expiry, 1});
+	}
+}
+
+static bool quickRejectConnection(const std::string& ip)
+{
+	if (isLoopbackIP(ip.c_str()))
+	{
+		return false;
+	}
+	auto it = tmp_pendingIPs.find(ip);
+	if (it != tmp_pendingIPs.end())
+	{
+		if (it->second > 1)
+		{
+			return true;
+		}
+	}
+	auto *pBadIpInfo = tmp_badIPs.tryGetPt(ip);
+	if (pBadIpInfo != nullptr)
+	{
+		if (std::chrono::steady_clock::now() < pBadIpInfo->expiry)
+		{
+			NETaddSessionBanBadIP(ip);
+			return true;
+		}
+		else
+		{
+			// clean up expired bad entry
+			tmp_badIPs.remove(ip);
+			pBadIpInfo = nullptr;
+		}
+	}
+
+	return false;
+}
+
+static void NEThostPromoteTempSocketToPermanentPlayerConnection(unsigned int tempSocketIdx, uint8_t index)
+{
+	std::string rIP = tmp_socket[tempSocketIdx]->textAddress();
+
+	debug(LOG_NET, "freeing temp socket %p (%d), creating permanent socket.", static_cast<void *>(tmp_socket[tempSocketIdx]), __LINE__);
+	tmp_socket_set->remove(tmp_socket[tempSocketIdx]);
+	connected_bsocket[index] = tmp_socket[tempSocketIdx];
+	tmp_socket[tempSocketIdx] = nullptr;
+	NET_waitingForIndexChangeAckSince[index] = nullopt;
+	NET_playerKicked[index] = false;
+	server_socket_set->add(connected_bsocket[index]);
+	NETmoveQueue(NETnetTmpQueue(tempSocketIdx), NETnetQueue(index));
+
+	// Copy player's IP address
+	sstrcpy(NetPlay.players[index].IPtextAddress, rIP.c_str());
+
+	// Decrement pending IP counter
+	auto it = tmp_pendingIPs.find(rIP);
+	if (it != tmp_pendingIPs.end())
+	{
+		if (it->second > 1)
+		{
+			it->second--;
+		}
+		else
+		{
+			tmp_pendingIPs.erase(it);
+		}
+	}
+}
+
+static void NETrejectTempSocketClient(unsigned int i, uint8_t rejectedReason, bool sessionBan = false)
+{
+	const std::string rejectedIP = tmp_connectState[i].ip;
+
+	auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+	NETuint8_t(w, rejectedReason);
+	NETstring(w, "", 0);
+	NETend(w);
+	NETflush();
+
+	if (sessionBan)
+	{
+		NETaddSessionBanBadIP(rejectedIP);
+	}
+	NETcloseTempSocket(i);
+	sync_counter.cantjoin++;
+}
+
+static void NETtempSocketBeginHandleJoinApproval(unsigned int i)
+{
+	auto currentConnectState = tmp_connectState[i].connectState;
+	ASSERT_OR_RETURN(, (currentConnectState == TmpSocketInfo::TmpConnectState::PendingJoinRequest) || (currentConnectState == TmpSocketInfo::TmpConnectState::PendingLobbyJoinCheckResult), "Unexpected connectState: %d", (int)currentConnectState);
+
+	auto& joinRequestInfo = tmp_connectState[i].receivedJoinInfo;
+
+	if (bAsyncJoinApprovalEnabled)
+	{
+		tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingAsyncApproval;
+
+		// use the connectChallenge as a unique, random join ID
+		tmp_connectState[i].uniqueJoinID = base64Encode(tmp_connectState[i].connectChallenge);
+
+		std::string joinerPublicKeyB64 = base64Encode(joinRequestInfo.identity.toBytes(EcKey::Public));
+		std::string joinerIdentityHash = joinRequestInfo.identity.publicHashString();
+		std::string joinerName = joinRequestInfo.name;
+		std::string joinerNameB64 = base64Encode(std::vector<unsigned char>(joinerName.begin(), joinerName.end()));
+		wz_command_interface_output("WZEVENT: join approval needed: %s %s %s %s %s %s\n", tmp_connectState[i].uniqueJoinID.c_str(), tmp_connectState[i].ip.c_str(), joinerIdentityHash.c_str(), joinerPublicKeyB64.c_str(), joinerNameB64.c_str(), (joinRequestInfo.playerType == NET_JOIN_SPECTATOR) ? "spec" : "play");
+	}
+	else
+	{
+		// if async join approval is not enabled, go directly to pending success
+		tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::ProcessJoin;
+	}
+	tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+}
+
+static void NETtempSocketHandleLobbyJoinCheckResult(unsigned int i, const std::string& uniqueJoinID, netlobby::LobbyServerHostingHandlerProtocol::CheckJoinResult result)
+{
+	if (tmp_connectState[i].uniqueJoinID != uniqueJoinID)
+	{
+		// received response for old join attempt - discard
+		return;
+	}
+
+	ASSERT_OR_RETURN(, (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyJoinCheckResult), "Unexpected connectState: %d", (int)tmp_connectState[i].connectState);
+	ASSERT(tmp_socket[i] != nullptr, "No socket?");
+
+	if (!result.has_value())
+	{
+		// there was an error checking the join request - reject with general message
+		debug(LOG_INFO, "Error checking join request %s: %s", result.error().errCode.c_str(), result.error().errMessage.c_str());
+		NETrejectTempSocketClient(i, ERROR_HOSTDROPPED, false);
+		return;
+	}
+
+	if (result.value().pass)
+	{
+		// proceed to handling join approval
+		NETtempSocketBeginHandleJoinApproval(i);
+	}
+	else
+	{
+		// lobby join check failed
+		NETaddSessionBanBadIP(tmp_connectState[i].ip, std::chrono::seconds(4));
+		NETrejectTempSocketClient(i, ERROR_WRONGDATA, false);
+	}
+}
+
+static netlobby::ConnectionMethod lobbyConnectionMethodFrom(ConnectionProviderType type)
+{
+	switch (type)
+	{
+		case ConnectionProviderType::TCP_DIRECT:
+			return netlobby::ConnectionMethod::TCP_DIRECT;
+#ifdef WZ_GNS_NETWORK_BACKEND_ENABLED
+		case ConnectionProviderType::GNS_DIRECT:
+			return netlobby::ConnectionMethod::GNS_DIRECT;
+#endif
+	}
+	return netlobby::ConnectionMethod::TCP_DIRECT; // silence compiler warning
+}
+
+static bool allowNonLobbyMediatedJoin(const char* ipAddress)
+{
+	if (lobbyDirectJoinOption == LobbyHostDirectJoinOption::All)
+	{
+		return true;
+	}
+	if (lobbyDirectJoinOption == LobbyHostDirectJoinOption::None)
+	{
+		return false;
+	}
+
+	auto ipClassificationOpt = GetIPClassification(ipAddress);
+	if (!ipClassificationOpt.has_value())
+	{
+		debug(LOG_ERROR, "Failed to get ip classification for: %s", ipAddress);
+		return true;
+	}
+
+	auto ipClass = ipClassificationOpt.value();
+
+	switch (lobbyDirectJoinOption)
+	{
+		case LobbyHostDirectJoinOption::None: return false; // handled above, but included here for compile-time check of complete enum handling
+		case LobbyHostDirectJoinOption::Local:
+		{
+			switch (ipClass)
+			{
+				case IPClassification::PrivateOrULA:
+				case IPClassification::LinkLocal:
+				case IPClassification::Loopback:
+					return true;
+				default:
+					return false;
+			}
+			break;
+		}
+		case LobbyHostDirectJoinOption::All: return true; // handled above, but included here for compile-time check of complete enum handling
+	}
+
+	return false; // silence compiler warning
+}
+
+static std::vector<netlobby::ConnectionInfo> buildHostingConnectionDescriptions()
+{
+	std::vector<netlobby::ConnectionInfo> result;
+
+	if (server_listen_socket != nullptr)
+	{
+		const auto connectionType = lobbyConnectionMethodFrom(server_listen_socket->type());
+		const auto supportedProtocols = server_listen_socket->supportedIpVersions();
+		if (supportedProtocols & static_cast<IListenSocket::IPVersionsMask>(IListenSocket::IPVersions::IPV4))
+		{
+			netlobby::ConnectionInfo conn;
+			conn.type.method = connectionType;
+			conn.type.ipVersion = netlobby::IPVersion::IPv4;
+			conn.host = knownExternalIPv4Info.host; // may be empty, which is fine
+			conn.port = (knownExternalIPv4Info.port > 0) ? knownExternalIPv4Info.port : NETgetGameserverPort();
+
+			result.push_back(conn);
+		}
+		if (supportedProtocols & static_cast<IListenSocket::IPVersionsMask>(IListenSocket::IPVersions::IPV6))
+		{
+			if (!war_getLobbyDisableIPv6())
+			{
+				netlobby::ConnectionInfo conn;
+				conn.type.method = connectionType;
+				conn.type.ipVersion = netlobby::IPVersion::IPv6;
+				conn.host = "";
+				conn.port = NETgetGameserverPort();
+				result.push_back(conn);
+			}
+			else
+			{
+				debug(LOG_INFO, "Disabling listing IPv6 address due to \"Enable IPv6\" lobby setting");
+			}
+		}
+	}
+
+	return result;
+};
+
+static optional<size_t> firstAvailableTempSocketIdx()
+{
+	// Find the first empty socket slot
+	for (size_t i = 0; i < MAX_TMP_SOCKETS; ++i)
+	{
+		if (tmp_socket[i] == nullptr)
+		{
+			return i;
+		}
+	}
+	return nullopt;
+}
+
+static void NETsendLobbyConnectCheckResponse(unsigned int i, const std::string& response)
+{
+	// output response to lobby connection check
+	ASSERT(response.size() <= UINT16_MAX, "response length is too long! (%zu)", response.size());
+	size_t responseLength = std::min<size_t>(response.size(), UINT16_MAX);
+
+	const char ResponseStart[] = "WZLR";
+	std::vector<char> buf;
+	buf.resize((sizeof(char) * 4) + sizeof(uint32_t) + sizeof(uint32_t) + responseLength);
+	char *pLobbyRespBuffer = buf.data();
+	auto push32 = [&pLobbyRespBuffer](uint32_t value) {
+		uint32_t swapped = wz_htonl(value);
+		memcpy(pLobbyRespBuffer, &swapped, sizeof(swapped));
+		pLobbyRespBuffer += sizeof(swapped);
+	};
+
+	// Copy response prefix chars ("WZLR")
+	memcpy(pLobbyRespBuffer, ResponseStart, sizeof(char) * strlen(ResponseStart));
+	pLobbyRespBuffer += sizeof(char) * strlen(ResponseStart);
+
+	// Copy version of response
+	const uint32_t response_version = 2;
+	push32(response_version);
+
+	// Copy length of response (as uint32)
+	push32(static_cast<uint32_t>(responseLength));
+
+	// Copy response
+	memcpy(pLobbyRespBuffer, response.data(), responseLength);
+
+	ASSERT(!tmp_socket[i]->isCompressed(), "Socket should not be compressed!");
+	const auto writeResult = tmp_socket[i]->writeAll(buf.data(), buf.size(), nullptr);
+	if (!writeResult.has_value())
+	{
+		debug(LOG_NET, "writeAll to tmpSocket[%u] failed with error?: %d", i, writeResult.error().value());
+	}
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// Host a game with a given name and player name. & 4 user game flags
+static void NETallowJoining()
+{
+	ASSERT_HOST_ONLY(return);
+
+	unsigned int i;
+	int32_t result;
+	bool connectFailed = true;
+	uint32_t major, minor;
+
+	if (allow_joining == false)
+	{
+		return;
+	}
+
+	if (!lobbyHostingHandler)
+	{
+		// First time attempting lobby connection for this listing - create lobbyHostingHandler
+		lobbyHostingHandler = NETcreateLobbyHostingHandler();
+
+		// Attempt to create game listing
+		if (lobby_disabled || !lobbyHostingHandler->createGameListing(getMultiStats(realSelectedPlayer).identity, gameDetails, hostJoinOptions, buildHostingConnectionDescriptions()))
+		{
+			handleLobbyHostingStatusIsKnown(nullopt);
+
+			if (lobby_disabled)
+			{
+				debug(LOG_INFO, "Multiplayer lobby support unavailable. Please update your client.");
+				ShowLobbyStatusMessage({_("Multiplayer lobby support unavailable. Please update your client.")});
+
+				wz_command_interface_output("WZEVENT: lobbyerror: Client support disabled / unavailable\n");
+			}
+			else
+			{
+				debug(LOG_INFO, "Failed to create game listing");
+				ShowLobbyStatusMessage({astringf("%s\n%s", _("Game not listed in the lobby:"), _("Failed to create game listing. Check WZ logs."))});
+
+				wz_command_interface_output("WZEVENT: lobbyerror: Failed to create game listing\n");
+			}
+		}
+	}
+
+	ASSERT(tmp_socket_set != nullptr, "Null tmp_socket_set");
+	if (tmp_socket_set->checkConnectionsReadable(NET_READ_TIMEOUT).value_or(0) > 0)
+	{
+		for (i = 0; i < MAX_TMP_SOCKETS; ++i)
+		{
+			if (tmp_socket[i] == nullptr)
+			{
+				continue;
+			}
+
+			if (!tmp_socket[i]->readReady())
+			{
+				continue;
+			}
+
+			if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingInitialConnect)
+			{
+				char *p_buffer = tmp_connectState[i].buffer;
+
+				const auto sizeReadResult = tmp_socket[i]->readNoInt(p_buffer + tmp_connectState[i].usedBuffer, 8 - tmp_connectState[i].usedBuffer, nullptr);
+				if (sizeReadResult.has_value())
+				{
+					tmp_connectState[i].usedBuffer += sizeReadResult.value();
+				}
+
+				// A 2.3.7 client sends a "list" command first, just drop the connection.
+				if (tmp_connectState[i].usedBuffer >= 5 && (strcmp(tmp_connectState[i].buffer, "list") == 0))
+				{
+					debug(LOG_INFO, "An old client tried to connect, closing the socket.");
+					NETlogEntry("Dropping old client.", SYNC_FLAG, i);
+					NETlogEntry("Invalid (old)game version", SYNC_FLAG, i);
+					NETaddSessionBanBadIP(tmp_connectState[i].ip);
+					connectFailed = true;
+				}
+				else if (tmp_connectState[i].usedBuffer >= 8)
+				{
+					// New clients send NETCODE_VERSION_MAJOR and NETCODE_VERSION_MINOR
+					// Check these numbers with our own.
+
+					memcpy(&major, p_buffer, sizeof(uint32_t));
+					major = wz_ntohl(major);
+					p_buffer += sizeof(int32_t);
+					memcpy(&minor, p_buffer, sizeof(uint32_t));
+					minor = wz_ntohl(minor);
+
+					if (major == 0 && minor == 0)
+					{
+						// special case for lobby server "alive" check
+						tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckRequest;
+						tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+
+						// Continue to wait (until timeout) for the full initial lobby connect check request message
+						continue;
+					}
+					else if (NETisCorrectVersion(major, minor))
+					{
+						result = wz_htonl(ERROR_NOERROR);
+						memcpy(&tmp_connectState[i].buffer, &result, sizeof(result));
+						const auto writeResult = tmp_socket[i]->writeAll(&tmp_connectState[i].buffer, sizeof(result), nullptr);
+						if (!writeResult.has_value())
+						{
+							debug(LOG_NET, "writeAll to tmpSocket[%u] failed with error?: %d", i, writeResult.error().value());
+						}
+						tmp_socket[i]->enableCompression();
+
+						// Connection is successful.
+						connectFailed = false;
+
+						// Give client a challenge to solve before connecting
+						tmp_connectState[i].connectChallenge.resize(NETgetJoinConnectionNETPINGChallengeFromHostSize());
+						genSecRandomBytes(tmp_connectState[i].connectChallenge.data(), tmp_connectState[i].connectChallenge.size());
+						auto w = NETbeginEncode(NETnetTmpQueue(i), NET_PING);
+						NETbytes(w, tmp_connectState[i].connectChallenge);
+						// Send the server's public identity
+						// - As long as host is a spectator host, or this is a regular (non-blind) game, this is always the host's actual public identity
+						// - If host is a player-host *and* this is a blind game, it's the blind identity
+						EcKey::Key serverPublicKey = getLocalSharedIdentity().toBytes(EcKey::Public);
+						NETbytes(w, serverPublicKey);
+						NETend(w);
+					}
+					else
+					{
+						debug(LOG_INFO, "Received an invalid version \"%" PRIu32 ".%" PRIu32 "\".", major, minor);
+						result = wz_htonl(ERROR_WRONGVERSION);
+						memcpy(&tmp_connectState[i].buffer, &result, sizeof(result));
+						const auto writeResult = tmp_socket[i]->writeAll(&tmp_connectState[i].buffer, sizeof(result), nullptr);
+						if (!writeResult.has_value())
+						{
+							debug(LOG_NET, "writeAll to tmpSocket[%u] failed with error?: %d", i, writeResult.error().value());
+						}
+						NETlogEntry("Invalid game version", SYNC_FLAG, i);
+						NETaddSessionBanBadIP(tmp_connectState[i].ip);
+						connectFailed = true;
+					}
+					if ((!connectFailed) && (!NET_HasAnyOpenSlots()))
+					{
+						// early player count test, in case they happen to get in before updates.
+						// Tell the player that we are completely full.
+						uint8_t rejected = ERROR_FULL;
+						auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+						NETuint8_t(w, rejected);
+						NETend(w);
+						NETflush();
+						connectFailed = true;
+					}
+				}
+				else
+				{
+					// Continue to wait (until timeout) for the full initial connect message
+					continue;
+				}
+
+				// Remove a failed connection.
+				if (connectFailed)
+				{
+					debug(LOG_NET, "freeing temp socket %p (%d)", static_cast<void *>(tmp_socket[i]), __LINE__);
+					NETcloseTempSocket(i);
+				}
+				else
+				{
+					// on initial connect success...
+					tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingJoinRequest;
+					tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+				}
+				continue;
+			}
+			else if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingJoinRequest
+					 || tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckRequest)
+			{
+				uint8_t buffer[MaxMsgSize];
+				const auto readResult = tmp_socket[i]->readNoInt(buffer, sizeof(buffer), nullptr);
+				uint8_t rejected = 0;
+
+				if (!readResult.has_value())
+				{
+					// disconnect or programmer error
+					if (readResult.error() == std::errc::timed_out || readResult.error() == std::errc::connection_reset)
+					{
+						debug(LOG_NET, "Client socket disconnected.");
+					}
+					else
+					{
+						const auto readErrMsg = readResult.error().message();
+						debug(LOG_NET, "Client socket encountered error: %s", readErrMsg.c_str());
+					}
+					NETlogEntry("Client socket disconnected (allowJoining)", SYNC_FLAG, i);
+					debug(LOG_NET, "freeing temp socket %p (%d)", static_cast<void *>(tmp_socket[i]), __LINE__);
+					NETcloseTempSocket(i);
+					continue;
+				}
+				const auto size = readResult.value();
+				NETinsertRawData(NETnetTmpQueue(i), buffer, static_cast<size_t>(size));
+
+				if (!NETisMessageReady(NETnetTmpQueue(i)))
+				{
+					// need to wait for a full and complete join message
+					// sanity check
+					if (NETincompleteMessageDataBuffered(NETnetTmpQueue(i)) > (MaxMsgSize * 8))	// something definitely big enough to encompass the expected message(s) at this point
+					{
+						// client is sending data that doesn't appear to be a properly formatted message - cut it off
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+					}
+					continue;
+				}
+
+				if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckRequest
+					&& NETgetMessage(NETnetTmpQueue(i))->type() == 0) // special lobby connection check request
+				{
+					uint16_t jsonStringLen = 0;
+					std::string jsonString;
+					auto r = NETbeginDecode(NETnetTmpQueue(i), 0);
+					{
+						NETuint16_t(r, jsonStringLen);
+						jsonString.resize(jsonStringLen);
+						NETbin(r, reinterpret_cast<uint8_t*>(&jsonString[0]), jsonStringLen);
+					}
+					NETend(r);
+					NETpop(NETnetTmpQueue(i));
+
+					if (lobbyHostingHandler)
+					{
+						auto response = lobbyHostingHandler->respondToLobbyConnectionCheckRequest(jsonString, gameDetails.host.name, getMultiStats(realSelectedPlayer).identity);
+
+						if (response.has_value())
+						{
+							// wait for the response to be ready to send
+							tmp_connectState[i].pendingConnectCheckResponse = std::move(response.value());
+							tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckResponse;
+							tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+							continue;
+						}
+						else
+						{
+							// failed to process request
+							switch (response.error())
+							{
+								case netlobby::LobbyServerHostingHandlerProtocol::LobbyConnectionCheckRequestError::GameNotListed:
+									// ignore
+									break;
+								case netlobby::LobbyServerHostingHandlerProtocol::LobbyConnectionCheckRequestError::InvalidRequest:
+									NETaddSessionBanBadIP(tmp_connectState[i].ip);
+									break;
+							}
+						}
+					}
+
+					debug(LOG_NET, "freeing temp socket %p (%d)", static_cast<void *>(tmp_socket[i]), __LINE__);
+					NETcloseTempSocket(i);
+
+				}
+				else if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingJoinRequest
+						 && NETgetMessage(NETnetTmpQueue(i))->type() == NET_JOIN)
+				{
+					char name[StringSize] = { '\0' };
+					char ModList[modlist_string_size] = { '\0' };
+					char GamePassword[password_string_size] = { '\0' };
+					uint8_t playerType = 0;
+					EcKey::Key pkey;
+					EcKey identity;
+					std::vector<uint8_t> encryptedChallengeResponse;
+					std::string joinToken;
+
+					auto r = NETbeginDecode(NETnetTmpQueue(i), NET_JOIN);
+					{
+						NETstring(r, name, sizeof(name));
+						NETstring(r, ModList, sizeof(ModList));
+						NETstring(r, GamePassword, sizeof(GamePassword));
+						NETuint8_t(r, playerType);
+						NETbytes(r, pkey);
+						NETbytes(r, encryptedChallengeResponse);
+						NETstring(r, joinToken);
+					}
+					NETend(r);
+					NETpop(NETnetTmpQueue(i));
+
+					if (playerType != NET_JOIN_PLAYER && playerType != NET_JOIN_SPECTATOR)
+					{
+						debug(LOG_INFO, "**Rejecting player(%s), invalid player type: %u", tmp_connectState[i].ip.c_str(), static_cast<unsigned>(playerType));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+
+					// Determine if it's a valid public identity
+					if (!identity.fromBytes(pkey, EcKey::Public))
+					{
+						// Invalid public identity provided - just reject
+						auto rejectMsg = astringf("**Rejecting player(%s), invalid player identity.", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, invalid player identity", static_cast<void *>(tmp_socket[i]));
+
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+
+					// Do an initial pass of blacklist checks (even though we haven't verified the identity yet)
+					auto connectPermissions = netPermissionsCheck_Connect(identity);
+					if ((connectPermissions.has_value() && connectPermissions.value() == ConnectPermissions::Blocked)
+						|| (!connectPermissions.has_value() && onBanList(tmp_connectState[i].ip.c_str())))
+					{
+						char buf[256] = {'\0'};
+						ssprintf(buf, "** A player that you have kicked tried to rejoin the game, and was rejected. IP: %s", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", buf);
+						NETlogEntry(buf, SYNC_FLAG, i);
+
+						NETrejectTempSocketClient(i, ERROR_KICKED, false);
+						continue;
+					}
+
+					// Save join info in the tmp_connectState
+					sstrcpy(tmp_connectState[i].receivedJoinInfo.name, name);
+					tmp_connectState[i].receivedJoinInfo.playerType = playerType;
+					tmp_connectState[i].receivedJoinInfo.identity = identity;
+
+					auto& joinRequestInfo = tmp_connectState[i].receivedJoinInfo;
+
+					// Construct the auth session keys
+					try {
+						tmp_connectState[i].receivedJoinInfo.connectionAuthSessionKeys = std::make_unique<SessionKeys>(getLocalSharedIdentity(), 0, identity, 1);
+					}
+					catch (const std::invalid_argument& e) {
+						auto rejectMsg = astringf("**Rejecting player(%s), failed to establish session keys, error: %s", tmp_connectState[i].ip.c_str(), e.what());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, couldn't establish session keys", static_cast<void *>(tmp_socket[i]));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, false);
+						continue;
+					}
+
+					// Decrypt the encryptedChallengeResponse
+					if (encryptedChallengeResponse.empty())
+					{
+						auto rejectMsg = astringf("**Rejecting player(%s), missing player auth data", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, missing player auth data", static_cast<void *>(tmp_socket[i]));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+					std::vector<uint8_t> decryptedMessageRawData;
+					if (!tmp_connectState[i].receivedJoinInfo.connectionAuthSessionKeys->decryptMessageFromOther(encryptedChallengeResponse.data(), encryptedChallengeResponse.size(), decryptedMessageRawData))
+					{
+						auto rejectMsg = astringf("**Rejecting player(%s), failed to decrypt player auth data", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, couldn't verify player identity", static_cast<void *>(tmp_socket[i]));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+					NetMessageBuilder tmpMessageBuilder(NET_JOIN, decryptedMessageRawData.size()); // dummy message for parsing
+					tmpMessageBuilder.append(decryptedMessageRawData.data(), decryptedMessageRawData.size());
+					NETinsertMessageFromNet(NETnetTmpQueue(i), tmpMessageBuilder.build()); // insert virtual message into temp queue for parsing
+
+					// Parse the decrypted response
+					EcKey::Sig challengeResponse;
+					std::vector<uint8_t> connectionDescriptionSerializedBytes;
+					std::vector<uint8_t> challengeForHost(NETgetJoinConnectionNETPINGChallengeFromClientSize(), 0);
+					auto r2 = NETbeginDecode(NETnetTmpQueue(i), NET_JOIN);
+					{
+						NETbytes(r2, challengeResponse);
+						NETbytes(r2, connectionDescriptionSerializedBytes);
+						NETbytes(r2, challengeForHost);
+					}
+					NETend(r2);
+					NETpop(NETnetTmpQueue(i));
+
+					// Verify signature that player is joining with - reject on failure
+					const auto joinSignatureData = NETjoinClientSignatureData(tmp_connectState[i].connectChallenge, getLocalSharedIdentity().toBytes(EcKey::Public), identity.toBytes(EcKey::Public));
+					if (!identity.verify(challengeResponse, joinSignatureData.data(), joinSignatureData.size()))
+					{
+						auto rejectMsg = astringf("**Rejecting player(%s), failed to verify player identity.", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, couldn't verify player identity", static_cast<void *>(tmp_socket[i]));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+
+					// Verify that the challengeForHost is expected length
+					if (challengeForHost.size() != NETgetJoinConnectionNETPINGChallengeFromClientSize())
+					{
+						auto rejectMsg = astringf("**Rejecting player(%s), invalid host challenge length.", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", rejectMsg.c_str());
+						debug(LOG_NET, "freeing temp socket %p, invalid host challenge length", static_cast<void *>(tmp_socket[i]));
+						NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+						continue;
+					}
+					tmp_connectState[i].receivedJoinInfo.challengeForHost = std::move(challengeForHost);
+					challengeForHost.clear();
+
+					// Additional rejection checks
+					if (joinRequestInfo.playerType != NET_JOIN_SPECTATOR && !bAsyncJoinApprovalEnabled && playerManagementRecord.hostMovedPlayerToSpectators(tmp_connectState[i].ip))
+					{
+						// The host previously relegated a player from this IP address to Spectators (this game), and it seems they are trying to rejoin as a Player - deny this
+						char buf[256] = {'\0'};
+						ssprintf(buf, "** A player that you moved to Spectators tried to rejoin the game (as a Player), and was rejected. IP: %s", tmp_connectState[i].ip.c_str());
+						debug(LOG_INFO, "%s", buf);
+						NETlogEntry(buf, SYNC_FLAG, i);
+
+						// Player has been kicked before, kick again.
+						rejected = (uint8_t)ERROR_KICKED;
+					}
+					else if (NetPlay.GamePassworded && strcmp(NetPlay.gamePassword, GamePassword) != 0)
+					{
+						// Wrong password. Reject.
+						rejected = (uint8_t)ERROR_WRONGPASSWORD;
+					}
+					else if ((joinRequestInfo.playerType == NET_JOIN_PLAYER && NetPlay.playercount >= gameDetails.players.max)
+							 || (joinRequestInfo.playerType != NET_JOIN_PLAYER && !NET_FindOpenSlotForPlayer(false, true).has_value()))
+					{
+						// Game full. Reject.
+						rejected = (uint8_t)ERROR_FULL;
+					}
+
+					if (rejected)
+					{
+						char buf[256] = {'\0'};
+						ssprintf(buf, "**Rejecting player(%s), reason (%u).", tmp_connectState[i].ip.c_str(), (unsigned int) rejected);
+						debug(LOG_INFO, "%s", buf);
+						NETlogEntry(buf, SYNC_FLAG, i);
+						auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+						NETuint8_t(w, rejected);
+						NETstring(w, "", 0);
+						NETend(w);
+						NETflush();
+
+						NETcloseTempSocket(i);
+						sync_counter.cantjoin++;
+						continue;
+					}
+
+					// on passing all built-in checks for connect...
+
+					if (joinToken.empty())
+					{
+						if (!lobbyHostingHandler || !lobbyHostingHandler->isConnectedToLobby() || allowNonLobbyMediatedJoin(tmp_connectState[i].ip.c_str()))
+						{
+							NETtempSocketBeginHandleJoinApproval(i);
+						}
+						else
+						{
+							NETaddSessionBanBadIP(tmp_connectState[i].ip, std::chrono::seconds(4));
+							NETrejectTempSocketClient(i, ERROR_WRONGDATA, false);
+						}
+					}
+					else
+					{
+						// Check joinToken
+						if (lobbyHostingHandler && lobbyHostingHandler->isConnectedToLobby())
+						{
+							// use the connectChallenge as a unique, random join ID
+							tmp_connectState[i].uniqueJoinID = base64Encode(tmp_connectState[i].connectChallenge);
+							auto uniqueJoinIDCopy = tmp_connectState[i].uniqueJoinID;
+
+							netlobby::JoinRequest joinRequest;
+							joinRequest.joinToken = joinToken;
+							joinRequest.ip = tmp_connectState[i].ip;
+							joinRequest.playerName = name;
+							joinRequest.playerPublicIdentity = base64Encode(joinRequestInfo.identity.toBytes(EcKey::Public));
+							joinRequest.connectionMethod = lobbyConnectionMethodFrom(server_listen_socket->type());
+							joinRequest.asSpectator = (joinRequestInfo.playerType == NET_JOIN_SPECTATOR);
+							if (lobbyHostingHandler->checkJoinRequest(joinRequest, [i, uniqueJoinIDCopy](netlobby::LobbyServerHostingHandlerProtocol::CheckJoinResult result) {
+								// handle result
+								NETtempSocketHandleLobbyJoinCheckResult(i, uniqueJoinIDCopy, result);
+							}))
+							{
+								// dispatch check join request
+								tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingLobbyJoinCheckResult;
+								tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+							}
+							else
+							{
+								// failure to check join request, despite having lobby connection - internal logic error
+								ASSERT(false, "Failure to issue check join request");
+								NETrejectTempSocketClient(i, ERROR_WRONGDATA, false);
+							}
+						}
+						else
+						{
+							// No lobbyHostingHandler
+							NETtempSocketBeginHandleJoinApproval(i);
+						}
+					}
+				}
+				else
+				{
+					// unexpected message type at this time
+					// reject the bad client
+					NETpop(NETnetTmpQueue(i));
+					NETrejectTempSocketClient(i, ERROR_WRONGDATA, true);
+				}
+				continue;
+			}
+		}
+	}
+
+	auto currentSteadTime = std::chrono::steady_clock::now();
+
+	for (i = 0; i < MAX_TMP_SOCKETS; ++i)
+	{
+		if (tmp_socket[i] == nullptr)
+		{
+			continue;
+		}
+
+		if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckResponse)
+		{
+			auto& futureResponse = tmp_connectState[i].pendingConnectCheckResponse.futureResponse;
+			if (futureResponse.valid() && futureResponse.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+			{
+				NETsendLobbyConnectCheckResponse(i, futureResponse.get());
+				debug(LOG_NET, "freeing temp socket %p (%d)", static_cast<void *>(tmp_socket[i]), __LINE__);
+				NETcloseTempSocket(i);
+				continue;
+			}
+		}
+
+		if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingAsyncApproval)
+		{
+			// check if async approval result has been set
+			if (tmp_connectState[i].asyncJoinApprovalResult.has_value())
+			{
+				if (tmp_connectState[i].asyncJoinApprovalResult.value() != AsyncJoinApprovalAction::Reject)
+				{
+					// async join approved - process the join
+					tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::ProcessJoin;
+					tmp_connectState[i].connectTime = std::chrono::steady_clock::now(); // reset connect time
+					if (tmp_connectState[i].asyncJoinApprovalResult.value() == AsyncJoinApprovalAction::ApproveSpectators)
+					{
+						// change the player join request to spectators
+						tmp_connectState[i].receivedJoinInfo.playerType = NET_JOIN_SPECTATOR;
+						// enforce spectator state for this player
+						playerManagementRecord.movedPlayerToSpectators(tmp_connectState[i].ip, tmp_connectState[i].receivedJoinInfo.identity.toBytes(EcKey::Privacy::Public), true);
+					}
+					else if (tmp_connectState[i].asyncJoinApprovalResult.value() == AsyncJoinApprovalAction::Approve)
+					{
+						// clear any enforced spectator state for this player
+						playerManagementRecord.movedSpectatorToPlayers(tmp_connectState[i].ip, tmp_connectState[i].receivedJoinInfo.identity.toBytes(EcKey::Privacy::Public), true);
+					}
+					// deliberately fall-through to the TmpSocketInfo::TmpConnectState::ProcessJoin condition further below
+				}
+				else
+				{
+					// async join rejected
+					uint8_t rejected = static_cast<uint8_t>(tmp_connectState[i].asyncJoinRejectCode);
+					char buf[256] = {'\0'};
+					ssprintf(buf, "**Rejecting player(%s), due to async approval rejection, reason (%u).", tmp_connectState[i].ip.c_str(), static_cast<unsigned int>(rejected));
+					debug(LOG_INFO, "%s", buf);
+					NETlogEntry(buf, SYNC_FLAG, i);
+					auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+					NETuint8_t(w, rejected);
+					uint16_t maxrejectlen = std::min<uint16_t>(MAX_JOIN_REJECT_REASON, tmp_connectState[i].asyncJoinRejectCustomMessage.size() + 1);
+					NETstring(w, tmp_connectState[i].asyncJoinRejectCustomMessage.c_str(), maxrejectlen);
+
+					if (rejected == ERROR_REDIRECT)
+					{
+						// construct + send encrypted client challenge response
+						const TmpSocketInfo::ReceivedJoinInfo& joinRequestInfo = tmp_connectState[i].receivedJoinInfo;
+						std::vector<uint8_t> encryptedHostChallengeResponse;
+						if (!joinRequestInfo.challengeForHost.empty())
+						{
+							const auto hostSignatureData = NETjoinHostSignatureData(joinRequestInfo.challengeForHost, joinRequestInfo.identity.toBytes(EcKey::Public), getLocalSharedIdentity().toBytes(EcKey::Public));
+							EcKey::Sig hostChallengeResponse = getLocalSharedIdentity().sign(hostSignatureData.data(), hostSignatureData.size());
+							encryptedHostChallengeResponse = joinRequestInfo.connectionAuthSessionKeys->encryptMessageForOther(&hostChallengeResponse[0], hostChallengeResponse.size());
+							if (encryptedHostChallengeResponse.empty())
+							{
+								debug(LOG_INFO, "Failed to encrypt response?");
+							}
+						}
+						NETbytes(w, encryptedHostChallengeResponse);
+					}
+
+					NETend(w);
+					NETflush();
+					auto tmpQueue = NETnetTmpQueue(i);
+					if (NETisMessageReady(tmpQueue))
+					{
+						NETpop(tmpQueue);
+					}
+
+					NETcloseTempSocket(i);
+					sync_counter.cantjoin++;
+					continue; // continue to next tmp_socket
+				}
+			}
+			else
+			{
+				// if no async approval, do a timeout check
+				std::chrono::milliseconds::rep timeout = 8000; // although the client no longer blocks on join, a response should still be relatively prompt (the client has its own timeout)
+				if (std::chrono::duration_cast<std::chrono::milliseconds>(currentSteadTime - tmp_connectState[i].connectTime).count() > timeout)
+				{
+					debug(LOG_INFO, "Freeing temp socket %p due to async connection approval timeout (IP: %s)", static_cast<void *>(tmp_socket[i]), tmp_connectState[i].ip.c_str());
+
+					uint8_t rejected = ERROR_HOSTDROPPED;
+					auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+					NETuint8_t(w, rejected);
+					NETstring(w, "", 0);
+					NETend(w);
+					NETflush();
+					auto tmpQueue = NETnetTmpQueue(i);
+					if (NETisMessageReady(tmpQueue))
+					{
+						NETpop(tmpQueue);
+					}
+					NETcloseTempSocket(i);
+				}
+				continue; // continue to next tmp_socket
+			}
+		}
+		// note: *not* an "else if" because the condition above may transition the state to ProcessJoin!
+		if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::ProcessJoin)
+		{
+			bool previousPlayersShouldCheckReadyValue = multiplayPlayersShouldCheckReady();
+			optional<uint32_t> tmp = nullopt;
+
+			if (tmp_connectState[i].asyncJoinApprovalExplicitPlayerIdx.has_value())
+			{
+				// Try to allocate the new player at the explicit index
+				if (NET_IsSlotOpenForPlayerJoin(tmp_connectState[i].asyncJoinApprovalExplicitPlayerIdx.value())
+					&& NET_CreatePlayerAtIdx(tmp_connectState[i].asyncJoinApprovalExplicitPlayerIdx.value(), tmp_connectState[i].receivedJoinInfo.name))
+				{
+					tmp = tmp_connectState[i].asyncJoinApprovalExplicitPlayerIdx.value();
+				}
+				else
+				{
+					debug(LOG_INFO, "Async join approval provided explicit player index (%" PRIu32 "), but it's occupied", tmp_connectState[i].asyncJoinApprovalExplicitPlayerIdx.value());
+				}
+			}
+			else
+			{
+				// Try to allocate the new player an open slot
+				if ((tmp_connectState[i].receivedJoinInfo.playerType == NET_JOIN_SPECTATOR) || NetPlay.playercount < gameDetails.players.max)
+				{
+					tmp = NET_CreatePlayer(tmp_connectState[i].receivedJoinInfo.name, false, (tmp_connectState[i].receivedJoinInfo.playerType == NET_JOIN_SPECTATOR));
+				}
+			}
+
+			if (!tmp.has_value() || tmp.value() > static_cast<uint32_t>(std::numeric_limits<uint8_t>::max()))
+			{
+				ASSERT(tmp.value_or(0) <= static_cast<uint32_t>(std::numeric_limits<uint8_t>::max()), "Currently limited to uint8_t");
+				debug(LOG_INFO, "freeing temp socket %p, couldn't create slot", static_cast<void *>(tmp_socket[i]));
+
+				// Tell the player that we are full.
+				NETrejectTempSocketClient(i, ERROR_FULL, false);
+				continue; // continue to next tmp_socket
+			}
+
+			uint8_t index = static_cast<uint8_t>(tmp.value());
+
+			TmpSocketInfo::ReceivedJoinInfo joinRequestInfo = std::move(tmp_connectState[i].receivedJoinInfo); // keep the join info
+			tmp_connectState[i].reset();
+
+			NEThostPromoteTempSocketToPermanentPlayerConnection(i, index);
+
+			// construct encrypted client challenge response
+			std::vector<uint8_t> encryptedHostChallengeResponse;
+			if (!joinRequestInfo.challengeForHost.empty())
+			{
+				const auto hostSignatureData = NETjoinHostSignatureData(joinRequestInfo.challengeForHost, joinRequestInfo.identity.toBytes(EcKey::Public), getLocalSharedIdentity().toBytes(EcKey::Public));
+				EcKey::Sig hostChallengeResponse = getLocalSharedIdentity().sign(hostSignatureData.data(), hostSignatureData.size());
+				encryptedHostChallengeResponse = joinRequestInfo.connectionAuthSessionKeys->encryptMessageForOther(&hostChallengeResponse[0], hostChallengeResponse.size());
+				if (encryptedHostChallengeResponse.empty())
+				{
+					debug(LOG_INFO, "Failed to encrypt response?");
+				}
+			}
+
+			// Send NET_ACCEPTED
+			{
+				auto w = NETbeginEncode(NETnetQueue(index), NET_ACCEPTED);
+				NETuint8_t(w, index);
+				NETuint32_t(w, NetPlay.hostPlayer);
+				uint8_t blindModeVal = static_cast<uint8_t>(game.blindMode);
+				NETuint8_t(w, blindModeVal);
+				NETbytes(w, encryptedHostChallengeResponse);
+				NETend(w);
+			}
+
+			// First send info about players to newcomer.
+			NETSendAllPlayerInfoTo(index);
+			// then send info about newcomer to all players.
+			NETBroadcastPlayerInfo(index);
+
+			char buf[250] = {'\0'};
+			const char* pPlayerType = (NetPlay.players[index].isSpectator) ? "Spectator" : "Player";
+			snprintf(buf, sizeof(buf), "%s[%" PRIu8 "] %s has joined, IP is: %s", pPlayerType, index, getPlayerName(index), NetPlay.players[index].IPtextAddress);
+			debug(LOG_INFO, "%s", buf);
+			NETlogEntry(buf, SYNC_FLAG, index);
+
+			debug(LOG_NET, "%s, %s, with index of %u has joined using socket %p", pPlayerType, getPlayerName(index), (unsigned int)index, static_cast<void *>(connected_bsocket[index]));
+
+			// Increment player count
+			if (!NetPlay.players[index].isSpectator)
+			{
+				gameDetails.players.current++;
+			}
+			else
+			{
+				gameDetails.spectators.current++;
+			}
+
+			MultiPlayerJoin(index, joinRequestInfo.identity.toBytes(EcKey::Public));
+
+			handlePossiblePlayersShouldCheckReadyChange(previousPlayersShouldCheckReadyValue);
+
+			if (wz_command_interface_enabled())
+			{
+				std::string joinerPublicKeyB64 = base64Encode(joinRequestInfo.identity.toBytes(EcKey::Public));
+				std::string joinerIdentityHash = joinRequestInfo.identity.publicHashString();
+				std::string joinerName = joinRequestInfo.name;
+				std::string joinerNameB64 = base64Encode(std::vector<unsigned char>(joinerName.begin(), joinerName.end()));
+				wz_command_interface_output("WZEVENT: player join: %u %s %s %s %s\n", index, joinerPublicKeyB64.c_str(), joinerIdentityHash.c_str(), NetPlay.players[index].IPtextAddress, joinerNameB64.c_str());
+			}
+
+			// Broadcast to everyone that a new player has joined
+			{
+				auto w = NETbeginEncode(NETbroadcastQueue(), NET_PLAYER_JOINED);
+				NETuint8_t(w, index);
+				NETend(w);
+			}
+
+			for (uint8_t j = 0; j < MAX_CONNECTED_PLAYERS; ++j)
+			{
+				NETBroadcastPlayerInfo(j);
+			}
+			NETfixDuplicatePlayerNames(index);
+
+			// Send the updated gameListing to the masterserver
+			NETupdateLobbyGameListing();
+
+			// reset flags for new players
+			if (NetPlay.players[index].wzFiles)
+			{
+				NetPlay.players[index].wzFiles->clear();
+			}
+			else
+			{
+				ASSERT(false, "wzFiles is uninitialized?? (Player: %" PRIu8 ")", index);
+			}
+
+			wz_command_interface_output_room_status_json();
+
+			continue; // continue to next tmp_socket
+		}
+
+		// in all other cases, do a timeout check
+		std::chrono::milliseconds::rep timeout = (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingInitialConnect) ? 2500 : 3000;
+		if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyJoinCheckResult)
+		{
+			timeout = (firstAvailableTempSocketIdx().has_value()) ? 10000 : std::max<std::chrono::milliseconds::rep>(timeout, 6000);
+		}
+		if (tmp_connectState[i].connectState == TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckResponse)
+		{
+			timeout = 10000;
+		}
+
+		if (std::chrono::duration_cast<std::chrono::milliseconds>(currentSteadTime - tmp_connectState[i].connectTime).count() > timeout)
+		{
+			debug(LOG_INFO, "Freeing temp socket %p due to initial connection timeout (IP: %s)", static_cast<void *>(tmp_socket[i]), tmp_connectState[i].ip.c_str());
+
+			uint8_t rejected = 0;
+			rejected = ERROR_WRONGDATA;
+			auto w = NETbeginEncode(NETnetTmpQueue(i), NET_REJECTED);
+			NETuint8_t(w, rejected);
+			NETstring(w, "", 0);
+			NETend(w);
+			NETflush();
+			auto tmpQueue = NETnetTmpQueue(i);
+			if (NETisMessageReady(tmpQueue))
+			{
+				NETpop(tmpQueue);
+			}
+
+			std::string rIP = tmp_socket[i]->textAddress();
+			if (tmp_connectState[i].connectState != TmpSocketInfo::TmpConnectState::PendingLobbyJoinCheckResult
+				&& tmp_connectState[i].connectState != TmpSocketInfo::TmpConnectState::PendingLobbyConnectCheckResponse)
+			{
+				NETaddSessionBanBadIP(rIP);
+			}
+
+			NETcloseTempSocket(i);
+			sync_counter.cantjoin++;
+		}
+	}
+}
+
+namespace
+{
+
+void SetupKnownExternalIPv4Info(const std::string& externalIp, uint16_t extPort)
+{
+	knownExternalIPv4Info = KnownExternalConnInfo();
+	knownExternalIPv4Info.host = externalIp;
+	knownExternalIPv4Info.port = extPort;
+
+	std::string connType = (activeConnProvider) ? to_string(activeConnProvider->type()) : std::string();
+	std::string outputExternalIP = (!externalIp.empty()) ? externalIp : "unknown";
+	std::string outputGamePassword = (NETGameIsLocked()) ? NetPlay.gamePassword : "";
+	wz_command_interface_output("WZEVENT: readyForJoins: %s %" PRIu16 " %s %s\n", connType.c_str(), extPort, outputExternalIP.c_str(), outputGamePassword.c_str());
+}
+
+// Set the fields for GAMESTRUCT structure to announce it to the lobby server and other players.
+//
+// `gamestruct.desc.host` will be filled with `externalIp` contents if it's not empty.
+//
+// If `extPort == 0`, then `gamestruct.hostPort` will be filled with the default value from the configuration file,
+// otherwise, it will be set to `extPort`.
+void SetupGameStructInfo(const char* SessionName, const char* PlayerName, const EcKey& playerIdentity, bool spectatorHost, uint32_t maxPlayers, uint32_t gameType, uint32_t blindMode, uint8_t alliancesType, uint8_t techLevel, uint8_t powerLevel, uint8_t basesLevel)
+{
+	gameDetails = netlobby::GameDetails();
+
+	gameDetails.versionStr = versionString;
+	gameDetails.netcodeVer.major = NETCODE_VERSION_MAJOR;
+	gameDetails.netcodeVer.minor = NETCODE_VERSION_MINOR;
+
+	gameDetails.name = SessionName;
+	gameDetails.host.name = PlayerName;
+	gameDetails.host.publicIdentity = base64Encode(playerIdentity.toBytes(EcKey::Public));
+
+	gameDetails.map.name = game.map;
+	gameDetails.map.hash = (!game.hash.isZero()) ? game.hash.toString() : std::string();
+
+	auto loadedMods = getLoadedMods();
+	for (auto& mod : loadedMods)
+	{
+		netlobby::ModDetails modDetails;
+		modDetails.name = WzString::fromUtf8(mod.name);
+		auto modHash = mod.getHash();
+		if (!modHash.isZero())
+		{
+			modDetails.hash = WzString::fromUtf8(modHash.toString());
+		}
+		gameDetails.mods.push_back(modDetails);
+	}
+
+	gameDetails.players.current = (!spectatorHost) ? 1 : 0;
+	gameDetails.players.max = maxPlayers;
+
+	auto currentSpectatorInfo = SpectatorInfo::currentNetPlayState();
+	gameDetails.spectators.current = currentSpectatorInfo.spectatorsJoined;
+	gameDetails.spectators.max = currentSpectatorInfo.totalSpectatorSlots;
+
+	gameDetails.alliancesMode = alliancesType;
+	gameDetails.blindMode = blindMode;
+
+	NETsetLobbyLimitFlags(ingame.flags);
+
+	gameDetails.isPrivate = NETGameIsLocked();
+}
+
+} // anonymous namespace
+
+static void NETEnableAllowJoining()
+{
+	ASSERT_HOST_ONLY(return);
+	ASSERT_OR_RETURN(, !allow_joining, "allow_joining already true!");
+
+	// Once this is true, we are able to connect to the lobby server and announce to other players that
+	// this game session is available to join to.
+	allow_joining = true;
+
+	debug(LOG_NET, "Hosting a server. We are player %d.", selectedPlayer);
+}
+
+bool NEThostGame(const char *SessionName, const char *PlayerName, const EcKey& playerIdentity, bool spectatorHost,
+                 uint32_t gameType, uint32_t blindMode,
+                 UDWORD plyrs,	// # of players
+				 uint16_t defaultOpenSpectatorSlots,
+                 uint8_t alliancesType, uint8_t techLevel, uint8_t powerLevel, uint8_t basesLevel)
+{
+	debug(LOG_NET, "NEThostGame(%s, %s, %" PRIu32 ", %" PRIu32 ", %u)", SessionName, PlayerName,
+		  gameType, blindMode, plyrs);
+
+	netPlayersUpdated = true;
+
+	for (unsigned playerIndex = 0; playerIndex < MAX_CONNECTED_PLAYERS; ++playerIndex)
+	{
+		initPlayerNetworkProps(playerIndex);
+	}
+	if (!NetPlay.bComms)
+	{
+		ASSERT(!spectatorHost, "spectatorHost flag will be ignored");
+		selectedPlayer			= 0;
+		realSelectedPlayer		= selectedPlayer;
+		NetPlay.isHost			= true;
+		NetPlay.hostPlayer 		= selectedPlayer;
+		NetPlay.players[0].allocated	= true;
+		NetPlay.players[0].difficulty	= AIDifficulty::HUMAN;
+		NetPlay.playercount		= 1;
+		debug(LOG_NET, "Hosting but no comms");
+		// Now switch player color of the host to what they normally use for MP games
+		if (war_getMPcolour() >= 0)
+		{
+			changeColour(NetPlay.hostPlayer, war_getMPcolour(), realSelectedPlayer);
+		}
+		return true;
+	}
+
+	ASSERT_OR_RETURN(false, activeConnProvider != nullptr, "Active connection provider is not set!");
+
+	// Start listening for client connections on `gameserver_port`.
+	// These will initially be assigned to `tmp_socket[i]` until accepted in the game session,
+	// in which case `tmp_socket[i]` will be assigned to `connected_bsocket[i]` and `tmp_socket[i]`
+	// will become nullptr.
+	net::result<IListenSocket*> serverListenResult = {};
+	if (!server_listen_socket)
+	{
+		debug(LOG_INFO, "Opening listening socket (backend: %s)", to_string(activeConnProvider->type()).c_str());
+		serverListenResult = activeConnProvider->openListenSocket(gameserver_port);
+		server_listen_socket = serverListenResult.value_or(nullptr);
+	}
+	if (server_listen_socket == nullptr)
+	{
+		const auto sockErrMsg = serverListenResult.error().message();
+		debug(LOG_ERROR, "Cannot open listening connection: %s", sockErrMsg.c_str());
+		if (wz_command_interface_enabled())
+		{
+			std::string sockErrMsgB64 = base64Encode(std::vector<unsigned char>(sockErrMsg.begin(), sockErrMsg.end()));
+			wz_command_interface_output("WZEVENT: serverListenSocketFailed: %d %s\n", serverListenResult.error().value(), sockErrMsgB64.c_str());
+		}
+		return false;
+	}
+	debug(LOG_NET, "New server_listen_socket = %p", static_cast<void *>(server_listen_socket));
+	// Host needs to create a socket set for MAX_PLAYERS
+	if (!server_socket_set)
+	{
+		server_socket_set = activeConnProvider->newConnectionPollGroup();
+	}
+	// allocate socket storage for all possible players
+	for (unsigned i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+	{
+		connected_bsocket[i] = nullptr;
+		NETinitQueue(NETnetQueue(i));
+	}
+
+	NetPlay.isHost = true;
+	NETlogEntry("Hosting game, resetting ban list.", SYNC_FLAG, 0);
+	NETpermissionsInit();
+	playerManagementRecord.clear();
+
+	if (spectatorHost)
+	{
+		// open one spectator slot for the host
+		ASSERT(_NET_openNewSpectatorSlot_internal(false).has_value(), "Unable to open spectator slot for host??");
+	}
+	optional<uint32_t> newHostPlayerIdx = NET_CreatePlayer(PlayerName, (getHostLaunch() == HostLaunch::Autohost), spectatorHost);
+	ASSERT_OR_RETURN(false, newHostPlayerIdx.has_value() && (newHostPlayerIdx.value() < MAX_PLAYERS || (spectatorHost && newHostPlayerIdx.value() < MAX_CONNECTED_PLAYERS)), "Failed to create player");
+	selectedPlayer = newHostPlayerIdx.value();
+	realSelectedPlayer = selectedPlayer;
+	NetPlay.isHost	= true;
+	NetPlay.isHostAlive = true;
+	NetPlay.hostPlayer	= selectedPlayer;
+
+	MultiPlayerJoin(selectedPlayer, nullopt);
+
+	// Now switch player color of the host to what they normally use for SP games
+	if (NetPlay.hostPlayer < MAX_PLAYERS && war_getMPcolour() >= 0)
+	{
+		changeColour(NetPlay.hostPlayer, war_getMPcolour(), realSelectedPlayer);
+	}
+
+	// Enable spectator slots as desired
+	{
+		auto currentSpectatorSlotInfo = SpectatorInfo::currentNetPlayState();
+		auto desiredDefaultOpenSpectatorSlots = std::min<uint16_t>(defaultOpenSpectatorSlots, MAX_SPECTATOR_SLOTS);
+		if (currentSpectatorSlotInfo.availableSpectatorSlots() < desiredDefaultOpenSpectatorSlots)
+		{
+			for (uint16_t addedSpecSlots = currentSpectatorSlotInfo.availableSpectatorSlots(); addedSpecSlots < desiredDefaultOpenSpectatorSlots; ++addedSpecSlots)
+			{
+				if (!NETopenNewSpectatorSlot())
+				{
+					break;
+				}
+			}
+		}
+	}
+
+	knownExternalIPv4Info = KnownExternalConnInfo();
+	if (lobbyHostingHandler)
+	{
+		lobbyHostingHandler->removeGameListing(false);
+		lobbyHostingHandler.reset();
+	}
+
+	SetupGameStructInfo(SessionName, PlayerName, playerIdentity, spectatorHost, plyrs, gameType, blindMode, alliancesType, techLevel, powerLevel, basesLevel);
+
+	if (ipv4MappingRequest)
+	{
+		// Do not allow others to join and delay announcing the game session to the lobby server
+		// until we manage to setup (successfully or not) the port mapping rule for the `gameserver_port`.
+		PortMappingManager::instance().attach_callback(ipv4MappingRequest,
+			[](std::string externalIp, uint16_t extPort) // success callback
+		{
+			// Setup gamestruct with the external ip + port combination received from the LibPlum.
+			SetupKnownExternalIPv4Info(externalIp, extPort);
+
+			// Only allow joining the game once the server has successfully discovered its external IP + port combination.
+			//
+			// Once this is true, we are able to connect to the lobby server and announce to other players that
+			// this game session is available to join to.
+			NETEnableAllowJoining();
+		}, [](PortMappingDiscoveryStatus /*status*/) // failure callback
+		{
+			// Allow joining with the default gameserver host + port combination and proceed as usual in the hope
+			// that others will still be able to connect to us.
+			SetupKnownExternalIPv4Info(std::string(), gameserver_port);
+
+			NETEnableAllowJoining();
+		});
+	}
+	else
+	{
+		ASSERT(!NetPlay.isPortMappingEnabled, "Expected to have an in-flight port mapping request to attach to");
+
+		// Allow joining with the default gameserver host + port combination and proceed as usual in the hope
+		// that others will still be able to connect to us.
+		SetupKnownExternalIPv4Info(std::string(), gameserver_port);
+
+		NETEnableAllowJoining();
+	}
+
+	return true;
+}
+
+// ////////////////////////////////////////////////////////////////////////
+// Stop the dplay interface from accepting more players.
+bool NEThaltJoining(bool matchStarted)
+{
+	debug(LOG_NET, "temporarily locking game to prevent more players");
+
+	allow_joining = false;
+	// disconnect from the master server
+	if (lobbyHostingHandler)
+	{
+		lobbyHostingHandler->removeGameListing(matchStarted);
+		lobbyHostingHandler.reset();
+	}
+	return true;
+}
+
+// "consumes" the sockets and related info
+bool NETpromoteJoinAttemptToEstablishedConnectionToHost(uint32_t hostPlayer, uint8_t index, const char *playername, NETQUEUE joiningQUEUEInfo, IClientConnection** client_joining_socket, IConnectionPollGroup** client_joining_socket_set)
+{
+	if (hostPlayer >= MAX_CONNECTED_PLAYERS)
+	{
+		debug(LOG_ERROR, "Bad host player number (%" PRIu32 ") received from host!", hostPlayer);
+		return false;
+	}
+
+	if (index >= MAX_CONNECTED_PLAYERS || index == hostPlayer)
+	{
+		debug(LOG_ERROR, "Bad player number (%u) received from host!", index);
+		return false;
+	}
+
+	NetPlay.hostPlayer = hostPlayer;
+
+	// On success, promote the temporary socket / socketset / queuepair to their permanent (stable) locations
+	NETinitQueue(NETnetQueue(NetPlay.hostPlayer));
+	NETmoveQueue(joiningQUEUEInfo, NETnetQueue(NetPlay.hostPlayer));
+
+	// Promote transient socket to stable client connection.
+	// bsocket = client_joining_socket, client_joining_socket = nullptr now!
+	bsocket = *client_joining_socket;
+	*client_joining_socket = nullptr;
+	client_socket_set = *client_joining_socket_set;
+	*client_joining_socket_set = nullptr;
+
+	debug(LOG_NET, "NET_ACCEPTED received. Accepted into the game - I'm player %u using bsocket %p", (unsigned int)index, static_cast<void *>(bsocket));
+
+	selectedPlayer = index;
+	realSelectedPlayer = selectedPlayer;
+	NetPlay.isHost = false;
+	NetPlay.isHostAlive = true;
+
+	NetPlay.players[index].allocated = true;
+	setPlayerName(index, playername);
+	NetPlay.players[index].heartbeat = true;
+
+	// Store the host's address
+	lastHostAddress = bsocket->textAddress();
+
+	return true;
+}
+
+/*!
+ * Set the masterserver name
+ * \param hostname The hostname of the masterserver to connect to
+ */
+void NETsetLobbyserverAddress(std::string_view lobbyAddress)
+{
+	masterserver_name = std::string(lobbyAddress);
+}
+
+/**
+ * @return The hostname of the masterserver we will connect to.
+ */
+const std::string& NETgetLobbyserverAddress()
+{
+	return masterserver_name;
+}
+
+/*!
+ * Set the port we shall host games on
+ * \param port The port to listen to
+ */
+void NETsetGameserverPort(unsigned int port)
+{
+	gameserver_port = port;
+}
+
+/**
+ * @return The port we will host games on.
+ */
+unsigned int NETgetGameserverPort()
+{
+	return gameserver_port;
+}
+
+/**
+ * @return The size of the join connection challenge (see: NET_PING in NETallowJoining())
+ */
+uint32_t NETgetJoinConnectionNETPINGChallengeFromHostSize()
+{
+	return NET_PING_TMP_PING_CHALLENGE_SIZE;
+}
+
+uint32_t NETgetJoinConnectionNETPINGChallengeFromClientSize()
+{
+	return NET_PING_TMP_PING_CHALLENGE_SIZE / 2;
+}
+
+static void appendSignatureDataTag(std::vector<uint8_t>& data, const char *tag)
+{
+	data.push_back(0);
+	data.insert(data.end(), tag, tag + strlen(tag));
+	data.push_back(0);
+}
+
+static void appendSignatureDataUint32(std::vector<uint8_t>& data, uint32_t value)
+{
+	for (int shift = 24; shift >= 0; shift -= 8)
+	{
+		data.push_back(static_cast<uint8_t>(value >> shift));
+	}
+}
+
+static void appendSignatureDataBytes(std::vector<uint8_t>& data, const uint8_t *bytes, size_t size)
+{
+	appendSignatureDataUint32(data, static_cast<uint32_t>(size));
+	data.insert(data.end(), bytes, bytes + size);
+}
+
+std::vector<uint8_t> NETpingSignatureData(const uint8_t *challenge, size_t challengeSize, uint32_t pingerIndex, uint32_t responderIndex, uint32_t hostIndex, const EcKey::Key& hostPublicKey)
+{
+	std::vector<uint8_t> data;
+	appendSignatureDataTag(data, "WZ:ping:1");
+	appendSignatureDataBytes(data, challenge, challengeSize);
+	appendSignatureDataUint32(data, pingerIndex);
+	appendSignatureDataUint32(data, responderIndex);
+	appendSignatureDataUint32(data, hostIndex);
+	appendSignatureDataBytes(data, hostPublicKey.data(), hostPublicKey.size());
+	return data;
+}
+
+std::vector<uint8_t> NETjoinClientSignatureData(const std::vector<uint8_t>& hostChallenge, const EcKey::Key& hostPublicKey, const EcKey::Key& clientPublicKey)
+{
+	std::vector<uint8_t> data;
+	appendSignatureDataTag(data, "WZ:join-client:1");
+	appendSignatureDataBytes(data, hostChallenge.data(), hostChallenge.size());
+	appendSignatureDataBytes(data, hostPublicKey.data(), hostPublicKey.size());
+	appendSignatureDataBytes(data, clientPublicKey.data(), clientPublicKey.size());
+	return data;
+}
+
+std::vector<uint8_t> NETjoinHostSignatureData(const std::vector<uint8_t>& clientChallenge, const EcKey::Key& clientPublicKey, const EcKey::Key& hostPublicKey)
+{
+	std::vector<uint8_t> data;
+	appendSignatureDataTag(data, "WZ:join-host:1");
+	appendSignatureDataBytes(data, clientChallenge.data(), clientChallenge.size());
+	appendSignatureDataBytes(data, clientPublicKey.data(), clientPublicKey.size());
+	appendSignatureDataBytes(data, hostPublicKey.data(), hostPublicKey.size());
+	return data;
+}
+
+/*!
+* Set the join preference for IPv6
+* \param bTryIPv6First Whether to attempt IPv6 first when joining, before IPv4.
+*/
+void NETsetJoinPreferenceIPv6(bool bTryIPv6First)
+{
+	bJoinPrefTryIPv6First = bTryIPv6First;
+}
+
+/**
+* @return Whether joining a game that advertises both IPv6 and IPv4 should attempt IPv6 first.
+*/
+bool NETgetJoinPreferenceIPv6()
+{
+	return bJoinPrefTryIPv6First;
+}
+
+void NETsetDefaultMPHostFreeChatPreference(bool enabled)
+{
+	bDefaultHostFreeChatEnabled = enabled;
+}
+
+bool NETgetDefaultMPHostFreeChatPreference()
+{
+	return bDefaultHostFreeChatEnabled;
+}
+
+void NETsetEnableTCPNoDelay(bool enabled)
+{
+	bEnableTCPNoDelay = enabled;
+}
+
+bool NETgetEnableTCPNoDelay()
+{
+	return bEnableTCPNoDelay;
+}
+
+void NETsetPlayerConnectionStatus(CONNECTION_STATUS status, unsigned player)
+{
+	unsigned n;
+	const int timeouts[] = {GAME_TICKS_PER_SEC * 10, GAME_TICKS_PER_SEC * 10, GAME_TICKS_PER_SEC, GAME_TICKS_PER_SEC / 6};
+	ASSERT(ARRAY_SIZE(timeouts) == CONNECTIONSTATUS_NORMAL, "Connection status timeout array too small.");
+
+	if (player == NET_ALL_PLAYERS)
+	{
+		for (n = 0; n < MAX_CONNECTED_PLAYERS; ++n)
+		{
+			NETsetPlayerConnectionStatus(status, n);
+		}
+		return;
+	}
+	ASSERT_OR_RETURN(, player < MAX_CONNECTED_PLAYERS, "Invalid player: %u", player);
+	if (status == CONNECTIONSTATUS_NORMAL)
+	{
+		for (n = 0; n < CONNECTIONSTATUS_NORMAL; ++n)
+		{
+			NET_PlayerConnectionStatus[n][player] = 0;
+		}
+		return;
+	}
+
+	NET_PlayerConnectionStatus[status][player] = realTime + timeouts[status];
+}
+
+bool NETcheckPlayerConnectionStatus(CONNECTION_STATUS status, unsigned player)
+{
+	unsigned n;
+
+	if (player == NET_ALL_PLAYERS)
+	{
+		for (n = 0; n < MAX_CONNECTED_PLAYERS; ++n)
+		{
+			if (NETcheckPlayerConnectionStatus(status, n))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+	ASSERT_OR_RETURN(false, player < MAX_CONNECTED_PLAYERS, "Invalid player: %u", player);
+	if (status == CONNECTIONSTATUS_NORMAL)
+	{
+		for (n = 0; n < CONNECTIONSTATUS_NORMAL; ++n)
+		{
+			if (NETcheckPlayerConnectionStatus((CONNECTION_STATUS)n, player))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	return realTime < NET_PlayerConnectionStatus[status][player];
+}
+
+const char *messageTypeToString(unsigned messageType_)
+{
+	MESSAGE_TYPES messageType = (MESSAGE_TYPES)messageType_;  // Cast to enum, so switch gives a warning if new message types are added without updating the switch.
+
+	switch (messageType)
+	{
+	// Search:  ^\s*([\w_]+).*
+	// Replace: case \1:                             return "\1";
+	// Search:  (case ...............................) *(return "[\w_]+";)
+	// Replace: \t\t\1\2
+
+	// Net-related messages.
+	case NET_MIN_TYPE:                  return "NET_MIN_TYPE";
+	case NET_PING:                      return "NET_PING";
+	case NET_PLAYER_STATS:              return "NET_PLAYER_STATS";
+	case NET_TEXTMSG:                   return "NET_TEXTMSG";
+	case NET_PLAYERRESPONDING:          return "NET_PLAYERRESPONDING";
+	case NET_OPTIONS:                   return "NET_OPTIONS";
+	case NET_KICK:                      return "NET_KICK";
+	case NET_FIREUP:                    return "NET_FIREUP";
+	case NET_COLOURREQUEST:             return "NET_COLOURREQUEST";
+	case NET_FACTIONREQUEST:            return "NET_FACTIONREQUEST";
+	case NET_AITEXTMSG:                 return "NET_AITEXTMSG";
+	case NET_BEACONMSG:                 return "NET_BEACONMSG";
+	case NET_TEAMREQUEST:               return "NET_TEAMREQUEST";
+	case NET_JOIN:                      return "NET_JOIN";
+	case NET_ACCEPTED:                  return "NET_ACCEPTED";
+	case NET_PLAYER_INFO:               return "NET_PLAYER_INFO";
+	case NET_PLAYER_JOINED:             return "NET_PLAYER_JOINED";
+	case NET_PLAYER_LEAVING:            return "NET_PLAYER_LEAVING";
+	case NET_PLAYER_DROPPED:            return "NET_PLAYER_DROPPED";
+	case NET_GAME_FLAGS:                return "NET_GAME_FLAGS";
+	case NET_READY_REQUEST:             return "NET_READY_REQUEST";
+	case NET_REJECTED:                  return "NET_REJECTED";
+	case NET_POSITIONREQUEST:           return "NET_POSITIONREQUEST";
+	case NET_DATA_CHECK:                return "NET_DATA_CHECK";
+	case NET_HOST_DROPPED:              return "NET_HOST_DROPPED";
+	case NET_SEND_TO_PLAYER:            return "NET_SEND_TO_PLAYER";
+	case NET_SHARE_GAME_QUEUE:          return "NET_SHARE_GAME_QUEUE";
+	case NET_FILE_REQUESTED:            return "NET_FILE_REQUESTED";
+	case NET_FILE_CANCELLED:            return "NET_FILE_CANCELLED";
+	case NET_FILE_PAYLOAD:              return "NET_FILE_PAYLOAD";
+	case NET_DEBUG_SYNC:                return "NET_DEBUG_SYNC";
+	case NET_VOTE:                      return "NET_VOTE";
+	case NET_VOTE_REQUEST:              return "NET_VOTE_REQUEST";
+	case NET_SPECTEXTMSG:				return "NET_SPECTEXTMSG";
+	case NET_PLAYERNAME_CHANGEREQUEST:  return "NET_PLAYERNAME_CHANGEREQUEST";
+	case NET_PLAYER_SLOTTYPE_REQUEST:   return "NET_PLAYER_SLOTTYPE_REQUEST";
+	case NET_PLAYER_SWAP_INDEX:         return "NET_PLAYER_SWAP_INDEX";
+	case NET_PLAYER_SWAP_INDEX_ACK:     return "NET_PLAYER_SWAP_INDEX_ACK";
+	case NET_DATA_CHECK2:               return "NET_DATA_CHECK2";
+	case NET_SECURED_NET_MESSAGE:		return "NET_SECURED_NET_MESSAGE";
+	case NET_TEAM_STRATEGY:				return "NET_TEAM_STRATEGY";
+	case NET_QUICK_CHAT_MSG:			return "NET_QUICK_CHAT_MSG";
+	case NET_HOST_CONFIG:				return "NET_HOST_CONFIG";
+	case NET_MAX_TYPE:                  return "NET_MAX_TYPE";
+
+	// Game-state-related messages, must be processed by all clients at the same game time.
+	case GAME_MIN_TYPE:                 return "GAME_MIN_TYPE";
+	case GAME_DROIDINFO:                return "GAME_DROIDINFO";
+	case GAME_STRUCTUREINFO:            return "GAME_STRUCTUREINFO";
+	case GAME_RESEARCHSTATUS:           return "GAME_RESEARCHSTATUS";
+	case GAME_TEMPLATE:                 return "GAME_TEMPLATE";
+	case GAME_TEMPLATEDEST:             return "GAME_TEMPLATEDEST";
+	case GAME_ALLIANCE:                 return "GAME_ALLIANCE";
+	case GAME_GIFT:                     return "GAME_GIFT";
+	case GAME_LASSAT:                   return "GAME_LASSAT";
+	case GAME_GAME_TIME:                return "GAME_GAME_TIME";
+	case GAME_PLAYER_LEFT:              return "GAME_PLAYER_LEFT";
+	case GAME_DROIDDISEMBARK:           return "GAME_DROIDDISEMBARK";
+	case GAME_SYNC_REQUEST:             return "GAME_SYNC_REQUEST";
+
+	// The following messages are used for debug mode.
+	case GAME_DEBUG_MODE:               return "GAME_DEBUG_MODE";
+	case GAME_DEBUG_ADD_DROID:          return "GAME_DEBUG_ADD_DROID";
+	case GAME_DEBUG_ADD_STRUCTURE:      return "GAME_DEBUG_ADD_STRUCTURE";
+	case GAME_DEBUG_ADD_FEATURE:        return "GAME_DEBUG_ADD_FEATURE";
+	case GAME_DEBUG_REMOVE_DROID:       return "GAME_DEBUG_REMOVE_DROID";
+	case GAME_DEBUG_REMOVE_STRUCTURE:   return "GAME_DEBUG_REMOVE_STRUCTURE";
+	case GAME_DEBUG_REMOVE_FEATURE:     return "GAME_DEBUG_REMOVE_FEATURE";
+	case GAME_DEBUG_FINISH_RESEARCH:    return "GAME_DEBUG_FINISH_RESEARCH";
+	// End of redundant messages.
+	case GAME_SYNC_OPT_CHANGE:			return "GAME_SYNC_OPT_CHANGE";
+	case GAME_MAX_TYPE:                 return "GAME_MAX_TYPE";
+
+	// The following messages are used for playing back replays.
+	case REPLAY_ENDED:                  return "REPLAY_ENDED";
+	// End of replay messages.
+	}
+	return "(UNUSED)";
+}
+
+
+void NETacceptIncomingConnections()
+{
+	ASSERT_HOST_ONLY(return);
+	if (!allow_joining)
+	{
+		return;
+	}
+
+	// First-time initialize `tmp_socket_set` if needed.
+	if (tmp_socket_set == nullptr)
+	{
+		// initialize temporary server socket set
+		// FIXME: why is this not done in NETinit()?? - Per
+		ASSERT_OR_RETURN(, activeConnProvider != nullptr, "Active connection provider is not set!");
+		tmp_socket_set = activeConnProvider->newConnectionPollGroup();
+		// FIXME: I guess initialization of allowjoining is here now... - FlexCoral
+		for (auto& tmpState : tmp_connectState)
+		{
+			tmpState.reset();
+		}
+		tmp_pendingIPs.clear();
+		// NOTE: Do *NOT* call tmp_badIPs.clear() here - we want to preserve it until quit
+	}
+
+	// Find the first empty socket slot
+	auto optFirstAvailableTmpSocketIdx = firstAvailableTempSocketIdx();
+	if (!optFirstAvailableTmpSocketIdx.has_value() || optFirstAvailableTmpSocketIdx.value() >= MAX_TMP_SOCKETS)
+	{
+		debug(LOG_NET, "all temp sockets are currently used up!");
+		return;
+	}
+	size_t i = optFirstAvailableTmpSocketIdx.value();
+
+	// See if there's an incoming connection
+	tmp_socket[i] = server_listen_socket->accept();
+	if (!tmp_socket[i])
+	{
+		return;
+	}
+	const std::string rIP = tmp_socket[i]->textAddress();
+	if (quickRejectConnection(rIP))
+	{
+		debug(LOG_NET, "freeing temp socket %p (%d)", static_cast<void*>(tmp_socket[i]), __LINE__);
+		tmp_socket[i]->close();
+		tmp_socket[i] = nullptr;
+		tmp_connectState[i].reset();
+		return;
+	}
+
+	NETinitQueue(NETnetTmpQueue(i));
+	tmp_socket_set->add(tmp_socket[i]);
+
+	tmp_pendingIPs[rIP]++;
+
+	std::string rIPLogEntry = "Incoming connection from:";
+	rIPLogEntry.append(rIP);
+	NETlogEntry(rIPLogEntry.c_str(), SYNC_FLAG, i);
+
+	tmp_connectState[i].ip = rIP;
+	tmp_connectState[i].connectTime = std::chrono::steady_clock::now();
+	tmp_connectState[i].connectState = TmpSocketInfo::TmpConnectState::PendingInitialConnect;
+
+	if (bEnableTCPNoDelay)
+	{
+		// Disable use of Nagle Algorithm for the TCP socket (i.e. enable TCP_NODELAY option in case of TCP connection)
+		tmp_socket[i]->useNagleAlgorithm(false);
+	}
+}
+
+void NETadjustConnectedTimeoutForClients()
+{
+	constexpr std::chrono::milliseconds IN_GAME_CONNECTED_TIMEOUT{ 60000 };
+
+	if (NetPlay.isHost)
+	{
+		for (size_t i = 0; i < MAX_CONNECTED_PLAYERS; ++i)
+		{
+			if (connected_bsocket[i] != nullptr)
+			{
+				connected_bsocket[i]->setConnectedTimeout(IN_GAME_CONNECTED_TIMEOUT);
+			}
+		}
+		return;
+	}
+	if (bsocket)
+	{
+		bsocket->setConnectedTimeout(IN_GAME_CONNECTED_TIMEOUT);
+	}
+}
+
+optional<std::string> NET_getCurrentHostTextAddress()
+{
+	if (!bsocket)
+	{
+		return lastHostAddress.value();
+	}
+	return bsocket->textAddress();
+}

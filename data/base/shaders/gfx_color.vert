@@ -1,0 +1,28 @@
+// Version directive is set by Warzone when loading the shader
+// (This shader supports GLSL 1.20 - 1.50 core.)
+
+layout(std140) uniform cbuffer {
+	mat4 transformationMatrix;
+};
+
+#if (!defined(GL_ES) && (__VERSION__ >= 130)) || (defined(GL_ES) && (__VERSION__ >= 300))
+in vec4 vertex;
+in vec2 vertexTexCoord;
+in vec4 vertexColor;
+#else
+attribute vec4 vertex;
+attribute vec2 vertexTexCoord;
+attribute vec4 vertexColor;
+#endif
+
+#if (!defined(GL_ES) && (__VERSION__ >= 130)) || (defined(GL_ES) && (__VERSION__ >= 300))
+out vec4 vColour;
+#else
+varying vec4 vColour;
+#endif
+
+void main()
+{
+	gl_Position = transformationMatrix * vertex;
+	vColour = vertexColor;
+}

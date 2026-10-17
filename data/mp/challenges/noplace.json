@@ -1,0 +1,55 @@
+{
+	"challenge": {
+		"bases": 2,
+		"description": "You've got seven AI players on your tail. There's nowhere to run, nowhere to hide.",
+		"difficulty": "Ultimate",
+		"map": "Sk-MizaMaze",
+		"maxPlayers": 8,
+		"name": "No Place To Hide",
+		"powerLevel": 1,
+		"scavengers": 0,
+		"techLevel": 1,
+		"version": 2
+	},
+	"locked": {
+		"position": "true"
+	},
+	"player_0": {
+		"team": 0
+	},
+	"player_1": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_2": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_3": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_4": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_5": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_6": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	},
+	"player_7": {
+		"ai": "multiplay/skirmish/nexus.js",
+		"difficulty": "Hard",
+		"team": 1
+	}
+}

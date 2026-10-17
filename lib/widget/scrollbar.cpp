@@ -1,0 +1,136 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 2020  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+/**
+ * @file
+ * Functions for scroll bar.
+ */
+
+#include <memory>
+#include "scrollbar.h"
+#include "lib/ivis_opengl/pieblitfunc.h"
+#include "src/intimage.h"
+
+static void displayScrollBar(WIDGET *widget, UDWORD xOffset, UDWORD yOffset)
+{
+	auto slider = (W_SLIDER *)widget;
+
+	int x0 = slider->x() + xOffset;
+	int y0 = slider->y() + yOffset;
+
+	RenderWindowFrame(FRAME_NORMAL, x0, y0, slider->width(), slider->height());
+	// pie_UniTransBoxFill(x0, y0, x0 + slider->width(), y0 + slider->height(), WZCOL_DBLUE);
+
+	auto sliderY = slider->numStops > 0 ? static_cast<int>(static_cast<int64_t>(slider->height() - slider->barSize) * slider->pos / slider->numStops) : 0;
+	int sliderDrawY0 = y0 + sliderY+2;
+	int sliderDrawY1 = y0 + sliderY + std::max<int>(slider->barSize,5)-2;
+	if (sliderDrawY1 - sliderDrawY0 <= 2)
+	{
+		--sliderDrawY0;
+		++sliderDrawY1;
+	}
+	pie_UniTransBoxFill(x0+2, sliderDrawY0, x0 + slider->width()-2, sliderDrawY1, slider->isEnabled() ? WZCOL_LBLUE : WZCOL_FORM_DISABLE);
+}
+
+void ScrollBarWidget::initialize()
+{
+	W_SLDINIT sliderInit;
+	attach(slider = std::make_shared<W_SLIDER>(&sliderInit));
+	slider->numStops = 0;
+	slider->barSize = 0;
+	slider->orientation = WSLD_TOP;
+	slider->displayFunction = displayScrollBar;
+	slider->setIsGamepadCursorMagnetTarget(false);
+}
+
+void ScrollBarWidget::geometryChanged()
+{
+	slider->setGeometry(0, 0, width(), height());
+}
+
+uint32_t ScrollBarWidget::position() const
+{
+	return slider->pos;
+}
+
+void ScrollBarWidget::setPosition(uint32_t newPosition)
+{
+	slider->pos = std::min(newPosition, slider->numStops);
+}
+
+void ScrollBarWidget::incrementPosition(int32_t amount)
+{
+	if (isEnabled()) {
+		// signed 64-bit intermediate: a negative amount must not wrap the unsigned pos
+		int64_t pos = static_cast<int64_t>(slider->pos) + amount;
+		slider->pos = static_cast<uint32_t>(std::max<int64_t>(0, std::min<int64_t>(pos, slider->numStops)));
+	}
+}
+
+void ScrollBarWidget::setScrollableSize(uint32_t value)
+{
+	auto moveToBottom = stickToBottom && slider->pos == slider->numStops;
+	scrollableSize = value;
+	updateSlider();
+	if (moveToBottom) {
+		slider->pos = slider->numStops;
+	}
+}
+
+void ScrollBarWidget::setViewSize(uint32_t value)
+{
+	viewSize = value;
+	updateSlider();
+}
+
+void ScrollBarWidget::setMinimumSliderSize(uint32_t value)
+{
+	minimumSliderSize = value;
+	updateSlider();
+}
+
+void ScrollBarWidget::setStickToBottom(bool value)
+{
+	stickToBottom = value;
+}
+
+void ScrollBarWidget::updateSlider()
+{
+	uint32_t trackSize = static_cast<uint32_t>(std::max(height(), 0));
+	uint32_t barSize = scrollableSize > 0 ? viewSize * trackSize / scrollableSize : 0;
+	barSize = std::min(trackSize, std::max<uint32_t>(barSize, std::min<uint32_t>(minimumSliderSize, trackSize)));
+	slider->barSize = static_cast<UWORD>(std::min<uint32_t>(barSize, UINT16_MAX));
+	// unsigned now: MAX(0, a - b) would wrap instead of clamping
+	slider->numStops = (scrollableSize > viewSize) ? (scrollableSize - viewSize) : 0;
+	slider->pos = std::min(slider->pos, slider->numStops);
+}
+
+void ScrollBarWidget::enable()
+{
+	slider->enable();
+}
+
+void ScrollBarWidget::disable()
+{
+	slider->disable();
+}
+
+bool ScrollBarWidget::isEnabled() const
+{
+	return slider->isEnabled();
+}

@@ -1,0 +1,92 @@
+{
+  "_comment": "Acceptance scenario sums across arrangements 0-4, recorded with no pathfinding features. Regenerate with tests/movebench/run.sh --acceptance --baseline.",
+  "arrangements": [
+    0,
+    1,
+    2,
+    3,
+    4
+  ],
+  "scenarios": {
+    "mountain_chain": {
+      "arrival_p50_s": 44.5,
+      "arrival_p95_s": 303.9,
+      "detourPct_p95": 174,
+      "hardStops": 782298,
+      "hardStopsNear": 4387,
+      "hardStopsTopSharePct": 6,
+      "hardStopsTransit": 777911,
+      "repaths": 13879,
+      "settle_p50_s": 400.0,
+      "settle_p95_s": 400.0,
+      "stallSharePct_p50": 93,
+      "unitsArrived": 127,
+      "unitsNear": 191,
+      "worstArrival_s": 400.0
+    },
+    "mountain_chain_cross": {
+      "arrival_p50_s": 46.6,
+      "arrival_p95_s": 264.3,
+      "detourPct_p95": 198,
+      "hardStops": 566488,
+      "hardStopsNear": 20177,
+      "hardStopsTopSharePct": 18,
+      "hardStopsTransit": 546311,
+      "repaths": 10081,
+      "settle_p50_s": 97.3,
+      "settle_p95_s": 400.0,
+      "stallSharePct_p50": 93,
+      "unitsArrived": 131,
+      "unitsNear": 250,
+      "worstArrival_s": 400.0
+    },
+    "open_corner": {
+      "arrival_p50_s": 52.4,
+      "arrival_p95_s": 291.9,
+      "detourPct_p95": 139,
+      "hardStops": 4529649,
+      "hardStopsNear": 85,
+      "hardStopsTopSharePct": 0,
+      "hardStopsTransit": 4529564,
+      "repaths": 76829,
+      "settle_p50_s": 400.0,
+      "settle_p95_s": 400.0,
+      "stallSharePct_p50": 95,
+      "unitsArrived": 97,
+      "unitsNear": 100,
+      "worstArrival_s": 400.0
+    },
+    "rush_corner": {
+      "arrival_p50_s": 81.3,
+      "arrival_p95_s": 396.8,
+      "detourPct_p95": 140,
+      "hardStops": 4440867,
+      "hardStopsNear": 60,
+      "hardStopsTopSharePct": 0,
+      "hardStopsTransit": 4440807,
+      "repaths": 74435,
+      "settle_p50_s": 400.0,
+      "settle_p95_s": 400.0,
+      "stallSharePct_p50": 95,
+      "unitsArrived": 111,
+      "unitsNear": 113,
+      "worstArrival_s": 400.0
+    },
+    "rush_turn": {
+      "arrival_p50_s": 27.7,
+      "arrival_p95_s": 126.8,
+      "detourPct_p95": 300,
+      "hardStops": 69057,
+      "hardStopsNear": 12770,
+      "hardStopsTopSharePct": 30,
+      "hardStopsTransit": 56287,
+      "repaths": 1065,
+      "settle_p50_s": 39.3,
+      "settle_p95_s": 114.8,
+      "stallSharePct_p50": 62,
+      "unitsArrived": 171,
+      "unitsNear": 410,
+      "worstArrival_s": 184.2
+    }
+  }
+}

@@ -1,0 +1,14 @@
+/*
+ * Cam2-7s.wrf
+ *
+ */
+
+/* Directory for Proximity messages and mission briefs */
+directory	"messages"
+file		FLIC		"brief2-7.json"
+
+directory "script"
+file JAVASCRIPT "rules.js"
+
+directory       "script/campaign"
+file            JAVASCRIPT      "cam2-7s.js"

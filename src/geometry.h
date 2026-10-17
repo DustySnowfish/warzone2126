@@ -1,0 +1,77 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 1999-2004  Eidos Interactive
+	Copyright (C) 2005-2020  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+
+#ifndef __INCLUDED_SRC_GEOMETRY_H__
+#define __INCLUDED_SRC_GEOMETRY_H__
+
+#include "map.h"
+#include "game_world.h"
+#include "world_map_state.h"
+
+struct WorldObjectState;
+
+struct QUAD
+{
+	Vector2i coords[4] = {{0,0}, {0,0}, {0,0}, {0,0}};
+};
+
+uint16_t calcDirection(int32_t x0, int32_t y0, int32_t x1, int32_t y1);
+bool inQuad(const Vector2i *pt, const QUAD *quad);
+Vector2i positionInQuad(Vector2i const &pt, QUAD const &quad);
+DROID *getNearestDroid(WorldObjectState& objState, UDWORD x, UDWORD y, bool bSelected);
+bool objectOnScreen(const BASE_OBJECT *object, SDWORD tolerance);
+
+static inline STRUCTURE *getTileStructure(WorldMapState& mapState, UDWORD x, UDWORD y)
+{
+	BASE_OBJECT *psObj = mapTile(mapState, x, y)->psObject;
+	if (psObj && psObj->type == OBJ_STRUCTURE)
+	{
+		return (STRUCTURE *)psObj;
+	}
+	return nullptr;
+}
+
+static inline FEATURE *getTileFeature(WorldMapState& mapState, UDWORD x, UDWORD y)
+{
+	BASE_OBJECT *psObj = mapTile(mapState, x, y)->psObject;
+	if (psObj && psObj->type == OBJ_FEATURE)
+	{
+		return (FEATURE *)psObj;
+	}
+	return nullptr;
+}
+
+/// WARNING: Returns NULL if tile not visible to selectedPlayer.
+/// Must *NOT* be used for anything game-state/simulation-calculation related
+static inline BASE_OBJECT *getTileOccupier(WorldMapState& mapState, UDWORD x, UDWORD y)
+{
+	MAPTILE *psTile = mapTile(mapState, x, y);
+
+	if (TEST_TILE_VISIBLE_TO_SELECTEDPLAYER(psTile))
+	{
+		return mapTile(mapState, x, y)->psObject;
+	}
+	else
+	{
+		return nullptr;
+	}
+}
+
+#endif // __INCLUDED_SRC_GEOMETRY_H__

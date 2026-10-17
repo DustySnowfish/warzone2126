@@ -1,0 +1,90 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 1999-2004  Eidos Interactive
+	Copyright (C) 2005-2020  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+/** \file
+ *  Definitions for missions.
+ */
+
+#ifndef __INCLUDED_MISSIONDEF_H__
+#define __INCLUDED_MISSIONDEF_H__
+
+#include "map.h"
+#include "structuredef.h"
+#include "droiddef.h"
+#include "featuredef.h"
+#include "power.h"
+#include "gateway.h"
+#include "game_world.h"
+
+//mission types
+
+//used to set the reinforcement time on hold whilst the Transporter is unable to land
+//hopefully they'll never need to set it this high for other reasons!
+#define SCR_LZ_COMPROMISED_TIME     999990
+//this is used to compare the value passed in from the scripts with which is multiplied by 100
+#define LZ_COMPROMISED_TIME         99999000
+//same value in seconds, as passed from JavaScript
+#define JS_LZ_COMPROMISED_TIME         99999
+
+struct LANDING_ZONE
+{
+	uint8_t x1;
+	uint8_t y1;
+	uint8_t x2;
+	uint8_t y2;
+};
+
+// How the mission timer behaves
+// IMPORTANT: values are exposed to scripts as the TIMER_* constants and stored in savegames - do not renumber!
+enum MISSION_TIMER_MODE
+{
+	TIMER_NONE = -1,		// no mission timer (internal and savegames only, not settable from scripts)
+	TIMER_COUNTDOWN = 0,	// counts down from mission.time and triggers a timeout when it expires (default)
+	TIMER_COUNTUP = 1,		// counts up (elapsed time since startTime) and never expires
+	TIMER_PAUSE = 2,		// frozen at mission.time and never expires
+};
+
+//storage structure for values that need to be kept between missions
+struct MISSION
+{
+	LEVEL_TYPE			type;							//defines which start and end functions to use - see levels_type in levels.h
+	GameWorld gameWorld;
+
+	int32_t                         asCurrentPower[MAX_PLAYERS];
+
+	UDWORD				startTime;			//time the mission started
+	SDWORD				time;				//countdown limit, or the frozen time for TIMER_PAUSE
+	// unused for TIMER_COUNTUP/TIMER_NONE
+	MISSION_TIMER_MODE	timerMode;			//how the mission timer behaves (countdown, count-up, ...)
+	SDWORD				ETA;				//time taken for reinforcements to arrive
+	// < 0 = none allowed
+
+	UWORD               homeLZ_X;           //selectedPlayer's LZ x and y
+	UWORD               homeLZ_Y;
+	SDWORD				playerX;			//original view position
+	SDWORD				playerY;
+
+	/* transporter entry/exit tiles */
+	UWORD				iTranspEntryTileX[MAX_PLAYERS];
+	UWORD				iTranspEntryTileY[MAX_PLAYERS];
+	UWORD				iTranspExitTileX[MAX_PLAYERS];
+	UWORD				iTranspExitTileY[MAX_PLAYERS];
+};
+
+#endif // __INCLUDED_MISSIONDEF_H__

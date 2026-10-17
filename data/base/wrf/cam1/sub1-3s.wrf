@@ -1,0 +1,15 @@
+/*
+ * Sub1-3s.wrf	temporary to start off world
+ *
+ */
+
+/* Directory for Proximity messages and mission briefs */
+directory	"messages"
+
+file		FLIC		"brief1-3.json"
+
+directory "script"
+file JAVASCRIPT "rules.js"
+
+directory "script/campaign"
+file JAVASCRIPT "cam1-3s.js"

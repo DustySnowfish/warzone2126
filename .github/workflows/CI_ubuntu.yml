@@ -1,0 +1,565 @@
+name: Ubuntu
+
+on:
+  push:
+    branches-ignore:
+      - 'l10n_**' # Push events to translation service branches (that begin with "l10n_")
+  pull_request:
+    # Match all pull requests...
+    paths-ignore:
+      # Except some text-only files / documentation
+      - 'ChangeLog'
+      # Except those that only include changes to stats
+      - 'data/base/stats/**'
+      - 'data/mp/stats/**'
+      - 'data/mp/multiplay/script/functions/camTechEnabler.js'
+  # Support running after "Draft Tag Release" workflow completes, as part of automated release process
+  workflow_run:
+    workflows: ["Draft Tag Release"]
+    push:
+      tags:
+        - '*'
+    types:
+      - completed
+
+jobs:
+  ubuntu-build:
+    strategy:
+      matrix:
+        include:
+          # Builds with GCC (uploaded as artifacts, and published as release DEBs)
+          - name: "Ubuntu 22.04 [GCC]"
+            docker: "ubuntu-22.04"
+            arch: "amd64"
+            output-suffix: "ubuntu22.04"
+            compiler: gcc
+            publish_artifact: true
+            deploy_release: true
+          - name: "Ubuntu 24.04 [GCC]"
+            docker: "ubuntu-24.04"
+            arch: "amd64"
+            output-suffix: "ubuntu24.04"
+            compiler: gcc
+            publish_artifact: true
+            deploy_release: true
+          # Builds with Clang (not uploaded)
+          - name: "Ubuntu 22.04 [Clang]"
+            docker: "ubuntu-22.04"
+            arch: "amd64"
+            compiler: clang
+            output-suffix: "ubuntu22.04"
+            publish_artifact: false
+            deploy_release: false
+          - name: "Ubuntu 24.04 [Clang]"
+            docker: "ubuntu-24.04"
+            arch: "amd64"
+            compiler: clang
+            output-suffix: "ubuntu24.04"
+            publish_artifact: false
+            deploy_release: false
+      fail-fast: false
+    name: '${{ matrix.name }}'
+    permissions:
+      contents: read
+      # needed to generate artifact attestations, see: https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[ci skip]')"
+    # Release runs tolerate failures from non-published builds
+    continue-on-error: ${{ !matrix.deploy_release && github.event_name == 'workflow_run' }}
+    outputs:
+      # Needed by the release + other later jobs - despite this being a matrix job, this should be the same for all, so we can allow whatever is last to persist it
+      WZ_GITHUB_REF: ${{ steps.checkout-config.outputs.WZ_GITHUB_REF }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: 'src'
+      - name: Configure Repo Checkout
+        id: checkout-config
+        working-directory: ./src
+        env:
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          . .ci/githubactions/checkout_config.sh
+      - name: Prepare Git Repo for autorevision
+        working-directory: '${{ github.workspace }}/src'
+        run: cmake -P .ci/githubactions/prepare_git_repo.cmake
+      - name: Init Git Submodules
+        working-directory: '${{ github.workspace }}/src'
+        run: git submodule update --init --recursive
+      - name: Build the Docker image
+        working-directory: '${{ github.workspace }}/src'
+        run: |
+          docker build --build-arg UID=$UID -f docker/${{ matrix.docker }}/Dockerfile -t ubuntu .
+      - name: Compute build variables
+        working-directory: '${{ github.workspace }}/src'
+        run: |
+          . .ci/githubactions/export_build_output_desc.sh
+          echo "WZ_BUILD_DESC_IS_TAG=${WZ_BUILD_DESC_IS_TAG}" >> $GITHUB_ENV
+          echo "WZ_BUILD_DESC_PREFIX=${WZ_BUILD_DESC_PREFIX}" >> $GITHUB_ENV
+          WZ_OUTPUT_NAME_SUFFIX=""
+          WZ_NAME_SUFFIX=""
+          if [ "$WZ_BUILD_DESC_IS_TAG" == "false" ]; then
+            WZ_OUTPUT_NAME_SUFFIX="_$(echo "${WZ_BUILD_DESC_PREFIX}" | sed 's/[^a-zA-Z0-9\.]/_/g')"
+            WZ_NAME_SUFFIX=" ($(echo "${WZ_BUILD_DESC_PREFIX}" | sed 's/[^a-zA-Z0-9\.]/_/g'))"
+          fi
+          echo "WZ_OUTPUT_NAME_SUFFIX=${WZ_OUTPUT_NAME_SUFFIX}"
+          echo "WZ_OUTPUT_NAME_SUFFIX=${WZ_OUTPUT_NAME_SUFFIX}" >> $GITHUB_ENV
+          echo "WZ_NAME_SUFFIX=${WZ_NAME_SUFFIX}" >> $GITHUB_ENV
+
+          WZ_DISTRIBUTOR="UNKNOWN"
+          if [ "${GITHUB_REPOSITORY}" == "Warzone2100/warzone2100" ]; then
+            WZ_DISTRIBUTOR="wz2100.net"
+          fi
+          echo "WZ_DISTRIBUTOR=${WZ_DISTRIBUTOR}"
+          echo "WZ_DISTRIBUTOR=${WZ_DISTRIBUTOR}" >> $GITHUB_ENV
+
+          WZ_BUILDMANIFEST_PUBLISHER=""
+          if [ "${GITHUB_REPOSITORY}" == "Warzone2100/warzone2100" ]; then
+            WZ_BUILDMANIFEST_PUBLISHER="wz2100-project"
+          fi
+          echo "WZ_BUILDMANIFEST_PUBLISHER=${WZ_BUILDMANIFEST_PUBLISHER}"
+          echo "WZ_BUILDMANIFEST_PUBLISHER=${WZ_BUILDMANIFEST_PUBLISHER}" >> $GITHUB_ENV
+
+          if [ "${{ matrix.compiler }}" == "gcc" ]; then
+            WZ_CC="/usr/bin/gcc"
+            WZ_CXX="/usr/bin/g++"
+          elif [ "${{ matrix.compiler }}" == "clang" ]; then
+            WZ_CC="/usr/bin/clang"
+            WZ_CXX="/usr/bin/clang++"
+          else
+            echo "Unknown / invalid matrix.compiler: \"${{ matrix.compiler }}\""
+          fi
+          echo "WZ_CC=${WZ_CC}"
+          echo "WZ_CC=${WZ_CC}" >> $GITHUB_ENV
+          echo "WZ_CXX=${WZ_CXX}"
+          echo "WZ_CXX=${WZ_CXX}" >> $GITHUB_ENV
+      - name: Prep Directories
+        run: |
+          mkdir -p "${{ github.workspace }}/build"
+          mkdir -p "${{ github.workspace }}/debug"
+      - name: CMake Configure
+        working-directory: '${{ github.workspace }}/build'
+        env:
+          SENTRY_IO_DSN: '${{ secrets.CRASHREPORTING_SENTRY_IO_DSN }}'
+          SENTRY_BACKEND: crashpad
+          DISCORD_RPC_APPID: '${{ secrets.DISCORD_RPC_APPID }}'
+        run: |
+          ADDITIONAL_CMAKE_PARAMS=""
+          # Always build Sentry anyway, even if we don't pass the configuration to actually enable it
+          WZ_BUILD_SENTRY_VALUE="ON"
+          if [[ ! -z "${SENTRY_IO_DSN}" ]]; then
+            # Pass the configuration to enable it
+            ADDITIONAL_CMAKE_PARAMS="-DSENTRY_IO_DSN:STRING=${SENTRY_IO_DSN}"
+          fi
+
+          echo "::add-matcher::${GITHUB_WORKSPACE}/src/.ci/githubactions/pattern_matchers/cmake.json"
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CC=${WZ_CC}" -e "CXX=${WZ_CXX}" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e "GITHUB_SHA=${WZ_GITHUB_SHA}" -e "GITHUB_REF=${WZ_GITHUB_REF}" -e "GITHUB_HEAD_REF=${WZ_GITHUB_HEAD_REF}" -e "GITHUB_BASE_REF=${WZ_GITHUB_BASE_REF}" -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cmake -DCMAKE_BUILD_TYPE=Release -DWZ_ENABLE_WARNINGS:BOOL=ON -DWZ_DISTRIBUTOR:STRING="${WZ_DISTRIBUTOR}" -DWZ_BUILD_SENTRY:BOOL="${WZ_BUILD_SENTRY_VALUE}" -DSENTRY_BACKEND="${SENTRY_BACKEND}" ${ADDITIONAL_CMAKE_PARAMS} -DENABLE_DISCORD:BOOL=ON -DDISCORD_RPC_APPID:STRING="${DISCORD_RPC_APPID}" -DWZ_OUTPUT_NAME_SUFFIX="${WZ_OUTPUT_NAME_SUFFIX}" -DWZ_NAME_SUFFIX="${WZ_NAME_SUFFIX}" -DENABLE_GNS_NETWORK_BACKEND:BOOL=ON -DWZ_BUILDMANIFEST:BOOL=ON -DWZ_BUILDMANIFEST_PUBLISHER:STRING="${WZ_BUILDMANIFEST_PUBLISHER}" -DWZ_BUILDMANIFEST_PLATFORM:STRING="linux-${{ matrix.arch }}" -G"Ninja" "${{ github.workspace }}/src"
+          echo "::remove-matcher owner=cmake::"
+      - name: CMake Build
+        working-directory: '${{ github.workspace }}/build'
+        run: |
+          echo "::add-matcher::${GITHUB_WORKSPACE}/src/.ci/githubactions/pattern_matchers/${{ matrix.compiler }}.json"
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CC=${WZ_CC}" -e "CXX=${WZ_CXX}" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e "GITHUB_SHA=${WZ_GITHUB_SHA}" -e "GITHUB_REF=${WZ_GITHUB_REF}" -e "GITHUB_HEAD_REF=${WZ_GITHUB_HEAD_REF}" -e "GITHUB_BASE_REF=${WZ_GITHUB_BASE_REF}" -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cmake --build . -- -k0
+          echo "::remove-matcher owner=${{ matrix.compiler }}::"
+      - name: Package .DEB
+        working-directory: '${{ github.workspace }}/build'
+        run: |
+          WZ_PACKAGE_VAR_OVERRIDES=""
+          WZ_SHORT_SHA=$(echo "${GITHUB_SHA}" | head -c 7)
+          if [ "$WZ_BUILD_DESC_IS_TAG" == "false" ]; then
+            DEB_VERSION_SAFE_DESC_PREFIX=$(echo "${WZ_BUILD_DESC_PREFIX}" | sed 's/[^a-zA-Z0-9]/~/g')
+            WZ_PACKAGE_VAR_OVERRIDES="-D CPACK_DEBIAN_PACKAGE_VERSION=1.${DEB_VERSION_SAFE_DESC_PREFIX}.${WZ_SHORT_SHA} -D WZ_DEVELOPMENT_BUILD=ON"
+          fi
+          WZ_DEB_PACKAGE_NAME=$(echo "warzone2100${WZ_OUTPUT_NAME_SUFFIX}" | sed 's/[^a-zA-Z0-9\.\+\-]/-/g')
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e GITHUB_SHA -e GITHUB_REF -e GITHUB_HEAD_REF -e GITHUB_BASE_REF -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cpack --config "./CPackConfig.cmake" -G DEB -D CPACK_DEBIAN_PACKAGE_MAINTAINER="${WZ_DISTRIBUTOR}" -D CPACK_DEB_COMPONENT_INSTALL=ON -D CPACK_COMPONENTS_GROUPING=ALL_COMPONENTS_IN_ONE -D CPACK_DEBIAN_PACKAGE_NAME="${WZ_DEB_PACKAGE_NAME}" -D CPACK_DEBIAN_FILE_NAME="warzone2100.deb" ${WZ_PACKAGE_VAR_OVERRIDES}
+          OUTPUT_DIR="${HOME}/output/deb"
+          echo "OUTPUT_DIR=${OUTPUT_DIR}"
+          echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
+          mkdir -p "${OUTPUT_DIR}"
+          OUTPUT_FILE_NAME="warzone2100_${{ matrix.output-suffix }}_${{ matrix.arch }}.deb"
+          cp "warzone2100.deb" "${OUTPUT_DIR}/${OUTPUT_FILE_NAME}"
+          echo "Generated .deb: \"${OUTPUT_FILE_NAME}\""
+          echo "  -> SHA512: $(sha512sum "${OUTPUT_DIR}/${OUTPUT_FILE_NAME}")"
+          echo "  -> Size (bytes): $(stat -c %s "${OUTPUT_DIR}/${OUTPUT_FILE_NAME}")"
+          echo "WZ_FULL_OUTPUT_DEB_PATH=${OUTPUT_DIR}/${OUTPUT_FILE_NAME}" >> $GITHUB_ENV
+      - name: 'Upload Artifact - (.DEB)'
+        uses: actions/upload-artifact@v7
+        if: success() && (matrix.publish_artifact == true)
+        with:
+          path: ${{ env.WZ_FULL_OUTPUT_DEB_PATH }}
+          archive: false
+          if-no-files-found: 'error'
+      - name: Archive Debug Symbols
+        if: success() && (matrix.publish_artifact == true)
+        working-directory: '${{ github.workspace }}/build'
+        env:
+          FULL_CMAKE_PATH: '${{ steps.settings.outputs.WZ_FULL_CMAKE_PATH }}'
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/output/debugsymbols"
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e GITHUB_SHA -e GITHUB_REF -e GITHUB_HEAD_REF -e GITHUB_BASE_REF -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cpack --config "./CPackConfig.cmake" -D CPACK_PACKAGE_FILE_NAME="warzone2100_debugsymbols" -D CPACK_COMPONENTS_ALL="DebugSymbols;AdditionalDebugSymbols" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -G 7Z -C "Release"
+          # Rename + move the archive
+          WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH="${GITHUB_WORKSPACE}/output/debugsymbols/warzone2100_${{ matrix.output-suffix }}_${{ matrix.arch }}.DEBUGSYMBOLS.7z"
+          mv "./warzone2100_debugsymbols.7z" "${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}"
+          echo "WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH=${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}" >> $GITHUB_ENV
+      - name: 'Upload Artifact - (Debug Symbols)'
+        uses: actions/upload-artifact@v7
+        if: success() && (matrix.publish_artifact == true) && (github.repository == 'Warzone2100/warzone2100')
+        with:
+          path: ${{ env.WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH }}
+          archive: false
+          if-no-files-found: 'error'
+      - name: Upload debug info (for Sentry)
+        uses: actions/upload-artifact@v7
+        if: success() && (matrix.publish_artifact == true)
+        with:
+          name: 'debugsymbols_${{ matrix.output-suffix }}_${{ matrix.arch }}'
+          path: |
+            ${{ github.workspace }}/build/src/warzone2100${{ env.WZ_OUTPUT_NAME_SUFFIX }}
+            ${{ github.workspace }}/build/src/warzone2100${{ env.WZ_OUTPUT_NAME_SUFFIX }}.debug
+          if-no-files-found: 'error'
+      - name: Generate artifact attestation (.deb)
+        # Run on push to master branch (development build), or tag release automation build
+        if: success() && (matrix.publish_artifact == true) && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release'))
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-path: '${{ env.WZ_FULL_OUTPUT_DEB_PATH }}'
+      - name: Generate artifact attestation (debug symbols)
+        # Run on push to master branch (development build), or tag release automation build
+        if: success() && (matrix.publish_artifact == true) && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release'))
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-path: '${{ env.WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH }}'
+      - name: List Release Assets
+        if: success() && (matrix.deploy_release == true) && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release')
+        run: |
+          mkdir -p "${GITHUB_WORKSPACE}/output"
+          RELEASE_ASSETS_LIST="${GITHUB_WORKSPACE}/output/release_assets_${{ matrix.output-suffix }}_${{ matrix.arch }}.txt"
+          basename "${WZ_FULL_OUTPUT_DEB_PATH}" > "${RELEASE_ASSETS_LIST}"
+          basename "${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}" >> "${RELEASE_ASSETS_LIST}"
+          echo "RELEASE_ASSETS_LIST=${RELEASE_ASSETS_LIST}" >> $GITHUB_ENV
+      - name: 'Upload Artifact - (Release Assets List)'
+        if: success() && (matrix.deploy_release == true) && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release')
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ env.RELEASE_ASSETS_LIST }}
+          archive: false
+          if-no-files-found: 'error'
+
+  sign-build-manifest:
+    name: 'Sign Build Manifests'
+    permissions:
+      contents: read
+      # Signing rewrites the packages, so they need an attestation for their new digest
+      id-token: write
+      attestations: write
+    needs: ubuntu-build
+    runs-on: ubuntu-latest
+    # For this job to work, the following must be set in the 'sign_buildmanifest' environment:
+    # WZ_BUILDMANIFEST_KEY (secret), WZ_BUILDMANIFEST_KEY_ID (variable)
+    environment: sign_buildmanifest
+    # Run on tag release automation build
+    if: success() && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release') && (github.repository == 'Warzone2100/warzone2100')
+    outputs:
+      signedfiles: ${{ steps.output-result.outputs.signedfiles }}
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          path: 'src'
+      - name: Build wzbuildmanifest tool
+        if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
+        run: |
+          # Built from source here rather than taken from the build jobs,
+          # so that the signing key is never handed to a binary those jobs produced
+          sudo apt-get update
+          sudo apt-get install -y libsodium-dev ninja-build
+          cmake -S "${GITHUB_WORKSPACE}/src/tools/buildmanifest" -B "${GITHUB_WORKSPACE}/buildmanifest" -DCMAKE_BUILD_TYPE=Release -G"Ninja"
+          cmake --build "${GITHUB_WORKSPACE}/buildmanifest"
+          echo "WZ_BUILDMANIFEST_TOOL=${GITHUB_WORKSPACE}/buildmanifest/wzbuildmanifest" >> $GITHUB_ENV
+      - name: Download Release Assets Lists
+        if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'release_assets_*.txt'
+          path: ./dl-lists
+          merge-multiple: true
+      - name: Download .DEB Packages
+        if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'warzone2100_*.deb'
+          path: ./dl-debs
+          merge-multiple: true
+      - name: Sign Manifests
+        id: sign
+        if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
+        env:
+          WZ_BUILDMANIFEST_KEY: ${{ secrets.WZ_BUILDMANIFEST_KEY }}
+          WZ_BUILDMANIFEST_KEY_ID: ${{ vars.WZ_BUILDMANIFEST_KEY_ID }}
+        run: |
+          if [ -z "${WZ_BUILDMANIFEST_KEY}" ]; then
+            echo "::error ::WZ_BUILDMANIFEST_KEY_ID is set but the WZ_BUILDMANIFEST_KEY secret is not"
+            exit 1
+          fi
+          mkdir -p "${GITHUB_WORKSPACE}/signed-debs"
+          for name in $(cat ./dl-lists/*.txt | grep '\.deb$'); do
+            deb="./dl-debs/${name}"
+            echo "::group::${name}"
+            work="$(mktemp -d)/pkg"
+            dpkg-deb -R "${deb}" "${work}"
+            cmake -DWZBM_TOOL="${WZ_BUILDMANIFEST_TOOL}" -DWZBM_PACKAGE_DIR="${work}" -DWZBM_KEY_ID="${WZ_BUILDMANIFEST_KEY_ID}" -P "${GITHUB_WORKSPACE}/src/pkg/buildmanifest_sign_package.cmake"
+            # Keep the package's md5sums in step with the re-signed manifest
+            manifest="$(cd "${work}" && find . -name '*.buildmanifest' -printf '%P\n')"
+            grep -q "  ${manifest}\$" "${work}/DEBIAN/md5sums"
+            sed -i "s|^[0-9a-f]*  ${manifest}\$|$(cd "${work}" && md5sum "${manifest}")|" "${work}/DEBIAN/md5sums"
+            # Repack with the original data compression
+            case "$(ar t "${deb}" | sed -n 's/^data\.tar\.//p')" in
+              gz) compression="gzip" ;;
+              xz) compression="xz" ;;
+              zst) compression="zstd" ;;
+              *) compression="none" ;;
+            esac
+            dpkg-deb --root-owner-group -Z"${compression}" -b "${work}" "${GITHUB_WORKSPACE}/signed-debs/${name}"
+            rm -rf "$(dirname "${work}")"
+            echo "::endgroup::"
+          done
+          ls -l "${GITHUB_WORKSPACE}/signed-debs"
+      - name: 'Generate artifact attestations - (Manifest-Signed Packages)'
+        if: (steps.sign.outcome == 'success')
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-path: '${{ github.workspace }}/signed-debs/*'
+      - name: 'Upload Artifact - Manifest-Signed Packages'
+        if: (steps.sign.outcome == 'success')
+        uses: actions/upload-artifact@v7
+        with:
+          name: 'wz_ubuntu_manifest_signed'
+          path: '${{ github.workspace }}/signed-debs/*'
+          if-no-files-found: 'error'
+      - name: Output Result
+        id: output-result
+        env:
+          SIGN_STEP_OUTCOME: ${{ steps.sign.outcome }}
+        run: |
+          signedfiles="false"
+          if [ "${SIGN_STEP_OUTCOME}" == "success" ]; then
+            signedfiles="true"
+          fi
+          echo "signedfiles=${signedfiles}"
+          echo "signedfiles=${signedfiles}" >> $GITHUB_OUTPUT
+
+  upload-release:
+    name: 'Upload Release Assets'
+    permissions:
+      contents: write # Needed to upload to releases
+    runs-on: ubuntu-latest
+    # Run on tag release automation build
+    if: success() && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release') && (github.repository == 'Warzone2100/warzone2100')
+    needs: [ubuntu-build, sign-build-manifest]
+    env:
+      WZ_GITHUB_REF: ${{ needs.ubuntu-build.outputs.WZ_GITHUB_REF }}
+    steps:
+      - name: Prep Environment
+        run: mkdir upload-assets && mkdir upload-assets-signed
+      - name: Download Release Assets Lists
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'release_assets_*.txt'
+          path: ./release-lists
+          merge-multiple: true
+      - name: Download .DEB Packages
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'warzone2100_*.deb'
+          path: ./upload-assets
+          merge-multiple: true
+      - name: Download Debug Symbols
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'warzone2100_*.DEBUGSYMBOLS.7z'
+          path: ./upload-assets
+          merge-multiple: true
+      - name: List Assets
+        run: ls -LRl ./upload-assets
+      - name: Download Manifest-Signed Packages
+        if: success() && (needs.sign-build-manifest.outputs.signedfiles == 'true')
+        uses: actions/download-artifact@v8
+        with:
+          name: 'wz_ubuntu_manifest_signed'
+          path: ./upload-assets-signed
+          merge-multiple: true
+      - name: Replace Unsigned with Manifest-Signed Packages
+        if: success() && (needs.sign-build-manifest.outputs.signedfiles == 'true')
+        run: |
+          for file in ./upload-assets-signed/*; do
+            filename="${file##*/}"
+            dest="./upload-assets/${filename}"
+            if [ ! -f "${dest}" ]; then
+              echo "::warning ::Missing original (unsigned) file - ${filename} ?"
+            fi
+            echo "Replacing with manifest-signed: ${filename}"
+            mv -f "${file}" "${dest}"
+          done
+          ls -LRl ./upload-assets
+      - name: Upload Release Assets
+        working-directory: '${{ github.workspace }}/upload-assets/'
+        run: |
+          SOURCE_TAG="${WZ_GITHUB_REF#refs/tags/}"
+          for file in $(cat ../release-lists/*.txt); do
+            echo "Uploading: $file"
+            gh release upload "${SOURCE_TAG}" "./$file"
+          done
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+
+  package-source:
+    name: Package Source (Ubuntu 24.04) [GCC]
+    permissions:
+      contents: write # Needed to upload to releases
+      # needed to generate artifact attestations, see: https://docs.github.com/en/actions/security-guides/using-artifact-attestations-to-establish-provenance-for-builds
+      id-token: write
+      attestations: write
+    runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[ci skip]')"
+    steps:
+      - name: Debug Output
+        run: |
+          echo "GITHUB_REF=${GITHUB_REF}"
+          echo "GITHUB_HEAD_REF=${GITHUB_HEAD_REF}"
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
+          path: 'src'
+      - name: Configure Repo Checkout
+        id: checkout-config
+        working-directory: ./src
+        env:
+          WORKFLOW_RUN_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          WORKFLOW_RUN_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+        run: |
+          . .ci/githubactions/checkout_config.sh
+      - name: Prepare Git Repo for autorevision
+        working-directory: '${{ github.workspace }}/src'
+        run: cmake -P .ci/githubactions/prepare_git_repo.cmake
+      - name: Init Git Submodules
+        working-directory: '${{ github.workspace }}/src'
+        run: git submodule update --init --recursive
+      - name: Build the Docker image
+        working-directory: '${{ github.workspace }}/src'
+        run: |
+          docker build --build-arg UID=$UID -f docker/ubuntu-24.04/Dockerfile -t ubuntu .
+      - name: Prep Directories
+        run: |
+          mkdir -p "${{ github.workspace }}/build"
+      - name: CMake Configure
+        working-directory: '${{ github.workspace }}/build'
+        run: |
+          echo "::add-matcher::${GITHUB_WORKSPACE}/src/.ci/githubactions/pattern_matchers/cmake.json"
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e "GITHUB_SHA=${WZ_GITHUB_SHA}" -e "GITHUB_REF=${WZ_GITHUB_REF}" -e "GITHUB_HEAD_REF=${WZ_GITHUB_HEAD_REF}" -e "GITHUB_BASE_REF=${WZ_GITHUB_BASE_REF}" -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cmake -DCMAKE_BUILD_TYPE=Debug -G"Ninja" "${{ github.workspace }}/src"
+          echo "::remove-matcher owner=cmake::"
+      - name: CMake Package Source
+        working-directory: '${{ github.workspace }}/build'
+        run: docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e "GITHUB_SHA=${WZ_GITHUB_SHA}" -e "GITHUB_REF=${WZ_GITHUB_REF}" -e "GITHUB_HEAD_REF=${WZ_GITHUB_HEAD_REF}" -e "GITHUB_BASE_REF=${WZ_GITHUB_BASE_REF}" -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cmake --build . --target package_source
+      - name: Extract & Build Packaged Source
+        working-directory: '${{ github.workspace }}/build'
+        run: |
+          # Extract the .tar.xz into a new location
+          mkdir "${{ github.workspace }}/extracted" && tar -xf warzone2100.tar.xz -C "${{ github.workspace }}/extracted"
+          mkdir "${{ github.workspace }}/extracted/build"
+          # Attempt a build from the tarball source (using CMake)
+          echo "::add-matcher::${GITHUB_WORKSPACE}/src/.ci/githubactions/pattern_matchers/cmake.json"
+          docker run --rm -e MAKEFLAGS -v "${{ github.workspace }}/extracted/warzone2100:/src" -v "${{ github.workspace }}/extracted/build:/build" -w "/build" ubuntu cmake -DCMAKE_BUILD_TYPE=RelWithDebInfo -DWZ_ENABLE_WARNINGS:BOOL=ON -G"Ninja" "/src"
+          echo "::remove-matcher owner=cmake::"
+          echo "::add-matcher::${GITHUB_WORKSPACE}/src/.ci/githubactions/pattern_matchers/gcc.json"
+          docker run --rm -e MAKEFLAGS -v "${{ github.workspace }}/extracted/warzone2100:/src" -v "${{ github.workspace }}/extracted/build:/build" -w "/build" ubuntu cmake --build .
+          echo "::remove-matcher owner=gcc::"
+      - name: Rename Tarball & Output Info
+        run: |
+          OUTPUT_DIR="${HOME}/output"
+          echo "OUTPUT_DIR=${OUTPUT_DIR}"
+          echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
+          mkdir -p "${OUTPUT_DIR}"
+          cp "${{ github.workspace }}/build/warzone2100.tar.xz" "${OUTPUT_DIR}/warzone2100_src.tar.xz"
+          echo "Generated warzone2100 tarball: \"warzone2100_src.tar.xz\""
+          echo "  -> SHA512: $(sha512sum "${OUTPUT_DIR}/warzone2100_src.tar.xz")"
+          echo "  -> Size (bytes): $(stat -c %s "${OUTPUT_DIR}/warzone2100_src.tar.xz")"
+      - uses: actions/upload-artifact@v7
+        if: success()
+        with:
+          name: warzone2100_src
+          path: ${{ env.OUTPUT_DIR }}
+          if-no-files-found: 'error'
+      - name: Generate artifact attestation
+        # Run on push to master branch (development build), or tag release automation build
+        if: success() && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release'))
+        uses: actions/attest-build-provenance@v3
+        continue-on-error: true
+        with:
+          subject-path: '${{ env.OUTPUT_DIR }}/warzone2100_src.tar.xz'
+      - name: Upload source tarball to release
+        if: success() && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release')
+        run: |
+          SOURCE_TAG="${WZ_GITHUB_REF#refs/tags/}"
+          gh release upload "${SOURCE_TAG}" "${OUTPUT_DIR}/warzone2100_src.tar.xz"
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GH_REPO: ${{ github.repository }}
+          WZ_GITHUB_REF: ${{ steps.checkout-config.outputs.WZ_GITHUB_REF }}
+
+  upload-debug-symbols:
+    name: 'Upload Debug Symbols'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    # Run on push to master branch (development build), or tag release automation build
+    if: (github.repository == 'Warzone2100/warzone2100') && ((github.event_name == 'push' && github.ref == 'refs/heads/master') || (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release'))
+    needs: ubuntu-build
+    environment: upload_symbols
+    # For this job to work, the following secrets must be set in the 'upload_symbols' environment:
+    # SENTRY_AUTH_TOKEN
+    steps:
+      - uses: actions/checkout@v6
+        with:
+          fetch-depth: 1
+          path: 'src'
+      - name: Prep Environment
+        run: |
+          mkdir dl-debug-symbols
+          echo "WZ_REPO_PATH=$(pwd)/src" >> $GITHUB_ENV
+      - name: Download Artifacts
+        uses: actions/download-artifact@v8
+        with:
+          pattern: 'debugsymbols_*'
+          path: ./dl-debug-symbols
+          merge-multiple: false
+      - name: Display structure of downloaded files
+        run: ls -R
+        working-directory: ./dl-debug-symbols
+      - name: 'Upload debug symbols'
+        env:
+          SENTRY_AUTH_TOKEN: '${{ secrets.SENTRY_AUTH_TOKEN }}'
+          WZ_ARCHIVE_DIR: './dl-debug-symbols'
+          WZ_GITHUB_REF: ${{needs.ubuntu-build.outputs.WZ_GITHUB_REF}}
+        run: |
+          echo "WZ_GITHUB_REF=${WZ_GITHUB_REF}"
+          if [[ -z "${SENTRY_AUTH_TOKEN}" ]]; then
+            echo "No SENTRY_AUTH_TOKEN - skipping"
+            exit 0
+          fi
+          # Download sentry-cli
+          echo "::group::Downloading sentry-cli ..."
+          cmake -P "${WZ_REPO_PATH}/.ci/githubactions/FetchSentryCLI.cmake"
+          echo "Downloading sentry-cli ... Done"
+          echo "::endgroup::"
+          # Upload symbols
+          echo "::group::sentry-cli debug-files upload"
+          ./sentry-cli/sentry-cli debug-files upload --no-zips -o warzone2100 -p warzone2100 "${WZ_ARCHIVE_DIR}"
+          echo "::endgroup::"
