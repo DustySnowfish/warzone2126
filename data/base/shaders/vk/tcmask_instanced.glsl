@@ -39,7 +39,7 @@ layout(std140, set = 1, binding = 0) uniform meshuniforms
 	int fogOutput;
 	int pbrMaterial; // Warzone 2126: 0 classic, 1 PBR (ORM in the specular slot), 2 PBR without occlusion
 	int emissiveMap; // Warzone 2126: 1 when an emissive texture is bound
-	vec4 emissiveFactor; // Warzone 2126: linear RGB emissive multiplier
+	vec4 emissiveFactor; // Warzone 2126: linear RGB emissive multiplier; w = 1 when an environment map is bound
 };
 
 // Light data shares the texture set rather than taking one of its own, because the instanced

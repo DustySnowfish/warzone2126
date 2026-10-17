@@ -54,6 +54,10 @@ void pie_GetResetCounts(size_t *pPieCount, size_t *pPolyCount);
 
 /** Setup shadows and OpenGL lighting. */
 void pie_BeginLighting(const Vector3f &light);
+namespace gfx_api { struct texture; }
+/// Warzone 2126: image-based lighting environment for PBR models (null = none). Not owned.
+void pie_SetEnvironmentMap(gfx_api::texture* environmentMap);
+gfx_api::texture* pie_GetEnvironmentMap();
 void pie_setShadows(bool drawShadows);
 
 /** Set light parameters */

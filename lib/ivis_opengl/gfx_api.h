@@ -848,6 +848,7 @@ namespace gfx_api
 	inline constexpr char kSampler_TextureNormal[] = "TextureNormal";
 	inline constexpr char kSampler_TextureSpecular[] = "TextureSpecular";
 	inline constexpr char kSampler_TextureEmissive[] = "TextureEmissive";
+	inline constexpr char kSampler_TextureEnvironment[] = "TextureEnvironment";
 	inline constexpr char kSampler_shadowMap[] = "shadowMap";
 	inline constexpr char kSampler_lightmap_tex[] = "lightmap_tex";
 	inline constexpr char kSampler_groundTex[] = "groundTex";
@@ -1290,7 +1291,7 @@ namespace gfx_api
 		int fogOutput;
 		int pbrMaterial; // Warzone 2126: 0 classic, 1 PBR with ORM texture, 2 PBR without occlusion (metal/roughness texture only)
 		int emissiveMap = 0; // Warzone 2126: 1 when an emissive texture is bound
-		glm::vec4 emissiveFactor = glm::vec4(0.f); // Warzone 2126: linear RGB emissive multiplier (w unused)
+		glm::vec4 emissiveFactor = glm::vec4(0.f); // Warzone 2126: linear RGB emissive multiplier; w = 1 when an environment map is bound
 	};
 	static_assert(sizeof(Draw3DShapeInstancedPerMeshUniforms) % 16 == 0, "meshuniforms must be a multiple of 16 bytes");
 

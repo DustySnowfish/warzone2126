@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"name": "Arizona",
+	"zenith": [125, 150, 185],
+	"horizon": [220, 170, 120],
+	"ground": [150, 100, 70],
+	"horizonSharpness": 3.0,
+	"sunGlow": 0.6
+}

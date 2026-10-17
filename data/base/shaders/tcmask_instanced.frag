@@ -18,6 +18,7 @@ uniform sampler2D TextureTcmask; // tcmask
 uniform sampler2D TextureNormal; // normal map
 uniform sampler2D TextureSpecular; // specular map
 uniform sampler2D TextureEmissive; // emissive map (Warzone 2126 glTF models)
+uniform sampler2D TextureEnvironment; // image-based lighting environment (Warzone 2126)
 uniform sampler2DArrayShadow shadowMap; // shadow map
 uniform sampler2D lightmap_tex;
 

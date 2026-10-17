@@ -92,6 +92,7 @@
 #include "ssao.h"
 #include "ssr.h"
 #include "colour_grade.h"
+#include "environment_light.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1319,6 +1320,7 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	// this also determines the length of the shadows
 	// NOTE: the sun in world space
 	pie_BeginLighting(getTheSun());
+	environment_light::update();
 
 	// Reset all lighting data
 	lightManager.SetFrameStart();
@@ -1607,6 +1609,7 @@ void shutdown3DView_FullReset()
 	ssao::shutdown();
 	ssr::shutdown();
 	colour_grade::shutdown();
+	environment_light::shutdown();
 	range_rings::shutdown();
 
 	setLightingManager(nullptr);

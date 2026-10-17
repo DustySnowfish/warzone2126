@@ -92,7 +92,8 @@ namespace gfx_api
 	texture_description<3, sampler_type::anisotropic, kSampler_TextureSpecular>, // specular map
 	texture_description<4, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>,  // depth / shadow map
 	texture_description<5, sampler_type::bilinear, kSampler_lightmap_tex>, // lightmap
-	texture_description<6, sampler_type::anisotropic, kSampler_TextureEmissive> // emissive map (Warzone 2126 glTF models)
+	texture_description<6, sampler_type::anisotropic, kSampler_TextureEmissive>, // emissive map (Warzone 2126 glTF models)
+	texture_description<7, sampler_type::bilinear_repeat, kSampler_TextureEnvironment> // image-based lighting environment (Warzone 2126)
 	>, shader>;
 
 	using Draw3DShapeOpaque_Instanced = Draw3DShapeInstanced<REND_OPAQUE, SHADER_COMPONENT_INSTANCED, DEPTH_CMP_LEQ_WRT_ON>;

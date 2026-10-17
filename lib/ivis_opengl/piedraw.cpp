@@ -1704,6 +1704,18 @@ bool InstancedMeshRenderer::DrawAll(uint64_t currentGameFrame, const glm::mat4& 
 	return true;
 }
 
+static gfx_api::texture* g_environmentMap = nullptr;
+
+void pie_SetEnvironmentMap(gfx_api::texture* environmentMap)
+{
+	g_environmentMap = environmentMap;
+}
+
+gfx_api::texture* pie_GetEnvironmentMap()
+{
+	return g_environmentMap;
+}
+
 template<SHADER_MODE shader, typename Draw3DInstancedPSO>
 static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const gfx_api::Draw3DShapeInstancedGlobalUniforms& globalUniforms, const gfx_api::frame_uniform_block_ref<gfx_api::PointLightsUniforms>& pointLights, const iIMDShape * shape, gfx_api::buffer* instanceDataBuffer, size_t instanceBufferOffset, size_t instance_count, gfx_api::abstract_texture* shadowMap, gfx_api::texture* lightmapTexture, bool shieldEffect, gfx_api::ForwardFogOutput fogOutput)
 {
@@ -1712,13 +1724,14 @@ static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const g
 	auto* normalmap = textures.normalpage != iV_TEX_INVALID ? &pie_Texture(textures.normalpage) : nullptr;
 	auto* specularmap = textures.specularpage != iV_TEX_INVALID ? &pie_Texture(textures.specularpage) : nullptr;
 	auto* emissivemap = textures.emissivepage != iV_TEX_INVALID ? &pie_Texture(textures.emissivepage) : nullptr;
+	gfx_api::texture* environmentMap = pie_GetEnvironmentMap();
 
 	gfx_api::Draw3DShapeInstancedPerMeshUniforms meshUniforms {
 		tcmask ? 1 : 0, normalmap != nullptr, specularmap != nullptr, shape->buffers[VBO_TANGENT] != nullptr,
 		shieldEffect ? 1 : 0, static_cast<int>(fogOutput),
 		((shape->flags & iV_IMD_PBR) && specularmap != nullptr) ? ((shape->flags & iV_IMD_PBR_NO_AO) ? 2 : 1) : 0,
 		emissivemap != nullptr ? 1 : 0,
-		glm::vec4(shape->emissiveFactor.x, shape->emissiveFactor.y, shape->emissiveFactor.z, 0.f)
+		glm::vec4(shape->emissiveFactor.x, shape->emissiveFactor.y, shape->emissiveFactor.z, environmentMap != nullptr ? 1.f : 0.f)
 	};
 
 	gfx_api::buffer* pTangentBuffer = (shape->buffers[VBO_TANGENT] != nullptr) ? shape->buffers[VBO_TANGENT] : getZeroedVertexBuffer(shape->vertexCount * 4 * sizeof(gfx_api::gfxFloat));
@@ -1737,7 +1750,7 @@ static void drawInstanced3dShapeTemplated_Inner(ShaderOnce& globalsOnce, const g
 		std::make_tuple(shape->buffers[VBO_TEXCOORD], 0),
 		std::make_tuple(pTangentBuffer, 0),
 		std::make_tuple(instanceDataBuffer, instanceBufferOffset) });
-	Draw3DInstancedPSO::get().bind_textures(&pie_Texture(textures.texpage), tcmask, normalmap, specularmap, shadowMap, lightmapTexture, emissivemap);
+	Draw3DInstancedPSO::get().bind_textures(&pie_Texture(textures.texpage), tcmask, normalmap, specularmap, shadowMap, lightmapTexture, emissivemap, environmentMap);
 
 	Draw3DInstancedPSO::get().draw_elements_instanced(shape->polys.size() * 3, 0, instance_count);
 //	Draw3DInstancedPSO::get().unbind_vertex_buffers(shape->buffers[VBO_VERTEX], shape->buffers[VBO_NORMAL], shape->buffers[VBO_TEXCOORD]);

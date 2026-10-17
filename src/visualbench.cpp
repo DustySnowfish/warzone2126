@@ -24,6 +24,7 @@
 
 #include "visualbench.h"
 #include "colour_grade.h"
+#include "environment_light.h"
 
 #include "lib/framework/frame.h"
 #include "lib/framework/physfs_ext.h"
@@ -285,6 +286,7 @@ void writeResults()
 	out["bloomIntensity"] = gfx_api::context::get().bloomIntensity();
 	out["colourGrade"] = colour_grade::currentName();
 	out["colourGradeStrength"] = colour_grade::currentStrength();
+	out["environment"] = environment_light::currentName();
 	out["revealMap"] = revealMap;
 
 	std::vector<double> all;

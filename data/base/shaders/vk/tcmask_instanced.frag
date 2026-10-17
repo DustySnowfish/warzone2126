@@ -15,6 +15,7 @@ layout(set = 3, binding = 3) uniform sampler2D TextureSpecular; // specular map
 layout(set = 3, binding = 4) uniform sampler2DArrayShadow shadowMap; // shadow map
 layout(set = 3, binding = 5) uniform sampler2D lightmap_tex;
 layout(set = 3, binding = 6) uniform sampler2D TextureEmissive; // emissive map (Warzone 2126 glTF models)
+layout(set = 3, binding = 7) uniform sampler2D TextureEnvironment; // image-based lighting environment (Warzone 2126)
 
 layout(location = 0) in vec3 normal;
 layout(location = 1) in vec3 lightDir;

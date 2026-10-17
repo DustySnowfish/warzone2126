@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"name": "Rockies",
+	"zenith": [105, 140, 190],
+	"horizon": [200, 212, 230],
+	"ground": [190, 195, 205],
+	"horizonSharpness": 3.5,
+	"sunGlow": 0.6
+}

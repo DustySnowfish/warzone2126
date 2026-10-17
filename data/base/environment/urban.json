@@ -1,0 +1,9 @@
+{
+	"version": 1,
+	"name": "Urban",
+	"zenith": [115, 125, 140],
+	"horizon": [170, 168, 160],
+	"ground": [95, 95, 95],
+	"horizonSharpness": 2.5,
+	"sunGlow": 0.4
+}
