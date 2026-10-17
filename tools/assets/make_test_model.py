@@ -14,12 +14,13 @@ colour so orientation and mirroring are easy to check in game:
     bottom                   : dark grey
 
 Materials (ORM texture, for the PBR shader): front polished metal, sides brushed
-metal, top painted, back rough.
+metal, top painted, back rough. Emissive: cyan lights on the front, orange on the
+back, at strength 5 so they bloom with HDR on.
 
 Also writes a turret connector empty, conn_turret_1, on top of the hull.
 
 Usage: make_test_model.py OUT_DIR NAME [length width height]
-Writes OUT_DIR/NAME.glb, NAME_basecolor.png, NAME_orm.png, NAME_tc.png. Requires Pillow.
+Writes OUT_DIR/NAME.glb, NAME_basecolor.png, NAME_orm.png, NAME_emissive.png, NAME_tc.png. Requires Pillow.
 """
 
 import json
@@ -138,6 +139,16 @@ def write_textures(out_dir, name):
         box = (cx * CELL, cy * CELL, (cx + 1) * CELL - 1, (cy + 1) * CELL - 1)
         do.rectangle(box, fill=(int(o * 255), int(r * 255), int(m * 255)))
     orm.save(os.path.join(out_dir, name + '_orm.png'))
+    # Emissive: a row of cyan lights across the front and a light bar on the back
+    em = Image.new('RGB', (ATLAS, ATLAS), (0, 0, 0))
+    de = ImageDraw.Draw(em)
+    for key, colour in (('front', (60, 220, 255)), ('back', (255, 140, 40))):
+        cx, cy, _ = CELLS[key]
+        x0, y0 = cx * CELL, cy * CELL
+        for i in range(4):
+            lx = x0 + CELL // 8 + i * CELL // 5
+            de.rectangle((lx, y0 + CELL * 2 // 5, lx + CELL // 10, y0 + CELL * 3 // 5), fill=colour)
+    em.save(os.path.join(out_dir, name + '_emissive.png'))
 
 
 def write_glb(out_dir, name, pos, nrm, uv, idx, top):
@@ -175,10 +186,14 @@ def write_glb(out_dir, name, pos, nrm, uv, idx, top):
             'name': name,
             'pbrMetallicRoughness': {'baseColorTexture': {'index': 0}, 'metallicRoughnessTexture': {'index': 1}},
             'occlusionTexture': {'index': 1},
+            'emissiveTexture': {'index': 2},
+            'emissiveFactor': [1.0, 1.0, 1.0],
+            'extensions': {'KHR_materials_emissive_strength': {'emissiveStrength': 5.0}},
             'extras': {'wz_tcmask': name + '_tc.png'},
         }],
-        'textures': [{'source': 0}, {'source': 1}],
-        'images': [{'uri': name + '_basecolor.png'}, {'uri': name + '_orm.png'}],
+        'extensionsUsed': ['KHR_materials_emissive_strength'],
+        'textures': [{'source': 0}, {'source': 1}, {'source': 2}],
+        'images': [{'uri': name + '_basecolor.png'}, {'uri': name + '_orm.png'}, {'uri': name + '_emissive.png'}],
         'buffers': [{'byteLength': len(binary)}],
         'bufferViews': views,
         'accessors': [
