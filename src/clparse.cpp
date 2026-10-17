@@ -44,6 +44,7 @@
 #include "main.h"
 #include "modding.h"
 #include "movebench.h"
+#include "visualbench.h"
 #include "pathbench.h"
 #include "pathfinding_backend.h"
 #include "corridordump.h"
@@ -400,6 +401,7 @@ typedef enum
 	CLI_MOVEMENTSEED,
 	CLI_MOVEMENTARRANGE,
 	CLI_MOVEMENTWATCH,
+	CLI_VISUALBENCH,
 	CLI_PATHBENCH,
 	CLI_PATHBENCHREPEATS,
 	CLI_PATHFINDINGBACKEND,
@@ -511,6 +513,7 @@ static const struct poptOption *getOptionsTable()
 		{ "continue", POPT_ARG_NONE, CLI_CONTINUE,   N_("Continue the last saved game"), nullptr },
 		{ "autohost", POPT_ARG_STRING, CLI_AUTOHOST,   N_("Start host game with given settings file"), N_("autohost") },
 		{ "movementbench", POPT_ARG_STRING, CLI_MOVEMENTBENCH,   N_("Run the named deterministic movement benchmark scenario and quit"), N_("scenario") },
+		{ "visualbench", POPT_ARG_STRING, CLI_VISUALBENCH,   N_("Run a visual benchmark: scripted camera shots, frame timings and screenshots"), N_("name") },
 		{ "movementbenchwatch", POPT_ARG_STRING, CLI_MOVEMENTWATCH,   N_("Run a movement benchmark scenario on screen at normal speed"), N_("scenario") },
 		{ "movementseed", POPT_ARG_STRING, CLI_MOVEMENTSEED,   N_("Override the benchmark scenario seed"), N_("seed") },
 		{ "movementarrangement", POPT_ARG_STRING, CLI_MOVEMENTARRANGE,   N_("Which spawn arrangement of the scenario to run"), N_("index") },
@@ -1273,6 +1276,20 @@ bool ParseCommandLine(int argc, const char * const *argv)
 		case CLI_AUTOHEADLESS:
 			wz_cli_headless = true;
 			setHeadlessGameMode(true);
+			break;
+
+		case CLI_VISUALBENCH:
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr)
+			{
+				qFatal("Bad visual bench name");
+			}
+			// Windowed, autostarted skirmish using the --skirmish plumbing. The bench
+			// itself controls game speed, the camera and when to quit.
+			visualBenchSelect(token);
+			setHostLaunch(HostLaunch::Skirmish);
+			wz_test = visualBenchTestConfig();
+			wz_autogame = true;
 			break;
 
 		case CLI_MOVEMENTWATCH:

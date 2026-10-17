@@ -90,9 +90,9 @@ std::string version_getVersionedAppDirFolderName()
 	std::string versionedWriteDirFolderNameSuffix;
 
 #if defined(WZ_OS_WIN) || defined(WZ_OS_MAC)
-	versionedWriteDirFolderName = "Warzone 2100";
+	versionedWriteDirFolderName = "Warzone 2126";
 #else
-	versionedWriteDirFolderName = "warzone2100";
+	versionedWriteDirFolderName = "warzone2126";
 #endif
 
 	if (strlen(vcs_tag))

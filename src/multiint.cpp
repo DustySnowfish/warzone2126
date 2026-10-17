@@ -95,6 +95,7 @@
 #include "warzoneconfig.h"
 #include "modding.h"
 #include "movebench.h"
+#include "visualbench.h"
 #include "qtscript.h"
 #include "random.h"
 #include "notifications.h"
@@ -3957,7 +3958,7 @@ static void SendFireUp()
 
 	// Pick a random random seed for the synchronised random number generator.
 	// The movement benchmark pins it instead, so a scenario reproduces exactly.
-	uint32_t randomSeed = movementBenchActive() ? movementBenchSeed() : rand();
+	uint32_t randomSeed = movementBenchActive() ? movementBenchSeed() : (visualBenchActive() ? visualBenchSeed() : rand());
 
 	debug(LOG_INFO, "Sending NET_FIREUP");
 
@@ -5226,6 +5227,11 @@ static void loadMapPlayerSettings(WzConfig& ini)
 					NetPlay.players[i].difficulty = difficultyValue[j];
 				}
 			}
+		}
+		if (ini.contains("colour"))
+		{
+			// Fixed colours keep benchmark screenshots comparable between runs
+			setPlayerColour(i, ini.value("colour").toInt());
 		}
 		if (ini.contains("faction"))
 		{

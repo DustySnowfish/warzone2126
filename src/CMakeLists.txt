@@ -856,6 +856,9 @@ if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
 
 	# Executable
 	install(TARGETS warzone2100 COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
+	if(WIN32)
+		install(PROGRAMS "${CMAKE_SOURCE_DIR}/pkg/windows/run_visual_benchmark.bat" COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
+	endif()
 
 	if(WZ_BUILDMANIFEST)
 		# Placeholder, rewritten by pkg/buildmanifest_stage.cmake.in (archive generators only package files tracked at component-install time)

@@ -57,6 +57,7 @@
 #include "droid.h"
 #include "frend.h"
 #include "frontend.h"
+#include "visualbench.h"
 #include "group.h"
 #include "hci.h"
 #include "init.h"
@@ -182,6 +183,10 @@ const char * VIDEO_TAG = "videoMissing";
 
 void notifyAboutMissingVideos()
 {
+	if (visualBenchActive())
+	{
+		return; // keep benchmark screenshots clean
+	}
 	if (!hasNotificationsWithTag(VIDEO_TAG))
 	{
 		WZ_Notification notification;

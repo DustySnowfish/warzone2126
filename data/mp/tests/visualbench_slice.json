@@ -1,0 +1,38 @@
+{
+	"challenge": {
+		"map": "Sk-Startup",
+		"maxPlayers": 2,
+		"scavengers": "true",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 2,
+		"name": "Visual bench - vertical slice",
+		"version": 2
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0,
+		"colour": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"colour": 1,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"visualbench": {
+		"localAI": "nb_generic.js",
+		"warmupGameSeconds": 480,
+		"warmupSpeed": 16,
+		"settleSeconds": 2,
+		"shots": [
+			{ "name": "p0_base_wide",  "anchor": "start:0", "offset": [0, 0],   "distance": 3200, "pitch": -45, "yaw": 0,   "orbit": 6,  "hold": 8 },
+			{ "name": "p0_base_close", "anchor": "start:0", "offset": [0, -2],  "distance": 1400, "pitch": -30, "yaw": 45,  "orbit": 10, "hold": 8 },
+			{ "name": "p1_base",       "anchor": "start:1", "offset": [0, 0],   "distance": 2200, "pitch": -40, "yaw": 180, "orbit": 0,  "hold": 8 },
+			{ "name": "flyover",       "anchor": "centre",  "offset": [0, 40],  "distance": 3000, "pitch": -50, "yaw": 0,   "pan": [0, -8], "hold": 10 },
+			{ "name": "low_angle",     "anchor": "start:0", "offset": [0, -10], "distance": 1800, "pitch": -15, "yaw": 0,   "orbit": 0,  "hold": 8 },
+			{ "name": "top_down",      "anchor": "centre",  "offset": [0, 0],   "distance": 5000, "pitch": -80, "yaw": 0,   "orbit": 0,  "hold": 6 }
+		]
+	}
+}

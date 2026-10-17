@@ -483,7 +483,7 @@ bool endsWith (std::string const &fullString, std::string const &endString) {
 
 static std::string getWzPlatformPrefDir()
 {
-	return getPlatformPrefDir("Warzone 2100 Project", version_getVersionedAppDirFolderName());
+	return getPlatformPrefDir("Warzone 2126 Project", version_getVersionedAppDirFolderName());
 }
 
 static void initialize_ConfigDir()
@@ -2072,7 +2072,7 @@ int realmain(int argc, char *argv[])
 
 	// NOTE: it is now safe to use debug() calls to make sure output gets captured.
 	check_Physfs();
-	debug(LOG_WZ, "Warzone 2100 - %s", version_getFormattedVersionString(false));
+	debug(LOG_WZ, "Warzone 2126 - %s", version_getFormattedVersionString(false));
 	debug(LOG_WZ, "Using language: %s", getLanguage());
 	debug(LOG_WZ, "Backend: %s", BACKEND);
 	debug(LOG_MEMORY, "sizeof: SIMPLE_OBJECT=%ld, BASE_OBJECT=%ld, DROID=%ld, STRUCTURE=%ld, FEATURE=%ld, PROJECTILE=%ld",
@@ -2229,7 +2229,7 @@ int realmain(int argc, char *argv[])
 
 	wzCmdInterfaceInit();
 
-	debug(LOG_WZ, "Warzone 2100 - %s", version_getFormattedVersionString(false));
+	debug(LOG_WZ, "Warzone 2126 - %s", version_getFormattedVersionString(false));
 	debug(LOG_WZ, "Using language: %s", getLanguage());
 	debug(LOG_WZ, "Backend: %s", BACKEND);
 	debug(LOG_MEMORY, "sizeof: SIMPLE_OBJECT=%ld, BASE_OBJECT=%ld, DROID=%ld, STRUCTURE=%ld, FEATURE=%ld, PROJECTILE=%ld",

@@ -614,6 +614,12 @@ void screenDumpToDisk(const char *path, const char *level)
 	screendump_required = true;
 }
 
+void screenDumpToDiskNamed(const char *fileName)
+{
+	sstrcpy(screendump_filename, fileName);
+	screendump_required = true;
+}
+
 void screen_FlipIfBackDropTransition()
 {
 	static auto hadBackDrop = false;

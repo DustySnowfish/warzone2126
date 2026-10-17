@@ -67,6 +67,7 @@
 
 #include "multiplay.h" //ajl
 #include "levels.h"
+#include "visualbench.h"
 #include "visibility.h"
 #include "multimenu.h"
 #include "intelmap.h"
@@ -782,6 +783,11 @@ GAMECODE gameLoop()
 	renderBudget = std::min(renderBudget, (renderFraction * 500).floor());
 #endif
 	previousUpdateWasRender = true;
+
+	if (visualBenchActive())
+	{
+		visualBenchFrame();
+	}
 
 	if (headlessGameMode() && autogame_enabled())
 	{

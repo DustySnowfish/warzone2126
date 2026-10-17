@@ -3285,8 +3285,19 @@ bool gl_context::getScreenshot(std::function<void (std::unique_ptr<iV_Image>)> c
 	bool allocateResult = image->allocate(width, height, channelsPerPixel); // RGB
 	ASSERT_OR_RETURN(false, allocateResult, "Failed to allocate buffer");
 
-	glPixelStorei(GL_PACK_ALIGNMENT, 1);
-	glReadPixels(0, 0, image->width(), image->height(), GL_RGB, GL_UNSIGNED_BYTE, image->bmp_w());
+	// Read back as RGBA, which every OpenGL and OpenGL ES implementation must support.
+	// (GL_RGB readback is not guaranteed on OpenGL ES and returns garbage on some drivers.)
+	std::vector<unsigned char> rgba(static_cast<size_t>(width) * static_cast<size_t>(height) * 4);
+	glPixelStorei(GL_PACK_ALIGNMENT, 4);
+	glReadPixels(0, 0, width, height, GL_RGBA, GL_UNSIGNED_BYTE, rgba.data());
+	unsigned char *dst = image->bmp_w();
+	const size_t numPixels = static_cast<size_t>(width) * static_cast<size_t>(height);
+	for (size_t i = 0; i < numPixels; ++i)
+	{
+		dst[i * 3 + 0] = rgba[i * 4 + 0];
+		dst[i * 3 + 1] = rgba[i * 4 + 1];
+		dst[i * 3 + 2] = rgba[i * 4 + 2];
+	}
 
 	callback(std::move(image));
 

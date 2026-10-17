@@ -57,6 +57,8 @@ void screen_Display();
 
 /* screendump */
 void screenDumpToDisk(const char *path, const char *level);
+/// Request a screenshot at the end of this frame, saved to the given PhysFS write-dir path
+void screenDumpToDiskNamed(const char *fileName);
 
 extern bool wz_texture_compression;
 extern bool uses_gfx_debug;
