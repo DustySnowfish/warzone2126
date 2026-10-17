@@ -32,6 +32,8 @@
  *      "warmupGameSeconds": 420,    // game time simulated before the first shot
  *      "warmupSpeed": 16,           // game speed multiplier during warm-up
  *      "settleSeconds": 2,          // real seconds at normal speed before each shot is measured
+ *      "vsync": false,              // default false: measure uncapped frame rates
+ *      "revealMap": true,           // default true: no fog of war, so every shot shows the scene
  *      "shots": [
  *        { "name": "p0_base_wide",
  *          "anchor": "start:0",     // start:N, centre, or tile

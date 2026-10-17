@@ -37,6 +37,7 @@
 #include "display.h"
 #include "display3d.h"
 #include "game_world.h"
+#include "keybind.h"
 #include "map.h"
 #include "qtscript.h"
 #include "version.h"
@@ -94,6 +95,8 @@ std::string localAI = "nb_generic.js";
 uint32_t warmupGameMs = 0;
 uint32_t warmupSpeed = 16;
 float settleSeconds = 2.f;
+bool disableVsync = true;
+bool revealMap = true;
 std::vector<Shot> shots;
 std::vector<ShotResult> results;
 
@@ -139,6 +142,14 @@ bool loadConfig()
 	warmupGameMs = static_cast<uint32_t>(std::max(0.f, jsonFloat(vb, "warmupGameSeconds", 0.f)) * 1000.f);
 	warmupSpeed = static_cast<uint32_t>(std::clamp(jsonFloat(vb, "warmupSpeed", 16.f), 1.f, 64.f));
 	settleSeconds = std::max(0.f, jsonFloat(vb, "settleSeconds", 2.f));
+	if (vb.contains("vsync") && vb["vsync"].is_boolean())
+	{
+		disableVsync = !vb["vsync"].get<bool>();
+	}
+	if (vb.contains("revealMap") && vb["revealMap"].is_boolean())
+	{
+		revealMap = vb["revealMap"].get<bool>();
+	}
 
 	shots.clear();
 	if (vb.contains("shots") && vb["shots"].is_array())
@@ -268,6 +279,8 @@ void writeResults()
 	out["resolution"] = std::to_string(screenWidth) + "x" + std::to_string(screenHeight);
 	out["seed"] = seed;
 	out["warmupGameSeconds"] = warmupGameMs / 1000;
+	out["vsync"] = !disableVsync;
+	out["revealMap"] = revealMap;
 
 	std::vector<double> all;
 	nlohmann::json shotList = nlohmann::json::array();
@@ -364,6 +377,22 @@ void visualBenchLevelLoaded()
 	outDir = "benchmarks/" + benchName + "_" + runStamp + "/";
 	PHYSFS_mkdir("benchmarks");
 	PHYSFS_mkdir(outDir.c_str());
+
+	if (disableVsync)
+	{
+		// Measure real GPU/CPU headroom rather than the display refresh rate.
+		// Not saved to the player's config.
+		if (!gfx_api::context::get().setSwapInterval(gfx_api::context::swap_interval_mode::immediate, []() {}))
+		{
+			debug(LOG_WARNING, "Visual bench: could not disable vsync; frame rates will be capped by the display");
+		}
+	}
+	if (revealMap)
+	{
+		// Whole map visible, so every shot shows terrain, structures and units
+		// rather than unexplored fog. The local player is an AI in this mode.
+		enableGodMode();
+	}
 
 	results.clear();
 	haveLastFrame = false;
