@@ -179,6 +179,11 @@ std::string pie_MakeTexPageTCMaskName(const std::string& filename)
 
 gfx_api::texture* loadTextureHandleGraphicsOverrides(const char *filename, gfx_api::texture_type textureType, int maxWidth = -1, int maxHeight = -1)
 {
+	if (filename[0] == '/')
+	{
+		// A path from the data root (used by glTF models, whose textures sit next to the model file)
+		return gfx_api::context::get().loadTextureFromFile(filename + 1, textureType, maxWidth, maxHeight);
+	}
 	// First, try to load from the current graphics_overrides (if enabled)
 	std::string loadPath = WZ_CURRENT_GRAPHICS_OVERRIDES_PREFIX "/texpages/";
 	loadPath += filename;

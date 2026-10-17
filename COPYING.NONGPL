@@ -11,6 +11,8 @@ data/base/texpages/page-25-sky-urban.png
 	- CC0, original work by cybersphinx
 3rdparty/ControllerImage/*
 	- zlib, Copyright (c) 2023-2025 Ryan C. Gordon <icculus@icculus.org> and others (https://github.com/icculus/ControllerImage)
+lib/ivis_opengl/3rdparty/cgltf.h
+	- MIT, Copyright (c) 2018-2021 Johannes Kuhlmann (https://github.com/jkuhlmann/cgltf)
 3rdparty/date/*
 	- MIT, Various Authors, See: https://github.com/HowardHinnant/date/blob/master/include/date/date.h
 3rdparty/discord-rpc/*

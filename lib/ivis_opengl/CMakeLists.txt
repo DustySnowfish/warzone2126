@@ -73,6 +73,8 @@ file(GLOB HEADERS
 	"3rdparty/AreaTex.h"
 	"3rdparty/SearchTex.h"
 	"3rdparty/stb_image_resize.h"
+	"3rdparty/cgltf.h"
+	"gltfload.h"
 )
 
 file(GLOB SRC
@@ -97,6 +99,7 @@ file(GLOB SRC
 	"render_graph/scene_post_effects.cpp"
 	"render_graph/topology.cpp"
 	"gfx_api_vk.cpp"
+	"gltfload.cpp"
 	"imdload.cpp"
 	"jpeg_encoder.cpp"
 	"jpeg_util.cpp"

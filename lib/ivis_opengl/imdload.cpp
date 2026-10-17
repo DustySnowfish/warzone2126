@@ -49,6 +49,7 @@
 
 #include "ivisdef.h" // for imd structures
 #include "imd.h" // for imd structures
+#include "gltfload.h"
 #include "tex.h" // texture page loading
 
 #include <glm/vec4.hpp>
@@ -58,7 +59,7 @@ using Vector4f = glm::vec4;
 // 1. The vertexCount *must* be less than UINT16_MAX (65535), because this special vertex index value is treated as restarting the assembly of primitives in some cases (example: Vulkan on MoltenVK) - NOTE: we currently use index_type::u16 for our model VBO_INDEX buffers
 // 2. Given how the game world and models are displayed, using a very large number of polygons is effectively a waste
 //#define MAX_PIE_POLYGONS 21844 // floor((UINT16_MAX-1) / 3)
-#define MAX_PIE_POLYGONS 8192
+#define MAX_PIE_POLYGONS 21844 // floor((UINT16_MAX-1) / 3); raised from 8192 for Warzone 2126 glTF models
 static_assert(MAX_PIE_POLYGONS <= ((UINT16_MAX-1) / 3), "MAX_PIE_POLYGONS must not currently exceed floor((UINT16_MAX-1) / 3)");
 #define MAX_PIE_POINTS (MAX_PIE_POLYGONS * 3)
 #define MAX_PIE_CONNECTORS 256
@@ -372,6 +373,48 @@ static std::unique_ptr<iIMDShape> tryLoadDisplayModelInternal(const WzString &pa
 	return nullptr;
 }
 
+/// Loads the glTF display model configured for this PIE file in assets/model_overrides.json, if any.
+static std::unique_ptr<iIMDShape> tryLoadGLTFDisplayModel(const WzString &filename)
+{
+	auto gltfOverride = gltfFindOverride(filename.toStdString());
+	if (!gltfOverride.has_value())
+	{
+		return nullptr;
+	}
+	const std::string &modelPath = gltfOverride->modelPath;
+	PHYSFS_file *f = PHYSFS_openRead(modelPath.c_str());
+	if (!f)
+	{
+		debug(LOG_ERROR, "glTF override for %s: cannot open %s", filename.toUtf8().c_str(), modelPath.c_str());
+		++modelLoadingErrors;
+		return nullptr;
+	}
+	std::vector<char> glbData(static_cast<size_t>(std::max<PHYSFS_sint64>(0, PHYSFS_fileLength(f))));
+	const bool readOk = glbData.empty() || WZ_PHYSFS_readBytes(f, glbData.data(), static_cast<PHYSFS_uint32>(glbData.size())) == static_cast<PHYSFS_sint64>(glbData.size());
+	PHYSFS_close(f);
+	if (!readOk)
+	{
+		debug(LOG_ERROR, "glTF override for %s: failed to read %s", filename.toUtf8().c_str(), modelPath.c_str());
+		++modelLoadingErrors;
+		return nullptr;
+	}
+	std::string error;
+	auto pieText = gltfConvertToPIE(modelPath, glbData, gltfOverride->scale, error);
+	if (!pieText.has_value())
+	{
+		debug(LOG_ERROR, "glTF override for %s (%s): %s", filename.toUtf8().c_str(), modelPath.c_str(), error.c_str());
+		++modelLoadingErrors;
+		return nullptr;
+	}
+	const char *pData = pieText->c_str();
+	auto result = iV_ProcessIMD(filename, &pData, pieText->c_str() + pieText->size(), false, true);
+	if (result)
+	{
+		debug(LOG_INFO, "Using glTF display model %s for %s", modelPath.c_str(), filename.toUtf8().c_str());
+	}
+	return result;
+}
+
 bool tryLoad(const WzString &path, const WzString &filename)
 {
 	if (!PHYSFS_exists(path + filename))
@@ -396,6 +439,11 @@ bool tryLoad(const WzString &path, const WzString &filename)
 	auto baseInsertResult = models.insert(ModelMap::value_type(modelName.toUtf8(), std::make_unique<iIMDBaseShape>(std::move(baseModel), path, filename)));
 	ASSERT_OR_RETURN(false, baseInsertResult.second, "%s: Loaded duplicate model? (%s)", filename.toUtf8().c_str(), modelName.toUtf8().c_str());
 	// do NOT use baseModel after this point!
+
+	if (!graphics_override_model)
+	{
+		graphics_override_model = tryLoadGLTFDisplayModel(filename);
+	}
 
 	if (!graphics_override_model)
 	{

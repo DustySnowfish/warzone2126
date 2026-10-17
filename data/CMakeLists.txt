@@ -609,6 +609,7 @@ COMPRESS_ZIP(OUTPUT "${CMAKE_CURRENT_BINARY_DIR}/base.wz"
 	COMPRESSION_LEVEL 0
 	PATHS
 		"palette.txt"
+		"assets"
 		"audio"
 		"campaigns"
 		"components"
