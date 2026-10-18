@@ -45,6 +45,7 @@
 #include "map.h"
 #include "order.h"
 #include "projectile.h"
+#include "particles.h"
 #include "visibility.h"
 #include "group.h"
 #include "cmddroid.h"
@@ -1274,7 +1275,13 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 				imd = psStats->pTargetMissGraphic;
 			}
 
-			addMultiEffect(&position, &scatter, EFFECT_EXPLOSION, facing, true, (imd) ? imd->displayModel() : nullptr, psStats->numExplosions, psStats->lightWorld, psStats->effectSize, psObj->time);
+			// Warzone 2126 particle impact (display only)
+			const bool hitWater = imd == psStats->pWaterHitGraphic && psStats->pWaterHitGraphic != nullptr;
+			particles::weaponImpact(psStats, Vector3f(psObj->pos.x, psObj->pos.y, psObj->pos.z), hitWater ? particles::ImpactKind::Water : particles::ImpactKind::Miss);
+			if (!particles::replacesClassicImpact(psStats))
+			{
+				addMultiEffect(&position, &scatter, EFFECT_EXPLOSION, facing, true, (imd) ? imd->displayModel() : nullptr, psStats->numExplosions, psStats->lightWorld, psStats->effectSize, psObj->time);
+			}
 
 			// If the target was a VTOL hit in the air add smoke
 			if ((psStats->surfaceToAir & SHOOT_IN_AIR)
@@ -1316,7 +1323,12 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 				imd = psStats->pTargetHitGraphic;
 			}
 
-			addMultiEffect(&position, &scatter, EFFECT_EXPLOSION, facing, true, (imd) ? imd->displayModel() : nullptr, psStats->numExplosions, psStats->lightWorld, psStats->effectSize, psObj->time);
+			// Warzone 2126 particle impact (display only)
+			particles::weaponImpact(psStats, Vector3f(psObj->pos.x, psObj->pos.y, psObj->pos.z), particles::ImpactKind::Hit);
+			if (!particles::replacesClassicImpact(psStats))
+			{
+				addMultiEffect(&position, &scatter, EFFECT_EXPLOSION, facing, true, (imd) ? imd->displayModel() : nullptr, psStats->numExplosions, psStats->lightWorld, psStats->effectSize, psObj->time);
+			}
 		}
 
 		// Check for electronic warfare damage where we know the subclass and source

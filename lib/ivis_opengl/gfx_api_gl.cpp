@@ -1992,6 +1992,11 @@ static void bindUsedVertexAttribLocations(GLuint program, const std::unordered_s
 	bindIfUsed(gfx_api::terrain_tileNo, "tileNo");
 	bindIfUsed(gfx_api::terrain_grounds, "grounds");
 	bindIfUsed(gfx_api::terrain_groundWeights, "groundWeights");
+	// Warzone 2126 particles (per-instance data in locations 5 - 8)
+	bindIfUsed(5, "particlePositionSize");
+	bindIfUsed(6, "particleColour");
+	bindIfUsed(7, "particleParams");
+	bindIfUsed(8, "particleVelocity");
 }
 
 void gl_pipeline_state_object::build_program(gl_context& ctx,

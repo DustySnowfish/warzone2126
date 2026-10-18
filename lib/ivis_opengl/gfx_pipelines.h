@@ -1135,6 +1135,48 @@ namespace gfx_api
 		glm::vec4 params;    // x = sharpening strength (0..1)
 	};
 
+	// Warzone 2126 particles: camera-facing quads, one instance per particle
+	template<>
+	struct constant_buffer_type<SHADER_PARTICLE>
+	{
+		glm::mat4 viewProjection;
+		glm::vec4 cameraRight;  // world (render space), xyz
+		glm::vec4 cameraUp;
+		glm::vec4 cameraForward;
+		glm::vec4 atlas;        // x = columns, y = rows
+		glm::vec4 ambient;      // linear RGB light for lit (smoke) particles
+		glm::vec4 sunColour;    // linear RGB
+		glm::vec4 sunDir;       // xyz = direction to the sun
+	};
+
+	struct ParticleInstance
+	{
+		glm::vec4 positionSize;  // render-space position, w = size (world units)
+		glm::vec4 colour;        // linear RGB (may exceed 1), a = opacity
+		glm::vec4 params;        // x = rotation (radians), y = atlas frame, z = stretch, w = lit (0/1)
+		glm::vec4 velocity;      // render-space direction of travel (for stretched sparks)
+	};
+
+	template<REND_MODE render_mode>
+	using ParticlePSO = typename gfx_api::pipeline_state_helper<rasterizer_state<render_mode, DEPTH_CMP_LEQ_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangle_strip, index_type::u16,
+	std::tuple<constant_buffer_type<SHADER_PARTICLE>>,
+	std::tuple<
+		vertex_buffer_description<2 * sizeof(gfxFloat), gfx_api::vertex_attribute_input_rate::vertex,
+			vertex_attribute_description<position, gfx_api::vertex_attribute_type::float2, 0>
+		>,
+		vertex_buffer_description<sizeof(ParticleInstance), gfx_api::vertex_attribute_input_rate::instance,
+			vertex_attribute_description<5, gfx_api::vertex_attribute_type::float4, 0>,
+			vertex_attribute_description<6, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4)>,
+			vertex_attribute_description<7, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4) * 2>,
+			vertex_attribute_description<8, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4) * 3>
+		>
+	>,
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_particleAtlas, pixel_format_target::texture_2d>
+	>, SHADER_PARTICLE>;
+	using ParticleAdditivePSO = ParticlePSO<REND_ADDITIVE>;
+	using ParticleAlphaPSO = ParticlePSO<REND_ALPHA>;
+
 #define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
 	gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16, \
 	std::tuple<constant_buffer_type<SHADER>>, \

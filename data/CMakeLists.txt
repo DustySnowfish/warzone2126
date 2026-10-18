@@ -153,6 +153,8 @@ file(GLOB VK_SHADERS
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/taa_resolve.frag"
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/taa_copy.frag"
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/taa_sharpen.frag"
+	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/particle.vert"
+	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/particle.frag"
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/range_ring_sdf.vert"
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/range_ring_sdf.frag"
 	"${CMAKE_CURRENT_SOURCE_DIR}/base/shaders/vk/range_ring_composite.frag"

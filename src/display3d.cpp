@@ -94,6 +94,7 @@
 #include "colour_grade.h"
 #include "environment_light.h"
 #include "taa.h"
+#include "particles.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1389,6 +1390,7 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	/* This is done here as effects can light the terrain - pause mode problems though */
 	wzPerfBegin(PERF_EFFECTS, "3D scene - effects");
 	processEffects(perspectiveViewMatrix, lightData);
+	particles::update(lightData);
 	atmosUpdateSystem(gameWorld.map);
 	avUpdateTiles(gameWorld.map);
 	emitProjectileLights(lightData);
@@ -1577,6 +1579,9 @@ bool init3DView()
 
 	clearFadingProjectileLights();
 
+	// Warzone 2126: particle effects (definitions re-read each level, so they can be tuned between games)
+	particles::initialise();
+
 	return true;
 }
 
@@ -1614,6 +1619,7 @@ void shutdown3DView_FullReset()
 	ssr::shutdown();
 	colour_grade::shutdown();
 	environment_light::shutdown();
+	particles::shutdown();
 	range_rings::shutdown();
 
 	setLightingManager(nullptr);
@@ -1925,6 +1931,7 @@ void	renderProjectile(PROJECTILE *psCurr, const glm::mat4 &viewMatrix, const glm
 	}
 
 	st = interpolateObjectSpacetime(psCurr, graphicsTime);
+	particles::weaponTrail(psStats, psCurr->id, Vector3f(st.pos.x, st.pos.y, st.pos.z), Vector3f(0.f, 0.f, 0.f));
 
 	//the weapon stats holds the reference to which graphic to use
 	/*Need to draw the graphic depending on what the projectile is doing - hitting target,

@@ -42,6 +42,7 @@
 #include "fog_pass.h"
 #include "hdr_pass.h"
 #include "taa.h"
+#include "particles.h"
 #include "range_rings.h"
 #include "terrain.h"
 
@@ -148,6 +149,11 @@ static void recordScenePass(const gfx_api::RenderPassContext& passCtx)
 	}
 	wzPerfEnd(PERF_MODELS);
 
+	if (fusedTransparents)
+	{
+		particles::draw(fc.viewMatrix, fc.perspectiveMatrix);
+	}
+
 	if (fusedTransparents && !gamePaused())
 	{
 		display3d_doConstructionLines(fc.viewMatrix);
@@ -176,6 +182,7 @@ static void recordSceneTransparent(const gfx_api::RenderPassContext& passCtx)
 			fc.shadowCascadesInfo, shadowMap, fc.pointLights, MeshDepthPassMode::None,
 			MeshDrawParts::Translucent | MeshDrawParts::Additive, MeshFogMode::ForwardDistance);
 	}
+	particles::draw(fc.viewMatrix, fc.perspectiveMatrix);
 
 	if (!gamePaused())
 	{

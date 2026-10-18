@@ -896,6 +896,7 @@ namespace gfx_api
 	inline constexpr char kSampler_gradeLut[] = "gradeLut";
 	inline constexpr char kSampler_currentTexture[] = "currentTexture";
 	inline constexpr char kSampler_historyTexture[] = "historyTexture";
+	inline constexpr char kSampler_particleAtlas[] = "particleAtlas";
 	inline constexpr char kSampler_ssaoTexture[] = "ssaoTexture";
 	inline constexpr char kSampler_prepassNormals[] = "prepassNormals";
 	inline constexpr char kSampler_prepassDepth[] = "prepassDepth";

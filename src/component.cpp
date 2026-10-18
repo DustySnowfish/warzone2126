@@ -29,6 +29,7 @@
 
 #include "action.h"
 #include "component.h"
+#include "particles.h"
 #include "display3d.h"
 #include "lib/ivis_opengl/pielighting.h"
 #include "warzoneconfig.h"
@@ -469,6 +470,19 @@ void drawMuzzleFlash(WEAPON sWeap, const iIMDShape *weaponImd, const iIMDShape *
 	/* Now we need to move to the end of the firing barrel */
 	modelMatrix *= glm::translate(glm::vec3(weaponImd->connectors[connector_num].xzy()));
 	heightAboveTerrain += weaponImd->connectors[connector_num].z;
+
+	// Warzone 2126: particle muzzle effect, once per shot (on the first frame that draws it)
+	const WEAPON_STATS* weaponStats = &asWeaponStats[sWeap.nStat];
+	if (sWeap.lastFired > graphicsTime - deltaGraphicsTime && deltaGraphicsTime > 0)
+	{
+		const glm::vec3 renderPos = glm::vec3(modelMatrix * glm::vec4(0.f, 0.f, 0.f, 1.f));
+		const glm::vec3 renderDir = glm::normalize(glm::mat3(modelMatrix) * glm::vec3(0.f, 0.f, -1.f));
+		particles::weaponFired(weaponStats, Vector3f(renderPos.x, -renderPos.z, renderPos.y), Vector3f(renderDir.x, -renderDir.z, renderDir.y));
+	}
+	if (particles::replacesClassicMuzzle(weaponStats))
+	{
+		return;
+	}
 
 	// assume no clan colours for muzzle effects
 	if (flashImd->numFrames == 0 || flashImd->animInterval <= 0)
