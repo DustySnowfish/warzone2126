@@ -33,7 +33,11 @@
 // ------------------------------------------------------------------------------------
 #define FADE_IN_TIME	(GAME_TICKS_PER_SEC/10)
 #define	START_DIVIDE	(8)
-#define MIN_ILLUM       (45.0f)
+// Warzone 2126: softer fog of war. Brightness (fraction of full) of tiles never explored, and
+// of explored tiles no unit currently sees. The classic values were about 18% (capped at
+// 45 of 255) and 50%; against the new sky and haze, near-black unexplored ground read as holes.
+#define UNEXPLORED_FRACTION  (0.38f)
+#define UNSEEN_FRACTION      (0.62f)
 
 /// Whether unexplored tiles should be shown as just darker fog. Left here as a future option
 /// for scripts, since campaign may still want total darkness on unexplored tiles.
@@ -63,21 +67,35 @@ void	avUpdateTiles(WorldMapState& mapState)
 		psTile = &mapState.tiles[i];
 		maxLevel = getTileIllumination(psTile);
 
-		if (psTile->level > MIN_ILLUM || psTile->tileExploredBits & playermask)	// seen
+		const int tileX = static_cast<int>(i % static_cast<UDWORD>(mapState.width));
+		const int tileY = static_cast<int>(i / static_cast<UDWORD>(mapState.width));
+		const bool outsidePlayArea = tileX < mapState.scroll.minX || tileX >= mapState.scroll.maxX
+			|| tileY < mapState.scroll.minY || tileY >= mapState.scroll.maxY;
+		if (outsidePlayArea && bRevealActive)
+		{
+			// Scenery beyond the playable area can never be explored: show it as plain terrain
+			// (it is already darkened by the lighting, see calcInitialLightingForMapState)
+		}
+		else if (godMode || psTile->tileExploredBits & playermask)	// seen
 		{
 			// If we are not omniscient, and we are not seeing the tile, and none of our allies see the tile...
 			if (!godMode && !(playerAllianceBits & (satuplinkbits | psTile->sensorBits)))
 			{
-				maxLevel /= 2;
+				maxLevel *= UNSEEN_FRACTION;
 			}
-			if (psTile->level > maxLevel)
-			{
-				psTile->level = MAX(psTile->level - increment, maxLevel);
-			}
-			else if (psTile->level < maxLevel)
-			{
-				psTile->level = MIN(psTile->level + increment, maxLevel);
-			}
+		}
+		else
+		{
+			// Never explored: shown dimmed (or black when reveal is off)
+			maxLevel = bRevealActive ? maxLevel * UNEXPLORED_FRACTION : 0.f;
+		}
+		if (psTile->level > maxLevel)
+		{
+			psTile->level = MAX(psTile->level - increment, maxLevel);
+		}
+		else if (psTile->level < maxLevel)
+		{
+			psTile->level = MIN(psTile->level + increment, maxLevel);
 		}
 	}
 }
@@ -118,7 +136,7 @@ void	preProcessVisibility(WorldMapState& mapState)
 		for (int j = 0; j < mapState.height; j++)
 		{
 			MAPTILE *psTile = mapTile(mapState, i, j);
-			psTile->level = bRevealActive ? MIN(MIN_ILLUM, getTileIllumination(psTile) / 4.0f) : 0;
+			psTile->level = bRevealActive ? getTileIllumination(psTile) * UNEXPLORED_FRACTION : 0;
 
 			if (TEST_TILE_VISIBLE_TO_SELECTEDPLAYER(psTile))
 			{

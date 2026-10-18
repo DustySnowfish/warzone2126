@@ -96,24 +96,45 @@ void initLighting(WorldMapState& mapState, UDWORD x1, UDWORD y1, UDWORD x2, UDWO
 		{
 			MAPTILE	*psTile = mapTile(mapState, i, j);
 
-			// always make the edge tiles dark
+			// The outermost tiles cannot be computed from their neighbours; they are filled in below
 			if (i == 0 || j == 0 || i >= mapState.width - 1 || j >= mapState.height - 1)
 			{
-				psTile->illumination = 16;
-				psTile->ambientOcclusion = 16.0;
+				continue;
 			}
-			else
-			{
-				calcTileIllum(i, j);
-			}
-			// Basically darkens down the tiles that are outside the scroll
-			// limits - thereby emphasising the cannot-go-there-ness of them
+			calcTileIllum(i, j);
+			// Darken the tiles outside the scroll limits, to show they cannot be reached.
+			// (Warzone 2126: to 60%, from a third, which read as black against the new sky.)
 			if ((SDWORD)i < mapState.scroll.minX + 4 || (SDWORD)i > mapState.scroll.maxX - 4
 			    || (SDWORD)j < mapState.scroll.minY + 4 || (SDWORD)j > mapState.scroll.maxY - 4)
 			{
-				psTile->illumination /= 3;
-				psTile->ambientOcclusion /= 3;
+				psTile->illumination = static_cast<uint8_t>(psTile->illumination * 3 / 5);
+				psTile->ambientOcclusion = static_cast<uint8_t>(psTile->ambientOcclusion * 3 / 5);
 			}
+		}
+	}
+
+	// Warzone 2126: the outermost tiles copy their inner neighbour (the classic renderer made
+	// them a fixed near-black, which showed as a black rim against the sky)
+	for (unsigned j = y1; j < y2; j++)
+	{
+		for (unsigned i = x1; i < x2; i++)
+		{
+			if (!(i == 0 || j == 0 || i >= mapState.width - 1 || j >= mapState.height - 1))
+			{
+				continue;
+			}
+			MAPTILE *psTile = mapTile(mapState, i, j);
+			if (mapState.width < 3 || mapState.height < 3)
+			{
+				psTile->illumination = 16;
+				psTile->ambientOcclusion = 16;
+				continue;
+			}
+			const unsigned ci = std::min<unsigned>(std::max<unsigned>(i, 1u), static_cast<unsigned>(mapState.width - 2));
+			const unsigned cj = std::min<unsigned>(std::max<unsigned>(j, 1u), static_cast<unsigned>(mapState.height - 2));
+			const MAPTILE *psInner = mapTile(mapState, ci, cj);
+			psTile->illumination = psInner->illumination;
+			psTile->ambientOcclusion = psInner->ambientOcclusion;
 		}
 	}
 }
