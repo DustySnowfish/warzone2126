@@ -219,6 +219,11 @@ bool anyScenePostEffectEnabled(const SceneEffectSurfaces& cfg)
 PrepassNeed prepassNeeds(const RenderTopologySnapshot& snapshot)
 {
 	PrepassNeed needs = unionPrepassNeeds([&](ScenePostEffectId id) { return effectEnabled(snapshot, id); });
+	if (snapshot.features & RenderFeatures::Taa)
+	{
+		// Warzone 2126 TAA reprojects last frame's result through the opaque scene depth
+		needs = needs | PrepassNeed::Depth;
+	}
 	if (anyScenePostEffectEnabled(snapshot))
 	{
 		// A post-effect sits between opaque ScenePass and the transparents, so the blueprint separates them into SceneTransparent,

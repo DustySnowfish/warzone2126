@@ -70,6 +70,10 @@ enum class PassId : uint16_t
 	BloomUp4,
 	BloomUp2,
 	Tonemap,
+	// Warzone 2126 TAA: temporal resolve, then a copy into the history kept for the next frame
+	TaaResolve,
+	TaaHistoryStore,
+	TaaSharpen,
 	SceneBlit,
 	SceneUpscaleEASU,
 	SceneUpscaleRCAS,

@@ -178,6 +178,12 @@ enum class PipelineSurfaceId : uint8_t
 	BloomUp2,
 	/// Scene-sized tonemapped (display-ready) scene colour with bloom; feeds SMAA/blit/FSR.
 	TonemappedColor,
+	/// Warzone 2126 TAA: anti-aliased scene colour (stored as history, then sharpened).
+	TaaColor,
+	/// Warzone 2126 TAA: last frame's anti-aliased colour, read back the next frame.
+	TaaHistory,
+	/// Warzone 2126 TAA: sharpened output (the history keeps the unsharpened result).
+	TaaOutput,
 	ShadowMap,
 	SwapchainColor,
 	SwapchainMSAAColor,
@@ -329,6 +335,8 @@ enum class SurfaceEnablePolicy : uint8_t
 	ScenePrepassNormalsActive,
 	/// Warzone 2126 HDR (bloom chain + tonemap output) active.
 	HdrActive,
+	/// Warzone 2126 TAA active (needs HDR).
+	TaaActive,
 };
 
 /// How the backend materializes the surface (allocate vs WSI import).
@@ -411,6 +419,8 @@ struct PipelineSurfaceSyncInputs
 	bool smaa = false;
 	/// Warzone 2126: HDR (half-float scene colour, bloom chain and tonemap output) is active.
 	bool hdr = false;
+	/// Warzone 2126: temporal anti-aliasing is active (needs HDR and the prepass depth).
+	bool taa = false;
 	/// Allocated scene-effect catalog request (enable flags + SSAO divisors).
 	SceneEffectSurfaces effects;
 	/// Enabled post-effect prepass capabilities, plus the separated transparents depth need when any effect is enabled (`prepassNeeds(effects)`).

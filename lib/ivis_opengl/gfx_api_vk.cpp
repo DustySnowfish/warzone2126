@@ -6229,8 +6229,14 @@ gfx_api::PipelineSurfaceSyncInputs VkRoot::pipelineSurfaceSyncInputs() const
 	inputs.sceneDynamicResolution = sceneDynamicResolutionEnabled();
 	inputs.smaa = smaaEnabled();
 	inputs.hdr = hdrActive();
+	inputs.taa = taaActive();
 	inputs.effects = storedSceneEffectSurfaces();
 	inputs.prepassNeeds = gfx_api::prepassNeeds(inputs.effects);
+	if (inputs.taa)
+	{
+		// Warzone 2126 TAA reprojects through the prepass depth (matches prepassNeeds(snapshot))
+		inputs.prepassNeeds = inputs.prepassNeeds | gfx_api::PrepassNeed::Depth;
+	}
 	return inputs;
 }
 
@@ -7407,6 +7413,21 @@ bool VkRoot::setHdrEnabled(bool enabled)
 	if (!dev || swapchainSize.width == 0 || swapchainSize.height == 0)
 	{
 		// no surfaces exist yet, the setting applies when they are created
+		return true;
+	}
+	invalidateWarmEntries();
+	return syncPipelineSurfaces();
+}
+
+bool VkRoot::setTaaEnabled(bool enabled)
+{
+	if (enabled == taaEnabled())
+	{
+		return true;
+	}
+	gfx_api::context::setTaaEnabled(enabled);
+	if (!dev || swapchainSize.width == 0 || swapchainSize.height == 0)
+	{
 		return true;
 	}
 	invalidateWarmEntries();

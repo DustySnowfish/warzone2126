@@ -82,11 +82,39 @@ static PassId appendHdrBloomAndTonemap(BlueprintBuilder& builder, PassId incomin
 	return PassId::Tonemap;
 }
 
+/// Warzone 2126 TAA: blend the (jittered) current frame with last frame's result, reprojected
+/// through the prepass depth, then store the result as the next frame's history.
+static PassId appendTaa(BlueprintBuilder& builder, PassId incomingColor)
+{
+	builder.beginPass(PassId::TaaResolve, std::string("TaaResolve"));
+	builder.color(PipelineSurfaceId::TaaColor, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+		.viewport(ViewportRule::SceneColorTarget)
+		.readFrom(incomingColor, AttachmentRole::PrimaryColor)       // 0: current frame
+		.readFrom(PassId::ScenePrepass, AttachmentRole::Depth)        // 1: depth for reprojection
+		.readSurface(PipelineSurfaceId::TaaHistory);                  // 2: last frame's result
+
+	builder.beginPass(PassId::TaaHistoryStore, std::string("TaaHistoryStore"));
+	builder.color(PipelineSurfaceId::TaaHistory, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+		.viewport(ViewportRule::SceneColorTarget)
+		.readFrom(PassId::TaaResolve, AttachmentRole::PrimaryColor);
+
+	// Accumulating jittered frames softens texture detail slightly; sharpen the output only
+	builder.beginPass(PassId::TaaSharpen, std::string("TaaSharpen"));
+	builder.color(PipelineSurfaceId::TaaOutput, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
+		.viewport(ViewportRule::SceneColorTarget)
+		.readFrom(PassId::TaaResolve, AttachmentRole::PrimaryColor);
+	return PassId::TaaSharpen;
+}
+
 void appendPresentation(BlueprintBuilder& builder, const RenderTopologySnapshot& snapshot, PassId incomingColor)
 {
 	if (snapshot.features & RenderFeatures::Hdr)
 	{
 		incomingColor = appendHdrBloomAndTonemap(builder, incomingColor);
+		if (snapshot.features & RenderFeatures::Taa)
+		{
+			incomingColor = appendTaa(builder, incomingColor);
+		}
 	}
 	const bool smaaActive = (snapshot.features & RenderFeatures::Smaa) != 0;
 	const bool smaaIntermediate = (snapshot.features & RenderFeatures::SmaaIntermediate) != 0;

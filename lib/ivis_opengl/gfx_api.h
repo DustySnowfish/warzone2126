@@ -680,6 +680,15 @@ namespace gfx_api
 		/// True when HDR is enabled and the backend can render to a half-float scene target
 		/// at the current MSAA setting (the HDR passes only run when this is true).
 		virtual bool hdrActive() const { return false; }
+		/// Warzone 2126: temporal anti-aliasing (runs after the tonemap, so it needs HDR).
+		bool taaEnabled() const { return _taaEnabled; }
+		/// Backend overrides store the value via this base implementation and rebuild their surfaces.
+		virtual bool setTaaEnabled(bool enabled)
+		{
+			_taaEnabled = enabled;
+			return true;
+		}
+		bool taaActive() const { return _taaEnabled && hdrActive(); }
 		/// Bloom strength applied by the tonemap pass (0 disables bloom).
 		float bloomIntensity() const { return _bloomIntensity; }
 		void setBloomIntensity(float value) { _bloomIntensity = value; }
@@ -803,6 +812,7 @@ namespace gfx_api
 		scene_upscaling_mode _sceneUpscalingMode = scene_upscaling_mode::bilinear;
 		bool _smaaEnabled = false;
 		bool _hdrEnabled = false;
+		bool _taaEnabled = false;
 		float _bloomIntensity = 0.6f;
 		SceneEffectSurfaces _sceneEffectSurfaces;
 		float _sceneRenderFraction = 1.f;
@@ -884,6 +894,8 @@ namespace gfx_api
 	inline constexpr char kSampler_levelTexture[] = "levelTexture";
 	inline constexpr char kSampler_bloomTexture[] = "bloomTexture";
 	inline constexpr char kSampler_gradeLut[] = "gradeLut";
+	inline constexpr char kSampler_currentTexture[] = "currentTexture";
+	inline constexpr char kSampler_historyTexture[] = "historyTexture";
 	inline constexpr char kSampler_ssaoTexture[] = "ssaoTexture";
 	inline constexpr char kSampler_prepassNormals[] = "prepassNormals";
 	inline constexpr char kSampler_prepassDepth[] = "prepassDepth";

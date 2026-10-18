@@ -4188,8 +4188,14 @@ gfx_api::PipelineSurfaceSyncInputs gl_context::pipelineSurfaceSyncInputs() const
 	inputs.sceneDynamicResolution = sceneDynamicResolutionEnabled();
 	inputs.smaa = smaaEnabled();
 	inputs.hdr = hdrActive();
+	inputs.taa = taaActive();
 	inputs.effects = storedSceneEffectSurfaces();
 	inputs.prepassNeeds = gfx_api::prepassNeeds(inputs.effects);
+	if (inputs.taa)
+	{
+		// Warzone 2126 TAA reprojects through the prepass depth (matches prepassNeeds(snapshot))
+		inputs.prepassNeeds = inputs.prepassNeeds | gfx_api::PrepassNeed::Depth;
+	}
 	return inputs;
 }
 
@@ -6138,6 +6144,20 @@ bool gl_context::setHdrEnabled(bool enabled)
 	if (viewportWidth == 0 || viewportHeight == 0)
 	{
 		// no usable drawable right now, the setting applies when the scene framebuffer is next created
+		return true;
+	}
+	return syncPipelineSurfaces();
+}
+
+bool gl_context::setTaaEnabled(bool enabled)
+{
+	if (enabled == taaEnabled())
+	{
+		return true;
+	}
+	gfx_api::context::setTaaEnabled(enabled);
+	if (viewportWidth == 0 || viewportHeight == 0)
+	{
 		return true;
 	}
 	return syncPipelineSurfaces();

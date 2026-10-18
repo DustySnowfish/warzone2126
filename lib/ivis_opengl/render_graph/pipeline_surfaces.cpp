@@ -457,6 +457,42 @@ const PipelineSurfaceCatalogTable PIPELINE_SURFACE_CATALOG = {{
 		SurfaceProvisionMode::Allocate,
 		SurfaceStorageKind::SampledColor2D,
 		SurfaceLifetimePolicy::SwapchainBound),
+	// TaaColor - temporally anti-aliased scene colour
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchScene,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::TaaActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// TaaHistory - previous frame's TaaColor, kept across frames
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchScene,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::TaaActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
+	// TaaOutput - sharpened TAA result fed to the rest of the chain
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchScene,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::TaaActive,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound),
 	// ShadowMap
 	makeCatalogEntry(
 		PipelineSurfaceUsage::DepthOnly,
@@ -632,6 +668,8 @@ bool evalEnablePolicy(const PipelineSurfaceCatalogEntry& cat, const PipelineSurf
 		return hasFlag(inputs.prepassNeeds, PrepassNeed::Normals);
 	case SurfaceEnablePolicy::HdrActive:
 		return inputs.hdr;
+	case SurfaceEnablePolicy::TaaActive:
+		return inputs.taa;
 	}
 	ASSERT(false, "Unknown SurfaceEnablePolicy");
 	return false;

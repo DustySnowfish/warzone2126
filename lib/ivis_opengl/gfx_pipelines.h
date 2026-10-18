@@ -1104,6 +1104,28 @@ namespace gfx_api
 		glm::vec4 fogColour;   // rgb = fog colour (display-encoded), w = 1 when fog is on
 	};
 
+	template<>
+	struct constant_buffer_type<SHADER_TAA_RESOLVE>
+	{
+		glm::mat4 currentInvViewProj; // clip to world, this frame (unjittered)
+		glm::mat4 previousViewProj;   // world to clip, last frame (unjittered)
+		glm::vec4 uvScaleClamp;
+		glm::vec4 texelSize;          // xy = 1 / texture size
+		glm::vec4 params;             // x = history weight, y = history valid, z = colour box size
+	};
+	template<>
+	struct constant_buffer_type<SHADER_TAA_COPY>
+	{
+		glm::vec4 uvScaleClamp;
+	};
+	template<>
+	struct constant_buffer_type<SHADER_TAA_SHARPEN>
+	{
+		glm::vec4 uvScaleClamp;
+		glm::vec4 texelSize; // xy = 1 / texture size
+		glm::vec4 params;    // x = sharpening strength (0..1)
+	};
+
 #define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
 	gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16, \
 	std::tuple<constant_buffer_type<SHADER>>, \
@@ -1135,6 +1157,23 @@ namespace gfx_api
 		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>,
 		texture_description<2, sampler_type::bilinear, kSampler_gradeLut, pixel_format_target::texture_2d>
 	>, SHADER_TONEMAP>;
+
+	using TaaResolvePSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TAA_RESOLVE),
+	std::tuple<
+		texture_description<0, sampler_type::nearest_clamped, kSampler_currentTexture, pixel_format_target::texture_2d>,
+		texture_description<1, sampler_type::nearest_clamped, kSampler_depthTexture, pixel_format_target::texture_2d>,
+		texture_description<2, sampler_type::bilinear, kSampler_historyTexture, pixel_format_target::texture_2d>
+	>, SHADER_TAA_RESOLVE>;
+
+	using TaaCopyPSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TAA_COPY),
+	std::tuple<
+		texture_description<0, sampler_type::nearest_clamped, kSampler_sourceTexture, pixel_format_target::texture_2d>
+	>, SHADER_TAA_COPY>;
+
+	using TaaSharpenPSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TAA_SHARPEN),
+	std::tuple<
+		texture_description<0, sampler_type::nearest_clamped, kSampler_sourceTexture, pixel_format_target::texture_2d>
+	>, SHADER_TAA_SHARPEN>;
 
 	// Drawn on the far plane with a depth test, so it only fills pixels nothing else covers
 	using SkyDomePSO = typename gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_LEQ_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16,

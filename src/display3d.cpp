@@ -93,6 +93,7 @@
 #include "ssr.h"
 #include "colour_grade.h"
 #include "environment_light.h"
+#include "taa.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1487,10 +1488,13 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	}
 
 	InGame3DFrameContext& ctx = pie_GetInGame3DFrameContext();
-	ctx.perspectiveViewMatrix = perspectiveViewMatrix;
+	// Warzone 2126 TAA: the GPU passes draw with a sub-pixel offset that changes every frame;
+	// CPU-side projection (picking, labels, culling) keeps the unshifted matrices.
+	const glm::mat4 scenePerspectiveMatrix = taa::beginFrame(perspectiveMatrix, viewMatrix);
+	ctx.perspectiveViewMatrix = scenePerspectiveMatrix * viewMatrix;
 	ctx.viewMatrix = viewMatrix;
 	ctx.baseViewMatrix = baseViewMatrix;
-	ctx.perspectiveMatrix = perspectiveMatrix;
+	ctx.perspectiveMatrix = scenePerspectiveMatrix;
 	ctx.cameraPos = cameraPos;
 	ctx.currentGameFrame = currentGameFrame;
 	ctx.pointLights = pointLightsRef;

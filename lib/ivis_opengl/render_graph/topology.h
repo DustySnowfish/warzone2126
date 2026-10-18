@@ -73,6 +73,8 @@ struct RenderFeatures
 		SSRDownsample      = 1u << 8,
 		/// Warzone 2126: HDR scene, bloom chain and tonemap pass before SMAA / scaling.
 		Hdr                = 1u << 9,
+		/// Warzone 2126: temporal anti-aliasing after the tonemap.
+		Taa                = 1u << 10,
 	};
 };
 
@@ -160,6 +162,8 @@ public:
 	virtual bool smaaIntermediateActive() const = 0;
 	/// True when the backend has the HDR bloom chain and tonemap output surfaces.
 	virtual bool hdrActive() const = 0;
+	/// True when the backend has the TAA colour and history surfaces.
+	virtual bool taaActive() const = 0;
 	/// Allocated scene-effect surfaces (not raw gameplay config).
 	virtual SceneEffectSurfaces sceneEffectSurfaces() const = 0;
 	virtual uint32_t shadowMapSize() const = 0;

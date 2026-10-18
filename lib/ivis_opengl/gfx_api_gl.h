@@ -436,6 +436,7 @@ struct gl_context final : public gfx_api::context
 	virtual bool setSmaaEnabled(bool enabled) override;
 	virtual bool setHdrEnabled(bool enabled) override;
 	virtual bool hdrActive() const override;
+	virtual bool setTaaEnabled(bool enabled) override;
 	virtual bool setSceneEffectSurfaces(gfx_api::SceneEffectSurfaces cfg) override;
 	virtual bool setSceneDynamicResolution(bool enabled) override;
 	virtual bool supportsGpuFrameTiming() const override;

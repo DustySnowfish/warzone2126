@@ -805,6 +805,7 @@ bool loadConfig()
 	war_setHdr(iniGetBool("hdr", war_getHdr()).value());
 	war_setBloomIntensity(iniGetInteger("bloomIntensity", war_getBloomIntensity()).value());
 	war_setColourGrading(iniGetInteger("colourGrading", war_getColourGrading()).value());
+	war_setTaa(iniGetBool("taa", war_getTaa()).value());
 	{
 		std::string smaaValue = iniGetString("smaa", "off").value();
 		if (smaaValue == "low")
@@ -1135,6 +1136,7 @@ bool saveConfig()
 	iniSetBool("hdr", war_getHdr());
 	iniSetInteger("bloomIntensity", war_getBloomIntensity());
 	iniSetInteger("colourGrading", war_getColourGrading());
+	iniSetBool("taa", war_getTaa());
 	switch (war_getSmaaMode())
 	{
 		case SMAA_MODE::OFF: iniSetString("smaa", "off"); break;

@@ -105,6 +105,10 @@ struct BlueprintReadEdge
 	AttachmentRole producerRole = AttachmentRole::PrimaryColor;
 	/// Index into the producer's `colorAttachments` when `producerRole == Color`.
 	uint32_t attachmentIndex = 0;
+	/// Warzone 2126: when set, read this pipeline surface directly instead of a pass output
+	/// (for data kept from an earlier frame, such as the TAA history). Barriers for it are
+	/// planned as an external read, with the old layout taken from the backend at run time.
+	PipelineSurfaceId surface = PipelineSurfaceId::Count;
 };
 
 /// <summary>
@@ -210,6 +214,9 @@ public:
 	/// Declare that the current pass reads an output from a prior pass (by `PassId`).
 	BlueprintBuilder& readFrom(PassId producer, AttachmentRole role = AttachmentRole::PrimaryColor,
 		uint32_t attachmentIndex = 0);
+	/// Warzone 2126: declare that the current pass samples a pipeline surface directly, as it
+	/// was left by an earlier frame (no producer pass in this graph).
+	BlueprintBuilder& readSurface(PipelineSurfaceId surface);
 
 	/// Finish building; invalidates the builder's current-pass cursor.
 	PassGraphTopologyBlueprint build();

@@ -804,6 +804,30 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("gfx.taa", N_("Temporal Anti-Aliasing"), N_("Smooths jagged and shimmering edges by combining several slightly shifted frames. Needs HDR Lighting."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getTaa());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				if (!gfx_api::context::get().setTaaEnabled(newValue))
+				{
+					debug(LOG_ERROR, "Failed to change temporal anti-aliasing");
+					return false;
+				}
+				war_setTaa(newValue);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("gfx.colourGrading", N_("Colour Grading"), N_("Each map type has its own colour look (warm desert, cold mountains, grey city). Needs HDR Lighting."));
 		auto valueChanger = OptionsDropdown<int>::make(
 			[]() {

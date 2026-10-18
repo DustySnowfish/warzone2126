@@ -2217,6 +2217,7 @@ int realmain(int argc, char *argv[])
 	}
 	display3d_setUpscalingSharpness(war_getUpscalingSharpness() / 100.f);
 	gfx_api::context::get().setBloomIntensity(static_cast<float>(war_getBloomIntensity()) / 100.f);
+	gfx_api::context::get().setTaaEnabled(war_getTaa());
 	if (war_getHdr())
 	{
 		if (!gfx_api::context::get().setHdrEnabled(true))

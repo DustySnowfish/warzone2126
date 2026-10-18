@@ -140,6 +140,19 @@ std::vector<RenderPassDesc> BlueprintMaterializer::materialize(const PassGraphTo
 		for (const BlueprintReadEdge& edge : bpPass.reads)
 		{
 			ReadDesc read;
+			if (edge.surface != PipelineSurfaceId::Count)
+			{
+				read.source = ReadSource::ExplicitTexture;
+				read.texture = gfx_api::context::get().getPipelineSurface(edge.surface);
+				if (read.texture == nullptr)
+				{
+					debug(LOG_ERROR, "BlueprintMaterializer: surface read %u has no texture (consumer PassId=%u)",
+						static_cast<unsigned>(edge.surface), static_cast<unsigned>(bpPass.id));
+					return {};
+				}
+				desc.reads.emplace_back(std::move(read));
+				continue;
+			}
 			read.source = ReadSource::PassOutput;
 			const auto producerIt = idToHandle.find(edge.producerPass);
 			if (producerIt == idToHandle.end())

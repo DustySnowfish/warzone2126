@@ -41,6 +41,7 @@
 #include "ssr.h"
 #include "fog_pass.h"
 #include "hdr_pass.h"
+#include "taa.h"
 #include "range_rings.h"
 #include "terrain.h"
 
@@ -121,7 +122,7 @@ static void recordScenePass(const gfx_api::RenderPassContext& passCtx)
 	wzPerfEnd(PERF_TERRAIN);
 
 	wzPerfBegin(PERF_SKYBOX, "3D scene - skybox");
-	display3d_renderSurroundings(pie_SkyboxPerspectiveGet(), fc.baseViewMatrix);
+	display3d_renderSurroundings(taa::jitterProjection(pie_SkyboxPerspectiveGet()), fc.baseViewMatrix);
 	wzPerfEnd(PERF_SKYBOX);
 
 	wzPerfBegin(PERF_WATER, "3D scene - water");
@@ -302,6 +303,9 @@ void registerInGame3DRecordFuncs(gfx_api::RecordFuncTable& table)
 	table.set(gfx_api::PassId::BloomUp4, hdr_pass::recordBloomUpsample);
 	table.set(gfx_api::PassId::BloomUp2, hdr_pass::recordBloomUpsample);
 	table.set(gfx_api::PassId::Tonemap, hdr_pass::recordTonemap);
+	table.set(gfx_api::PassId::TaaResolve, taa::recordResolve);
+	table.set(gfx_api::PassId::TaaHistoryStore, taa::recordHistoryStore);
+	table.set(gfx_api::PassId::TaaSharpen, taa::recordSharpen);
 	table.set(gfx_api::PassId::SceneBlit, recordSceneBlit);
 	table.set(gfx_api::PassId::SceneUpscaleEASU, recordSceneUpscaleEASU);
 	table.set(gfx_api::PassId::SceneUpscaleRCAS, recordSceneUpscaleRCAS);

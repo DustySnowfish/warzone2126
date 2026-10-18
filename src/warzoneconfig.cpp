@@ -127,6 +127,7 @@ struct WARZONE_GLOBALS
 	bool hdr = true;
 	int bloomIntensity = 60;
 	int colourGrading = 100; // percent strength of the per-map colour grade
+	bool taa = false; // temporal anti-aliasing
 	SSAO_MODE ssaoMode = SSAO_MODE::OFF; // screen-space ambient occlusion (default off)
 	SSR_MODE ssrMode = SSR_MODE::OFF; // screen-space reflections (default off)
 	// UI config
@@ -983,6 +984,16 @@ int war_getBloomIntensity()
 void war_setBloomIntensity(int percent)
 {
 	warGlobs.bloomIntensity = std::max(0, std::min(percent, 300));
+}
+
+bool war_getTaa()
+{
+	return warGlobs.taa;
+}
+
+void war_setTaa(bool enabled)
+{
+	warGlobs.taa = enabled;
 }
 
 int war_getColourGrading()

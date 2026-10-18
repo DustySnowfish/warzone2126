@@ -126,6 +126,10 @@ RenderTopologySnapshot snapshot(const IRenderTopologyQuery& query)
 		if (query.hdrActive())
 		{
 			snapshot.features |= RenderFeatures::Hdr;
+			if (query.taaActive())
+			{
+				snapshot.features |= RenderFeatures::Taa;
+			}
 		}
 		if (query.smaaActive())
 		{

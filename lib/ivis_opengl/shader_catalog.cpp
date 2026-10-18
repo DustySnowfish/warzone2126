@@ -108,6 +108,9 @@ constexpr std::array<shader_program_desc, SHADER_MAX> make_catalog_table()
 	t[SHADER_BLOOM_UPSAMPLE] = make_program("Bloom upsample program", "postprocess_fullscreen.vert", "bloom_upsample.frag");
 	t[SHADER_TONEMAP] = make_program("Tonemap program", "postprocess_fullscreen.vert", "tonemap.frag");
 	t[SHADER_SKY_DOME] = make_program("Sky dome program", "sky_dome.vert", "sky_dome.frag");
+	t[SHADER_TAA_RESOLVE] = make_program("TAA resolve program", "postprocess_fullscreen.vert", "taa_resolve.frag");
+	t[SHADER_TAA_COPY] = make_program("TAA copy program", "postprocess_fullscreen.vert", "taa_copy.frag");
+	t[SHADER_TAA_SHARPEN] = make_program("TAA sharpen program", "postprocess_fullscreen.vert", "taa_sharpen.frag");
 	t[SHADER_DEBUG_TEXTURE2D_QUAD] = make_program("Debug texture quad program", "quad_texture2d.vert", "quad_texture2d.frag");
 	t[SHADER_DEBUG_TEXTURE2DARRAY_QUAD] = make_program("Debug texture array quad program", "quad_texture2darray.vert", "quad_texture2darray.frag");
 	t[SHADER_DEBUG_TESS_QUAD] = make_program("Debug tessellated quad program", "tess_quad.vert", "tess_quad.frag", "tess_quad.tesc", "tess_quad.tese");

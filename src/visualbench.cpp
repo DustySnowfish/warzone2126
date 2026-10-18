@@ -287,6 +287,7 @@ void writeResults()
 	out["colourGrade"] = colour_grade::currentName();
 	out["colourGradeStrength"] = colour_grade::currentStrength();
 	out["environment"] = environment_light::currentName();
+	out["taa"] = gfx_api::context::get().taaActive();
 	out["revealMap"] = revealMap;
 
 	std::vector<double> all;

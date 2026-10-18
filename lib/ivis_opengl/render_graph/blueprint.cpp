@@ -83,7 +83,8 @@ void hashBlueprintReadEdge(std::size_t& h, const BlueprintReadEdge& edge)
 	hash_combine(h,
 		static_cast<std::size_t>(edge.producerPass),
 		static_cast<std::size_t>(edge.producerRole),
-		edge.attachmentIndex);
+		edge.attachmentIndex,
+		static_cast<std::size_t>(edge.surface));
 }
 
 } // anonymous namespace
@@ -136,6 +137,15 @@ BlueprintBuilder& BlueprintBuilder::readFrom(PassId producer, AttachmentRole rol
 	edge.producerPass = producer;
 	edge.producerRole = role;
 	edge.attachmentIndex = attachmentIndex;
+	_current->reads.push_back(edge);
+	return *this;
+}
+
+BlueprintBuilder& BlueprintBuilder::readSurface(PipelineSurfaceId surface)
+{
+	ASSERT(_current != nullptr, "BlueprintBuilder::readSurface without beginPass");
+	BlueprintReadEdge edge;
+	edge.surface = surface;
 	_current->reads.push_back(edge);
 	return *this;
 }
