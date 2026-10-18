@@ -127,7 +127,7 @@ struct WARZONE_GLOBALS
 	bool hdr = true;
 	int bloomIntensity = 60;
 	int colourGrading = 100; // percent strength of the per-map colour grade
-	bool taa = false; // temporal anti-aliasing
+	bool taa = true; // temporal anti-aliasing (needs HDR)
 	SSAO_MODE ssaoMode = SSAO_MODE::OFF; // screen-space ambient occlusion (default off)
 	SSR_MODE ssrMode = SSR_MODE::OFF; // screen-space reflections (default off)
 	// UI config
