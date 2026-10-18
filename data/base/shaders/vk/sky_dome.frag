@@ -18,5 +18,7 @@ layout(location = 0) out vec4 FragColor;
 
 void main()
 {
-	FragColor = vec4(wzSkyDome(texCoords, invViewProj, zenith.rgb, horizon.rgb, ground.rgb, sunDir.xyz, sunColour.rgb, params, fogColour), 1.0);
+	// Vulkan clip space has y pointing down (the scene shaders flip y), so flip back before un-projecting
+	vec2 clipUV = vec2(texCoords.x, 1.0 - texCoords.y);
+	FragColor = vec4(wzSkyDome(clipUV, invViewProj, zenith.rgb, horizon.rgb, ground.rgb, sunDir.xyz, sunColour.rgb, params, fogColour), 1.0);
 }
