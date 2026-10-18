@@ -32,12 +32,22 @@
 
 #include <string>
 
+#include "lib/framework/vector.h"
+#include <glm/fwd.hpp>
+
 namespace environment_light
 {
 
 /// Rebuild the environment if the map, the sun or the file changed, and hand it to the
 /// renderer. Call once per frame before 3D models are drawn.
 void update();
+
+/// Draw the sky dome for the current environment (behind everything, before the sky band).
+/// Returns false, drawing nothing, when the map has no environment.
+bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix);
+
+/// How much of the top of the classic cloud band fades into the sky dome (0 = none).
+float skyBandFade();
 
 /// Name of the environment in use ("none" if there is none), for logs and benchmarks.
 const std::string& currentName();

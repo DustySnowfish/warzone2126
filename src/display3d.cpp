@@ -4097,7 +4097,9 @@ static void renderSurroundings(const glm::mat4& projectionMatrix, const glm::mat
 	}
 
 	// TODO: skybox needs to be just below lowest point on map (because we have a bottom cap now). Hardcoding for now.
-	pie_DrawSkybox(skybox_scale, projectionMatrix, skyboxViewMatrix * glm::translate(glm::vec3(0.f, -500, 0.f)) * glm::rotate(RADIANS(wind), glm::vec3(0.f, 1.f, 0.f)));
+	// Warzone 2126: gradient sky dome from the map's environment first, then the cloud band over it
+	const bool skyDome = environment_light::drawSky(projectionMatrix, skyboxViewMatrix);
+	pie_DrawSkybox(skybox_scale, projectionMatrix, skyboxViewMatrix * glm::translate(glm::vec3(0.f, -500, 0.f)) * glm::rotate(RADIANS(wind), glm::vec3(0.f, 1.f, 0.f)), skyDome ? environment_light::skyBandFade() : 0.f);
 }
 
 static int calculateCameraHeight(int _mapHeight)

@@ -31,7 +31,12 @@
  *     "horizonSharpness": 3.0,      higher keeps the horizon colour in a thinner band
  *     "sunGlow": 0.5,               glow around the sun (the sun itself is direct light)
  *     "image": "environment/images/name.png",  optional panorama (2:1, lat-long)
- *     "imageMix": 1.0               blend of the panorama over the colours above
+ *     "imageMix": 1.0,              blend of the panorama over the colours above
+ *     "sky": {                      the visible sky dome (keys default to the lighting values)
+ *       "zenith": [..], "horizon": [..], "horizonSharpness": 3.0,
+ *       "sunGlow": 0.5, "sunDisc": 1.0, "brightness": 1.0,
+ *       "bandFade": 0.3             how much of the top of the cloud band fades into the dome
+ *     }
  *   }
  *
  * Output texture (matches pbr.glsl): 64 x 32 lat-long levels stacked vertically, RGBM
@@ -53,6 +58,11 @@
 #include "lib/ivis_opengl/piedef.h"
 #include "lib/ivis_opengl/pietypes.h"
 #include "lib/ivis_opengl/png_util.h"
+#include "lib/ivis_opengl/piestate.h"
+#include "lib/ivis_opengl/pielight_convert.h"
+
+#include "display3d_render_internal.h"
+
 
 #include <algorithm>
 #include <array>
@@ -135,6 +145,13 @@ struct EnvParams
 	float sunGlow = 0.5f;
 	std::string imageFile;
 	float imageMix = 1.f;
+	// Visible sky dome
+	Rgb skyZenith, skyHorizon;
+	float skyHorizonSharpness = 3.f;
+	float skySunGlow = 0.5f;
+	float skySunDisc = 1.f;
+	float skyBrightness = 1.f;
+	float skyBandFade = 0.3f;
 };
 
 struct State
@@ -147,6 +164,10 @@ struct State
 	PHYSFS_sint64 imageFileTime = 0;
 	std::string name = "none";
 	std::chrono::steady_clock::time_point nextFileCheck;
+	bool haveSky = false;
+	EnvParams sky;
+	Dir sunDir;
+	Rgb sunColour;
 };
 
 State state;
@@ -277,6 +298,22 @@ bool parseEnv(const std::string& path, EnvParams& out)
 		out.imageFile = imageIt->get<std::string>();
 	}
 	out.imageMix = jsonFloat(doc, "imageMix", 1.f, 0.f, 1.f);
+	out.skyZenith = out.zenith;
+	out.skyHorizon = out.horizon;
+	out.skyHorizonSharpness = out.horizonSharpness;
+	out.skySunGlow = out.sunGlow;
+	auto skyIt = doc.find("sky");
+	if (skyIt != doc.end() && skyIt->is_object())
+	{
+		const nlohmann::json& sky = *skyIt;
+		out.skyZenith = jsonColour(sky, "zenith", out.skyZenith);
+		out.skyHorizon = jsonColour(sky, "horizon", out.skyHorizon);
+		out.skyHorizonSharpness = jsonFloat(sky, "horizonSharpness", out.skyHorizonSharpness, 0.25f, 16.f);
+		out.skySunGlow = jsonFloat(sky, "sunGlow", out.skySunGlow, 0.f, 4.f);
+		out.skySunDisc = jsonFloat(sky, "sunDisc", 1.f, 0.f, 4.f);
+		out.skyBrightness = jsonFloat(sky, "brightness", 1.f, 0.f, 4.f);
+		out.skyBandFade = jsonFloat(sky, "bandFade", 0.3f, 0.f, 0.95f);
+	}
 	return true;
 }
 
@@ -446,6 +483,10 @@ void rebuild(const std::string& key, const std::string& envFile, const Dir& sunD
 	state.imageFile = haveParams ? params.imageFile : std::string();
 	state.imageFileTime = fileTime(state.imageFile);
 	state.name = haveParams ? params.name : std::string("none");
+	state.haveSky = haveParams;
+	state.sky = params;
+	state.sunDir = sunDir;
+	state.sunColour = sunColour;
 
 	if (!haveParams)
 	{
@@ -501,6 +542,34 @@ void update()
 		rebuild(key, findEnvFile(), sunDir, sunColour);
 		state.nextFileCheck = now + std::chrono::seconds(1);
 	}
+}
+
+bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix)
+{
+	if (!state.haveSky)
+	{
+		return false;
+	}
+	const EnvParams& p = state.sky;
+	const glm::mat4 rotationOnly = glm::mat4(glm::mat3(viewMatrix));
+	gfx_api::constant_buffer_type<SHADER_SKY_DOME> constants {};
+	constants.invViewProj = glm::inverse(projectionMatrix * rotationOnly);
+	constants.zenith = glm::vec4(p.skyZenith.r, p.skyZenith.g, p.skyZenith.b, 0.f);
+	constants.horizon = glm::vec4(p.skyHorizon.r, p.skyHorizon.g, p.skyHorizon.b, 0.f);
+	constants.ground = glm::vec4(p.ground.r, p.ground.g, p.ground.b, 0.f);
+	constants.sunDir = glm::vec4(state.sunDir.x, state.sunDir.y, state.sunDir.z, 0.f);
+	constants.sunColour = glm::vec4(state.sunColour.r, state.sunColour.g, state.sunColour.b, 0.f);
+	constants.params = glm::vec4(p.skyHorizonSharpness, p.skySunGlow, p.skySunDisc, p.skyBrightness);
+	const RENDER_STATE renderState = getCurrentRenderState();
+	const glm::vec4 fog = pielightToRGBAVec4(renderState.fogColour);
+	constants.fogColour = glm::vec4(fog.r, fog.g, fog.b, renderState.fogEnabled ? 1.f : 0.f);
+	display3d_drawFullscreenTriangle<gfx_api::SkyDomePSO>(constants);
+	return true;
+}
+
+float skyBandFade()
+{
+	return state.haveSky ? state.sky.skyBandFade : 0.f;
 }
 
 const std::string& currentName()

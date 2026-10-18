@@ -7,6 +7,7 @@ layout(std140) uniform cbuffer
 	vec4 color;
 	vec4 fog_color;
 	int fog_enabled;
+	float top_fade; // Warzone 2126: fade the top of the band into the sky dome
 };
 
 #if (!defined(GL_ES) && (__VERSION__ >= 130)) || (defined(GL_ES) && (__VERSION__ >= 300))

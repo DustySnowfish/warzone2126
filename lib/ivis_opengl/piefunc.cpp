@@ -320,7 +320,7 @@ void pie_Skybox_Shutdown()
 	skyboxGfx = nullptr;
 }
 
-void pie_DrawSkybox(float scale, const glm::mat4& projectionMatrix, const glm::mat4 &viewMatrix)
+void pie_DrawSkybox(float scale, const glm::mat4& projectionMatrix, const glm::mat4 &viewMatrix, float topFade)
 {
 	const auto& modelViewProjectionMatrix = projectionMatrix * viewMatrix * glm::scale(glm::vec3(scale, scale / 2.f, scale));
 
@@ -328,6 +328,6 @@ void pie_DrawSkybox(float scale, const glm::mat4& projectionMatrix, const glm::m
 	const glm::vec4 fogColor = pielightToRGBAVec4(renderState.fogColour);
 
 	gfx_api::SkyboxPSO::get().bind();
-	gfx_api::SkyboxPSO::get().bind_constants({ modelViewProjectionMatrix, glm::vec4(1.f), fogColor, renderState.fogEnabled });
+	gfx_api::SkyboxPSO::get().bind_constants({ modelViewProjectionMatrix, glm::vec4(1.f), fogColor, renderState.fogEnabled, topFade });
 	skyboxGfx->draw<gfx_api::SkyboxPSO>(modelViewProjectionMatrix);
 }

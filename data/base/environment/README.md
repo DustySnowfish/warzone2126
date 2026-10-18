@@ -15,5 +15,6 @@ Keys (all optional; colours are 0..255 sRGB, as in an image editor):
 | sunGlow | 0.5 | Glow around the sun in reflections (0..4); the sun itself is direct light |
 | image | none | Panorama image (2:1, lat-long PNG), e.g. `environment/images/name.png` |
 | imageMix | 1 | Blend of the panorama over the colours |
+| sky | | The visible sky dome, drawn behind the cloud band. Sub-keys: `zenith`, `horizon`, `horizonSharpness`, `sunGlow` (default to the values above), `sunDisc` (1, brightness of the sun disc), `brightness` (1), `bandFade` (0.35, how much of the top of the cloud band fades into the dome) |
 
-Only the colours matter, not the overall brightness: the game scales the environment to the map's ambient light level. Without a file, PBR models use a flat ambient light.
+For lighting, only the colours matter, not the overall brightness: the game scales the environment to the map's ambient light level. Without a file, PBR models use a flat ambient light.

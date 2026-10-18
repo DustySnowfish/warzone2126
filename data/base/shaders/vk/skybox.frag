@@ -6,6 +6,7 @@ layout(std140, set = 0, binding = 0) uniform cbuffer
 	vec4 color;
 	vec4 fog_color;
 	int fog_enabled;
+	float top_fade; // Warzone 2126: fade the top of the band into the sky dome
 };
 layout(set = 1, binding = 0) uniform sampler2D theTexture;
 
@@ -17,6 +18,11 @@ layout(location = 0) out vec4 FragColor;
 void main()
 {
 	vec4 resultingColor = texture(theTexture, uv) * color;
+
+	if (top_fade > 0.0)
+	{
+		resultingColor.a *= smoothstep(0.01, top_fade, uv.y);
+	}
 
 	if(fog_enabled > 0)
 	{

@@ -6,6 +6,7 @@ layout(std140, set = 0, binding = 0) uniform cbuffer
 	vec4 color;
 	vec4 fog_color;
 	int fog_enabled;
+	float top_fade; // Warzone 2126: fade the top of the band into the sky dome
 };
 
 layout(location = 0) in vec4 vertex;

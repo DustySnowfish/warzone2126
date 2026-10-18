@@ -536,6 +536,7 @@ namespace gfx_api
 		glm::vec4 color;
 		glm::vec4 fog_color;
 		int fog_enabled;
+		float top_fade = 0.f; // Warzone 2126: fade the band's top edge (texture v below this) into the sky dome
 	};
 
 	template<>
@@ -1090,6 +1091,19 @@ namespace gfx_api
 		glm::vec4 grade;  // x = colour grade strength (0 = off), y = LUT size (cells per axis)
 	};
 
+	template<>
+	struct constant_buffer_type<SHADER_SKY_DOME>
+	{
+		glm::mat4 invViewProj; // clip space to view direction (rotation-only view)
+		glm::vec4 zenith;      // linear RGB
+		glm::vec4 horizon;     // linear RGB
+		glm::vec4 ground;      // linear RGB (below the horizon when fog is off)
+		glm::vec4 sunDir;      // xyz = direction to the sun (world, normalised)
+		glm::vec4 sunColour;   // linear RGB
+		glm::vec4 params;      // x = horizon sharpness, y = sun glow, z = sun disc, w = brightness
+		glm::vec4 fogColour;   // rgb = fog colour (display-encoded), w = 1 when fog is on
+	};
+
 #define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
 	gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16, \
 	std::tuple<constant_buffer_type<SHADER>>, \
@@ -1121,6 +1135,16 @@ namespace gfx_api
 		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>,
 		texture_description<2, sampler_type::bilinear, kSampler_gradeLut, pixel_format_target::texture_2d>
 	>, SHADER_TONEMAP>;
+
+	// Drawn on the far plane with a depth test, so it only fills pixels nothing else covers
+	using SkyDomePSO = typename gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_LEQ_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16,
+	std::tuple<constant_buffer_type<SHADER_SKY_DOME>>,
+	std::tuple<
+		vertex_buffer_description<2 * sizeof(gfxFloat), gfx_api::vertex_attribute_input_rate::vertex,
+			vertex_attribute_description<position, gfx_api::vertex_attribute_type::float2, 0>
+		>
+	>,
+	std::tuple<>, SHADER_SKY_DOME>;
 
 #undef WZ2126_FULLSCREEN_PSO_PREFIX
 

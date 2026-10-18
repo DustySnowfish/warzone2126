@@ -5,5 +5,14 @@
 	"horizon": [200, 212, 230],
 	"ground": [190, 195, 205],
 	"horizonSharpness": 3.5,
-	"sunGlow": 0.6
+	"sunGlow": 0.6,
+	"sky": {
+		"zenith": [70, 105, 160],
+		"horizon": [170, 190, 215],
+		"horizonSharpness": 2.5,
+		"sunGlow": 0.6,
+		"sunDisc": 1.0,
+		"brightness": 1.0,
+		"bandFade": 0.35
+	}
 }
