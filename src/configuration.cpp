@@ -835,8 +835,9 @@ bool loadConfig()
 	}
 
 	{
-		auto value = iniGetBoolOpt("pointLightsPerpixel");
-		war_setPointLightPerPixelLighting(value.value_or(false));
+		// Warzone 2126: a new key, so settings saved under the old default (off) pick up the new one (on)
+		auto value = iniGetBoolOpt("pointLightsPerPixel2126");
+		war_setPointLightPerPixelLighting(value.value_or(true));
 	}
 	{
 		auto value = iniGetBoolOpt("muzzleFlashLights");
@@ -1145,7 +1146,7 @@ bool saveConfig()
 		case SMAA_MODE::HIGH: iniSetString("smaa", "high"); break;
 		case SMAA_MODE::ULTRA: iniSetString("smaa", "ultra"); break;
 	}
-	iniSetBool("pointLightsPerpixel", war_getPointLightPerPixelLighting());
+	iniSetBool("pointLightsPerPixel2126", war_getPointLightPerPixelLighting());
 	iniSetBool("muzzleFlashLights", war_getMuzzleFlashLighting());
 	iniSetBool("projectileLights", war_getProjectileLighting());
 	switch (war_getSsaoMode())

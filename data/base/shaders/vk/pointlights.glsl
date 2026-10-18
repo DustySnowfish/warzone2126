@@ -196,3 +196,68 @@ vec4 iterateOverAllPointLights(
 	}
 	return light;
 }
+
+// Warzone 2126: point lights on PBR (glTF) materials, using the same light list and buckets.
+// Linear albedo in, linear radiance out, and not capped, so bright flashes can go past 1
+// and bloom with HDR. Light colours are sRGB; the radiance is scaled by pi to match the
+// brightness the classic lights give a white surface.
+vec3 iterateOverAllPointLightsPBR(
+	vec2 clipSpaceCoord,
+	vec3 WorldFragPos,
+	vec3 N,
+	vec3 V,
+	vec3 albedo,
+	float roughness,
+	float metallic
+) {
+	vec3 result = vec3(0.0);
+	ivec2 bucket = ivec2(float(bucketDimensionUsed) * clipSpaceCoord);
+	int bucketId = min(bucket.y + bucket.x * bucketDimensionUsed, bucketDimensionUsed * bucketDimensionUsed - 1);
+	vec3 F0 = mix(vec3(0.04), albedo, metallic);
+	float a = roughness * roughness;
+	float a2 = a * a;
+	float k = (roughness + 1.0) * (roughness + 1.0) / 8.0;
+	float NdotV = max(dot(N, V), 1e-4);
+	float geomV = NdotV / (NdotV * (1.0 - k) + k);
+
+	for (int i = 0; i < bucketOffsetAndSize[bucketId].y; i++)
+	{
+		int lightIndex = wzLightIndex(bucketOffsetAndSize[bucketId].x + i);
+		vec4 position = wzLightPosition(lightIndex);
+		vec4 colorAndEnergy = wzLightColorAndEnergy(lightIndex);
+		vec4 directionAndCos = wzLightDirectionAndCos(lightIndex);
+		directionAndCos.xyz *= vec3(1.0, 1.0, -1.0);
+		vec3 lightPos = position.xyz * vec3(1.0, 1.0, -1.0);
+
+		vec3 toLight = lightPos - WorldFragPos;
+		float distanceSq = dot(toLight, toLight);
+		float rangeSq = colorAndEnergy.w * colorAndEnergy.w;
+		if (distanceSq >= rangeSq)
+		{
+			continue;
+		}
+		vec3 L = toLight * inversesqrt(max(distanceSq, 1e-8));
+		float NdotL = dot(N, L);
+		if (NdotL <= 0.0)
+		{
+			continue;
+		}
+		float attenuation = pointLightEnergyAtPosition(distanceSq, rangeSq) * pointLightConeFactor(-L, directionAndCos) * position.w;
+		if (attenuation <= 0.0)
+		{
+			continue;
+		}
+		vec3 H = normalize(L + V);
+		float NdotH = max(dot(N, H), 0.0);
+		float HdotV = max(dot(H, V), 0.0);
+		float d = NdotH * NdotH * (a2 - 1.0) + 1.0;
+		float D = a2 / max(3.14159265 * d * d, 1e-6);
+		float G = geomV * (NdotL / (NdotL * (1.0 - k) + k));
+		vec3 F = F0 + (1.0 - F0) * pow(clamp(1.0 - HdotV, 0.0, 1.0), 5.0);
+		vec3 specular = (D * G * F) / max(4.0 * NdotV * NdotL, 1e-4);
+		vec3 kD = (vec3(1.0) - F) * (1.0 - metallic);
+		vec3 radiance = pow(max(colorAndEnergy.rgb, vec3(0.0)), vec3(2.2)) * (attenuation * 3.14159265);
+		result += (kD * albedo / 3.14159265 + specular) * radiance * NdotL;
+	}
+	return result;
+}

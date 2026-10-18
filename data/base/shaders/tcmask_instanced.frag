@@ -121,11 +121,13 @@ void main()
 			// Emissive light is added in linear space; strengths above 1 bloom when HDR is on
 			pbrLinear += wzSRGBToLinear(texture(TextureEmissive, texCoord, WZ_MIP_LOAD_BIAS).rgb) * emissiveFactor.rgb;
 		}
-		vec3 pbrColour = wzLinearToSRGB(pbrLinear);
 #if WZ_POINT_LIGHT_ENABLED == 1
+		// Muzzle flashes, explosions and other point lights, shaded with the same material
 		vec2 clipSpaceCoordPBR = gl_FragCoord.xy / vec2(float(viewportWidth), float(viewportHeight));
-		pbrColour += iterateOverAllPointLights(clipSpaceCoordPBR, posModelSpace, N, normalize(normal), normalize(halfVec - lightDir), vec4(baseSRGB, 1.0), 1.0 - orm.g).rgb;
+		pbrLinear += iterateOverAllPointLightsPBR(clipSpaceCoordPBR, posModelSpace, N, normalize(cameraPos.xyz - posModelSpace),
+			wzSRGBToLinear(baseSRGB), clamp(orm.g, 0.045, 1.0), clamp(orm.b, 0.0, 1.0)) * orm.r;
 #endif
+		vec3 pbrColour = wzLinearToSRGB(pbrLinear);
 		fragColour = vec4(pbrColour, 1.0) * colour;
 	}
 	else

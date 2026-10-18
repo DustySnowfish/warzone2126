@@ -117,7 +117,7 @@ struct WARZONE_GLOBALS
 	uint32_t shadowFilteringMode = 1;
 	uint32_t shadowFilterSize = 5;
 	uint32_t shadowMapResolution = 0; // this defaults to 0, which causes the gfx backend to figure out a recommended default based on the system properties
-	bool pointLightLighting = false;
+	bool pointLightLighting = true; // Warzone 2126: per-pixel point lights by default
 	bool muzzleFlashLighting = true;
 	bool projectileLighting = true;
 	uint32_t renderResolutionPercent = 100; // percentage of the display resolution the 3D scene is rendered at
