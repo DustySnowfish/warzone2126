@@ -659,7 +659,7 @@ jobs:
         echo "::endgroup::"
         # Create the Sentry source bundle
         echo "sentry-cli difutil bundle-sources ..."
-        & "$(pwd)\sentry-cli\sentry-cli.exe" difutil bundle-sources -o "${env:SOURCE_BUNDLE_OUTPUT_DIR}" "$(pwd)\wz_extracted\bin\warzone2100.pdb"
+        & "$(pwd)\sentry-cli\sentry-cli.exe" difutil bundle-sources -o "${env:SOURCE_BUNDLE_OUTPUT_DIR}" "$(pwd)\wz_extracted\bin\warzone2126.pdb"
         echo "sentry-cli difutil bundle-sources ... Done"
         # List output bundles
         Get-ChildItem -Path "${env:SOURCE_BUNDLE_OUTPUT_DIR}" -Recurse
@@ -1237,7 +1237,7 @@ jobs:
       - name: Cleanup breakpad symbols
         run: |
           # Remove the breakpad symbols (so they are never selected instead of the PDB)
-          BREAKPAD_SYM="${OUTPUTDIR}/bin/warzone2100.sym"
+          BREAKPAD_SYM="${OUTPUTDIR}/bin/warzone2126.sym"
           if [[ -f "${BREAKPAD_SYM}" ]]; then
             echo "Removing breakpad .sym"
             rm "${BREAKPAD_SYM}"
@@ -1267,7 +1267,7 @@ jobs:
           echo "::group::sentry-cli debug-files upload"
           ./sentry-cli/sentry-cli debug-files upload --no-zips -o warzone2100 -p warzone2100 --wait "${WZ_ARCHIVE_DIR}"
           ./sentry-cli/sentry-cli debug-files upload --type sourcebundle -o warzone2100 -p warzone2100 "${WZ_SOURCEBUNDLES_DIR}"
-          ./sentry-cli/sentry-cli difutil check "${WZ_ARCHIVE_DIR}/bin/warzone2100.exe"
+          ./sentry-cli/sentry-cli difutil check "${WZ_ARCHIVE_DIR}/bin/warzone2126.exe"
           echo "::endgroup::"
   trigger-updates-json:
     name: 'Trigger Info Update'

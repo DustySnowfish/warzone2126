@@ -46,7 +46,7 @@
 #define WZ_LOCALEDIR "locale"
 
 #ifndef WZ_EXECUTABLE_NAME
-#define WZ_EXECUTABLE_NAME "warzone2100.exe"
+#define WZ_EXECUTABLE_NAME "warzone2126.exe"
 #endif
 
 #ifndef WZ_SETUP_ICON
