@@ -78,7 +78,8 @@ static PassId appendHdrBloomAndTonemap(BlueprintBuilder& builder, PassId incomin
 	builder.color(PipelineSurfaceId::TonemappedColor, AttachmentLoadOp::DontCare, AttachmentStoreOp::Store)
 		.viewport(ViewportRule::SceneColorTarget)
 		.readFrom(incomingColor, AttachmentRole::PrimaryColor)
-		.readFrom(PassId::BloomUp2, AttachmentRole::PrimaryColor);
+		.readFrom(PassId::BloomUp2, AttachmentRole::PrimaryColor)
+		.readFrom(PassId::ScenePrepass, AttachmentRole::Depth); // distance haze into the sky
 	return PassId::Tonemap;
 }
 

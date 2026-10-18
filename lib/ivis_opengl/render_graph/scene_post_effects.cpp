@@ -219,9 +219,10 @@ bool anyScenePostEffectEnabled(const SceneEffectSurfaces& cfg)
 PrepassNeed prepassNeeds(const RenderTopologySnapshot& snapshot)
 {
 	PrepassNeed needs = unionPrepassNeeds([&](ScenePostEffectId id) { return effectEnabled(snapshot, id); });
-	if (snapshot.features & RenderFeatures::Taa)
+	if (snapshot.features & (RenderFeatures::Hdr | RenderFeatures::Taa))
 	{
-		// Warzone 2126 TAA reprojects last frame's result through the opaque scene depth
+		// Warzone 2126: the tonemap pass hazes distant terrain into the sky, and TAA reprojects
+		// last frame's result, both through the opaque scene depth
 		needs = needs | PrepassNeed::Depth;
 	}
 	if (anyScenePostEffectEnabled(snapshot))

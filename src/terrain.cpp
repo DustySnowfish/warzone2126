@@ -65,6 +65,7 @@
 #include "lib/framework/math_ext.h"
 
 #include "terrain.h"
+#include "environment_light.h"
 #include "terrain_surface.h"
 #include "terrain_bake.h"
 #include "map.h"
@@ -1813,9 +1814,10 @@ static void updateLightMap(WorldMapState& mapState, const LightMap& lightmap)
 			// (For more, see avUpdateTiles() and getTileIllumination())
 			lightMapWritePtr[(i + j * lightmapWidth) * lightmapChannels + 3] = level;
 
-			if (!pie_GetFogStatus())
+			if (!pie_GetFogStatus() && !environment_light::hazeActive())
 			{
 				// fade to black at the edges of the visible terrain area
+				// (Warzone 2126: with an environment and HDR, the tonemap pass hazes it into the sky instead)
 				const float playerX = map_coordf(playerPos.p.x);
 				const float playerY = map_coordf(playerPos.p.z);
 

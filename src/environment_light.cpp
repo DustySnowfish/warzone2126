@@ -36,6 +36,10 @@
  *       "zenith": [..], "horizon": [..], "horizonSharpness": 3.0,
  *       "sunGlow": 0.5, "sunDisc": 1.0, "brightness": 1.0,
  *       "bandFade": 0.3             how much of the top of the cloud band fades into the dome
+ *     },
+ *     "haze": {                     distant terrain fades into the sky behind it (needs HDR)
+ *       "start": 0.55, "end": 0.92, fractions of the drawn area (from the camera pivot)
+ *       "strength": 1.0
  *     }
  *   }
  *
@@ -62,6 +66,8 @@
 #include "lib/ivis_opengl/pielight_convert.h"
 
 #include "display3d_render_internal.h"
+#include "display3d_render_graph.h"
+#include "display3d.h"
 
 
 #include <algorithm>
@@ -152,6 +158,10 @@ struct EnvParams
 	float skySunDisc = 1.f;
 	float skyBrightness = 1.f;
 	float skyBandFade = 0.3f;
+	// Distance haze
+	float hazeStart = 0.55f;
+	float hazeEnd = 0.92f;
+	float hazeStrength = 1.f;
 };
 
 struct State
@@ -313,6 +323,15 @@ bool parseEnv(const std::string& path, EnvParams& out)
 		out.skySunDisc = jsonFloat(sky, "sunDisc", 1.f, 0.f, 4.f);
 		out.skyBrightness = jsonFloat(sky, "brightness", 1.f, 0.f, 4.f);
 		out.skyBandFade = jsonFloat(sky, "bandFade", 0.3f, 0.f, 0.95f);
+	}
+	auto hazeIt = doc.find("haze");
+	if (hazeIt != doc.end() && hazeIt->is_object())
+	{
+		const nlohmann::json& haze = *hazeIt;
+		out.hazeStart = jsonFloat(haze, "start", out.hazeStart, 0.f, 1.f);
+		out.hazeEnd = jsonFloat(haze, "end", out.hazeEnd, 0.f, 1.f);
+		out.hazeStrength = jsonFloat(haze, "strength", out.hazeStrength, 0.f, 1.f);
+		out.hazeEnd = std::max(out.hazeEnd, out.hazeStart + 0.01f);
 	}
 	return true;
 }
@@ -565,6 +584,34 @@ bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix)
 	constants.fogColour = glm::vec4(fog.r, fog.g, fog.b, renderState.fogEnabled ? 1.f : 0.f);
 	display3d_drawFullscreenTriangle<gfx_api::SkyDomePSO>(constants);
 	return true;
+}
+
+bool hazeActive()
+{
+	return state.haveSky && state.sky.hazeStrength > 0.f && gfx_api::context::get().hdrActive();
+}
+
+void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
+{
+	constants.haze = glm::vec4(0.f);
+	if (!hazeActive() || !pie_IsInGame3DFrameContextReady())
+	{
+		return;
+	}
+	const InGame3DFrameContext& fc = pie_GetInGame3DFrameContext();
+	const EnvParams& p = state.sky;
+	constants.invViewProj = glm::inverse(fc.perspectiveMatrix * glm::mat4(glm::mat3(fc.viewMatrix)));
+	constants.hazeZenith = glm::vec4(p.skyZenith.r, p.skyZenith.g, p.skyZenith.b, 0.f);
+	constants.hazeHorizon = glm::vec4(p.skyHorizon.r, p.skyHorizon.g, p.skyHorizon.b, 0.f);
+	constants.hazeGround = glm::vec4(p.ground.r, p.ground.g, p.ground.b, 0.f);
+	constants.hazeSunDir = glm::vec4(state.sunDir.x, state.sunDir.y, state.sunDir.z, 0.f);
+	constants.hazeSunColour = glm::vec4(state.sunColour.r, state.sunColour.g, state.sunColour.b, p.skySunGlow);
+	// The camera pivot in render space is (x, -z) of the game position
+	const glm::vec2 pivot(static_cast<float>(playerPos.p.x), -static_cast<float>(playerPos.p.z));
+	constants.hazeShape = glm::vec4(p.skyHorizonSharpness, p.skyBrightness, pivot.x - fc.cameraPos.x, pivot.y - fc.cameraPos.z);
+	// The classic renderer draws a square of terrain around the pivot; haze completes before its edge
+	const float halfDrawn = static_cast<float>(world_coord(std::min(visibleTiles.x, visibleTiles.y) / 2 - 2));
+	constants.haze = glm::vec4(halfDrawn * p.hazeStart, halfDrawn * p.hazeEnd, p.hazeStrength, 0.f);
 }
 
 float skyBandFade()

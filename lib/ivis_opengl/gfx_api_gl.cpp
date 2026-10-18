@@ -4191,9 +4191,9 @@ gfx_api::PipelineSurfaceSyncInputs gl_context::pipelineSurfaceSyncInputs() const
 	inputs.taa = taaActive();
 	inputs.effects = storedSceneEffectSurfaces();
 	inputs.prepassNeeds = gfx_api::prepassNeeds(inputs.effects);
-	if (inputs.taa)
+	if (inputs.hdr || inputs.taa)
 	{
-		// Warzone 2126 TAA reprojects through the prepass depth (matches prepassNeeds(snapshot))
+		// Warzone 2126: tonemap haze and TAA read the prepass depth (matches prepassNeeds(snapshot))
 		inputs.prepassNeeds = inputs.prepassNeeds | gfx_api::PrepassNeed::Depth;
 	}
 	return inputs;

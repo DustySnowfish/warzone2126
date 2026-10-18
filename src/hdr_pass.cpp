@@ -30,6 +30,7 @@
 #include "hdr_pass.h"
 
 #include "colour_grade.h"
+#include "environment_light.h"
 
 #include "display3d_render_graph.h"
 #include "display3d_render_internal.h"
@@ -98,10 +99,11 @@ void recordBloomUpsample(const gfx_api::RenderPassContext& passCtx)
 
 void recordTonemap(const gfx_api::RenderPassContext& passCtx)
 {
-	ASSERT(passCtx.readCount() == 2, "Tonemap: 0 scene, 1 bloom");
+	ASSERT(passCtx.readCount() == 3, "Tonemap: 0 scene, 1 bloom, 2 depth");
 	gfx_api::abstract_texture* scene = passCtx.getRead(0);
 	gfx_api::abstract_texture* bloom = passCtx.getRead(1);
-	if (scene == nullptr || bloom == nullptr || !pie_IsInGame3DFrameContextReady())
+	gfx_api::abstract_texture* depth = passCtx.getRead(2);
+	if (scene == nullptr || bloom == nullptr || depth == nullptr || !pie_IsInGame3DFrameContextReady())
 	{
 		return;
 	}
@@ -111,8 +113,9 @@ void recordTonemap(const gfx_api::RenderPassContext& passCtx)
 	gfx_api::texture* gradeLut = colour_grade::currentLut();
 	const float gradeStrength = gradeLut != nullptr ? colour_grade::currentStrength() : 0.f;
 	constants.grade = glm::vec4(gradeStrength, static_cast<float>(colour_grade::kLutSize), 0.f, 0.f);
+	environment_light::fillHazeConstants(constants);
 	// The shader skips the LUT at strength 0; a texture must still be bound
-	display3d_drawFullscreenTriangle<gfx_api::TonemapPSO>(constants, scene, bloom, gradeLut != nullptr ? static_cast<gfx_api::abstract_texture*>(gradeLut) : bloom);
+	display3d_drawFullscreenTriangle<gfx_api::TonemapPSO>(constants, scene, bloom, gradeLut != nullptr ? static_cast<gfx_api::abstract_texture*>(gradeLut) : bloom, depth);
 }
 
 } // namespace hdr_pass

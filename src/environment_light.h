@@ -33,6 +33,7 @@
 #include <string>
 
 #include "lib/framework/vector.h"
+#include "lib/ivis_opengl/gfx_api.h"
 #include <glm/fwd.hpp>
 
 namespace environment_light
@@ -45,6 +46,12 @@ void update();
 /// Draw the sky dome for the current environment (behind everything, before the sky band).
 /// Returns false, drawing nothing, when the map has no environment.
 bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix);
+
+/// True when distant terrain fades into the sky (an environment with HDR on).
+bool hazeActive();
+
+/// Fill the haze part of the tonemap constants (strength 0 when inactive).
+void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants);
 
 /// How much of the top of the classic cloud band fades into the sky dome (0 = none).
 float skyBandFade();

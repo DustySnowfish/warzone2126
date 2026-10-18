@@ -1089,6 +1089,15 @@ namespace gfx_api
 		glm::vec4 uvScaleClamp;
 		glm::vec4 params; // x = bloom intensity, y = exposure, z = shoulder knee, w = bloom levels summed
 		glm::vec4 grade;  // x = colour grade strength (0 = off), y = LUT size (cells per axis)
+		// Warzone 2126 distance haze: far terrain fades into the sky colour behind it
+		glm::mat4 invViewProj;   // clip to camera-relative position (view without translation)
+		glm::vec4 hazeZenith;    // linear RGB sky colours (as the sky dome)
+		glm::vec4 hazeHorizon;
+		glm::vec4 hazeGround;
+		glm::vec4 hazeSunDir;    // xyz = direction to the sun
+		glm::vec4 hazeSunColour; // rgb, w = sun glow
+		glm::vec4 hazeShape;     // x = horizon sharpness, y = sky brightness, zw = camera pivot (render x, z) relative to the camera
+		glm::vec4 haze;          // x = start, y = end (world units from the pivot, square distance), z = strength (0 = off)
 	};
 
 	template<>
@@ -1155,7 +1164,8 @@ namespace gfx_api
 	std::tuple<
 		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>,
 		texture_description<1, sampler_type::bilinear, kSampler_bloomTexture, pixel_format_target::texture_2d>,
-		texture_description<2, sampler_type::bilinear, kSampler_gradeLut, pixel_format_target::texture_2d>
+		texture_description<2, sampler_type::bilinear, kSampler_gradeLut, pixel_format_target::texture_2d>,
+		texture_description<3, sampler_type::nearest_clamped, kSampler_depthTexture, pixel_format_target::texture_2d>
 	>, SHADER_TONEMAP>;
 
 	using TaaResolvePSO = typename WZ2126_FULLSCREEN_PSO_PREFIX(SHADER_TAA_RESOLVE),

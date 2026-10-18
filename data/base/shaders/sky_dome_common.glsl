@@ -4,6 +4,24 @@
 #ifndef WZ_SKY_DOME_COMMON_GLSL
 #define WZ_SKY_DOME_COMMON_GLSL
 
+// Sky colour (display-encoded) seen in direction d, without the sun disc.
+vec3 wzSkyDomeColour(vec3 d, vec3 zenith, vec3 horizon, vec3 ground, vec3 sunDir, vec3 sunColour,
+	float horizonSharpness, float sunGlow, float brightness)
+{
+	vec3 c;
+	if (d.y >= 0.0)
+	{
+		c = mix(zenith, horizon, pow(1.0 - d.y, horizonSharpness));
+	}
+	else
+	{
+		c = mix(horizon, ground, min(1.0, -d.y * 4.0));
+	}
+	float s = max(dot(d, sunDir), 0.0);
+	c += sunColour * (sunGlow * pow(s, 8.0));
+	return pow(max(c * brightness, vec3(0.0)), vec3(1.0 / 2.2));
+}
+
 // Returns display-encoded colour (gamma 2.2), unclamped: the sun can exceed 1.0 and bloom.
 vec3 wzSkyDome(vec2 texCoords, mat4 invViewProj, vec3 zenith, vec3 horizon, vec3 ground,
 	vec3 sunDir, vec3 sunColour, vec4 params, vec4 fogColour)
