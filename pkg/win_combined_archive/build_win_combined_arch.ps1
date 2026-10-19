@@ -18,8 +18,8 @@ function Build-WinCombinedArchDir {
   echo "TmpExtractDir=$TmpExtractDir"
   echo "BuildDir=$BuildDir"
 
-  $firstFile = "warzone2100_win_x64_archive.zip" # Default to the x64 archive for the non-binary (data) files
-  $Files = Get-ChildItem -Path "${InputArchivesDir}" -Filter "warzone2100_win_*_archive.zip" | Sort-Object { if ($_.Name -eq $firstFile) { 0 } else { 1 } }, Name
+  $firstFile = "warzone2126_win_x64_archive.zip" # Default to the x64 archive for the non-binary (data) files
+  $Files = Get-ChildItem -Path "${InputArchivesDir}" -Filter "warzone2126_win_*_archive.zip" | Sort-Object { if ($_.Name -eq $firstFile) { 0 } else { 1 } }, Name
 
   if ($Files.Count -eq 0) {
     throw "No matching archive zips found in: ${InputArchivesDir}"

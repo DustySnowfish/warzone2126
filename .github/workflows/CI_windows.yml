@@ -507,7 +507,7 @@ jobs:
 
         # Use CMake to configure with the appropriate Visual Studio (MSBUILD) generator, toolchain, and target platform
         echo "::add-matcher::${{ github.workspace }}\src\.ci\githubactions\pattern_matchers\cmake.json"
-        cmake -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}\build\vcpkg\scripts\buildsystems\vcpkg.cmake" -DCPACK_PACKAGE_FILE_NAME:STRING="warzone2100_portable" -DWZ_DISTRIBUTOR:STRING="${env:WZ_DISTRIBUTOR}" -DCMAKE_GENERATOR_INSTANCE="${env:WZ_VISUAL_STUDIO_INSTALL_PATH}" -DENABLE_DISCORD:BOOL=ON -DDISCORD_RPC_APPID:STRING="${env:DISCORD_RPC_APPID}" -DWZ_BUILD_SENTRY:BOOL="${WZ_BUILD_SENTRY_VALUE}" ${ADDITIONAL_CMAKE_PARAMS} -DWZ_BUILDMANIFEST:BOOL=ON -DWZ_BUILDMANIFEST_PUBLISHER:STRING="${env:WZ_BUILDMANIFEST_PUBLISHER}" -DWZ_BUILDMANIFEST_PLATFORM:STRING="windows-${env:WZ_TARGET_ARCH}" -G "${env:WZ_VC_GENERATOR}" -A "${env:WZ_VC_TARGET_PLATFORMNAME}" "${env:WZ_REPO_PATH}"
+        cmake -DCMAKE_TOOLCHAIN_FILE="${{ github.workspace }}\build\vcpkg\scripts\buildsystems\vcpkg.cmake" -DCPACK_PACKAGE_FILE_NAME:STRING="warzone2126_portable" -DWZ_DISTRIBUTOR:STRING="${env:WZ_DISTRIBUTOR}" -DCMAKE_GENERATOR_INSTANCE="${env:WZ_VISUAL_STUDIO_INSTALL_PATH}" -DENABLE_DISCORD:BOOL=ON -DDISCORD_RPC_APPID:STRING="${env:DISCORD_RPC_APPID}" -DWZ_BUILD_SENTRY:BOOL="${WZ_BUILD_SENTRY_VALUE}" ${ADDITIONAL_CMAKE_PARAMS} -DWZ_BUILDMANIFEST:BOOL=ON -DWZ_BUILDMANIFEST_PUBLISHER:STRING="${env:WZ_BUILDMANIFEST_PUBLISHER}" -DWZ_BUILDMANIFEST_PLATFORM:STRING="windows-${env:WZ_TARGET_ARCH}" -G "${env:WZ_VC_GENERATOR}" -A "${env:WZ_VC_TARGET_PLATFORMNAME}" "${env:WZ_REPO_PATH}"
         echo "::remove-matcher owner=cmake::"
     - name: CMake Configure (MINGW)
       if: success() && (steps.settings.outputs.WZ_USING_MINGW == 'true')
@@ -575,9 +575,9 @@ jobs:
         . "${env:WZ_REPO_PATH}\.ci\powershell\importVCvars.ps1"
         Import-VCVarsEnv "${env:WZ_VISUAL_STUDIO_INSTALL_PATH}" "-arch=${env:WZ_TARGET_ARCH} -host_arch=x64"
         # Run CPack
-        & "${env:FULL_CMAKE_PATH}\cpack.exe" -D CPACK_PACKAGE_FILE_NAME="warzone2100_archive" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -D CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE=ON -G ZIP -C "Release"
+        & "${env:FULL_CMAKE_PATH}\cpack.exe" -D CPACK_PACKAGE_FILE_NAME="warzone2126_archive" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -D CPACK_COMPONENTS_ALL_IN_ONE_PACKAGE=ON -G ZIP -C "Release"
         # Rename the archive
-        Move-Item -LiteralPath ".\warzone2100_archive.zip" -Destination "${{ github.workspace }}\output\archive\warzone2100_$($env:WZ_BUILD_DESC)_archive.zip"
+        Move-Item -LiteralPath ".\warzone2126_archive.zip" -Destination "${{ github.workspace }}\output\archive\warzone2126_$($env:WZ_BUILD_DESC)_archive.zip"
     - name: Archive Debug Symbols
       if: success() && (matrix.deploy_release == true)
       working-directory: '${{ github.workspace }}\build'
@@ -587,16 +587,16 @@ jobs:
         . "${env:WZ_REPO_PATH}\.ci\powershell\importVCvars.ps1"
         Import-VCVarsEnv "${env:WZ_VISUAL_STUDIO_INSTALL_PATH}" "-arch=${env:WZ_TARGET_ARCH} -host_arch=x64"
         # Run CPack
-        & "${env:FULL_CMAKE_PATH}\cpack.exe" -D CPACK_PACKAGE_FILE_NAME="warzone2100_debugsymbols" -D CPACK_COMPONENTS_ALL="DebugSymbols;AdditionalDebugSymbols" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -G 7Z -C "Release"
+        & "${env:FULL_CMAKE_PATH}\cpack.exe" -D CPACK_PACKAGE_FILE_NAME="warzone2126_debugsymbols" -D CPACK_COMPONENTS_ALL="DebugSymbols;AdditionalDebugSymbols" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -G 7Z -C "Release"
         # Rename the archive
-        Move-Item -LiteralPath ".\warzone2100_debugsymbols.7z" -Destination "${{ github.workspace }}\output\debugsymbols\warzone2100_$($env:WZ_BUILD_DESC).DEBUGSYMBOLS.7z"
+        Move-Item -LiteralPath ".\warzone2126_debugsymbols.7z" -Destination "${{ github.workspace }}\output\debugsymbols\warzone2126_$($env:WZ_BUILD_DESC).DEBUGSYMBOLS.7z"
     - name: Compare Build Outputs
       if: success() && (matrix.deploy_release == true)
       working-directory: '${{ github.workspace }}\output'
       run: |
         # Log hashes of the build output
         Write-Host "SHA512 Hashes:"
-        Write-Host "`nwarzone2100_$($env:WZ_BUILD_DESC)_archive.zip`n`t-> SHA512: $((Get-FileHash -LiteralPath ".\archive\warzone2100_$($env:WZ_BUILD_DESC)_archive.zip" -Algorithm SHA512).Hash)`n`t`-> Size (bytes): $((Get-Item -LiteralPath ".\archive\warzone2100_$($env:WZ_BUILD_DESC)_archive.zip").Length)"
+        Write-Host "`nwarzone2126_$($env:WZ_BUILD_DESC)_archive.zip`n`t-> SHA512: $((Get-FileHash -LiteralPath ".\archive\warzone2126_$($env:WZ_BUILD_DESC)_archive.zip" -Algorithm SHA512).Hash)`n`t`-> Size (bytes): $((Get-Item -LiteralPath ".\archive\warzone2126_$($env:WZ_BUILD_DESC)_archive.zip").Length)"
         Write-Host ""
     #####################################################
     # Upload build artifacts
@@ -605,14 +605,14 @@ jobs:
       uses: actions/upload-artifact@v7
       if: success() && (matrix.deploy_release == true) && (github.repository == 'Warzone2100/warzone2100')
       with:
-        name: warzone2100_${{ steps.settings.outputs.WZ_BUILD_DESC }}_DEBUGSYMBOLS
+        name: warzone2126_${{ steps.settings.outputs.WZ_BUILD_DESC }}_DEBUGSYMBOLS
         path: '${{ github.workspace }}\output\debugsymbols'
         if-no-files-found: 'error'
     - name: 'Upload Artifact - (Archive)'
       uses: actions/upload-artifact@v7
       if: success() && (matrix.deploy_release == true)
       with:
-        name: warzone2100_${{ steps.settings.outputs.WZ_BUILD_DESC }}_archive
+        name: warzone2126_${{ steps.settings.outputs.WZ_BUILD_DESC }}_archive
         path: '${{ github.workspace }}\output\archive'
         if-no-files-found: 'error'
     #####################################################
@@ -635,8 +635,8 @@ jobs:
       working-directory: '${{ github.workspace }}\sentry_artifacts'
       env:
         WZ_REPO_PATH: ${{ steps.settings.outputs.WZ_REPO_PATH }}
-        WZ_ARCHIVE_PATH: '${{ github.workspace }}\output\archive\warzone2100_${{ steps.settings.outputs.WZ_BUILD_DESC }}_archive.zip'
-        WZ_DEBUGSYMBOLS_PATH: '${{ github.workspace }}\output\debugsymbols\warzone2100_${{ steps.settings.outputs.WZ_BUILD_DESC }}.DEBUGSYMBOLS.7z'
+        WZ_ARCHIVE_PATH: '${{ github.workspace }}\output\archive\warzone2126_${{ steps.settings.outputs.WZ_BUILD_DESC }}_archive.zip'
+        WZ_DEBUGSYMBOLS_PATH: '${{ github.workspace }}\output\debugsymbols\warzone2126_${{ steps.settings.outputs.WZ_BUILD_DESC }}.DEBUGSYMBOLS.7z'
         SOURCE_BUNDLE_OUTPUT_DIR: '${{ github.workspace }}\sentry_output\sentry_source_bundles'
       run: |
         # Download sentry-cli
@@ -692,19 +692,19 @@ jobs:
       - name: Download x64 Archive
         uses: actions/download-artifact@v8
         with:
-          name: 'warzone2100_win_x64_archive'
+          name: 'warzone2126_win_x64_archive'
           path: ./dl-x64
       - name: Download Architecture Archive
         uses: actions/download-artifact@v8
         with:
-          name: 'warzone2100_win_${{ matrix.architecture }}_archive'
+          name: 'warzone2126_win_${{ matrix.architecture }}_archive'
           path: ./dl-arch
       - name: Rebuild Archive Using x64 Data Files
         env:
-          WZ_ARCHIVE_NAME: 'warzone2100_win_${{ matrix.architecture }}_archive.zip'
+          WZ_ARCHIVE_NAME: 'warzone2126_win_${{ matrix.architecture }}_archive.zip'
         run: |
           # Every archive ships the same files outside bin/, so the installer and any other repackaging of them agree
-          x64_zip="./dl-x64/warzone2100_win_x64_archive.zip"
+          x64_zip="./dl-x64/warzone2126_win_x64_archive.zip"
           arch_zip="./dl-arch/${WZ_ARCHIVE_NAME}"
           python3 "${GITHUB_WORKSPACE}/src/pkg/win_combined_archive/check_shared_files.py" "${x64_zip}" "${arch_zip}"
           work="$(mktemp -d)"
@@ -724,7 +724,7 @@ jobs:
       - name: 'Upload Artifact - (Archive)'
         uses: actions/upload-artifact@v7
         with:
-          name: 'warzone2100_win_${{ matrix.architecture }}_archive'
+          name: 'warzone2126_win_${{ matrix.architecture }}_archive'
           path: '${{ github.workspace }}/normalized'
           overwrite: true
           if-no-files-found: 'error'
@@ -770,7 +770,7 @@ jobs:
         if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
         uses: actions/download-artifact@v8
         with:
-          pattern: 'warzone2100_win_*_archive'
+          pattern: 'warzone2126_win_*_archive'
           path: ./dl-archives
           merge-multiple: true
       - name: Sign Manifests
@@ -938,7 +938,7 @@ jobs:
       - name: Download Architecture Archives
         uses: actions/download-artifact@v8
         with:
-          pattern: 'warzone2100_win_*_archive'
+          pattern: 'warzone2126_win_*_archive'
           path: .\built-archives
           merge-multiple: true
       - name: Download Manifest-Signed Archives
@@ -990,7 +990,7 @@ jobs:
             Write-Error "Failed building installer"
             Exit 1
           }
-          $OutputFile = "$(Join-Path "${env:INSTALLER_OUTPUT_DIR}" "warzone2100_win_installer.exe")"
+          $OutputFile = "$(Join-Path "${env:INSTALLER_OUTPUT_DIR}" "warzone2126_win_installer.exe")"
           Write-Host "Finished building installer:"
           Write-Host "`n$($OutputFile)`n`t-> SHA512: $((Get-FileHash -Path "$OutputFile" -Algorithm SHA512).Hash)`n`t`-> Size (bytes): $((Get-Item -Path "$OutputFile").Length)"
           echo "INSTALLER_OUTPUT_DIR=${env:INSTALLER_OUTPUT_DIR}" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
@@ -1005,7 +1005,7 @@ jobs:
         uses: actions/upload-artifact@v7
         if: success() && (github.repository == 'Warzone2100/warzone2100')
         with:
-          name: warzone2100_win_installer
+          name: warzone2126_win_installer
           path: ${{ steps.build-installer.outputs.INSTALLER_EXE }}
           if-no-files-found: 'error'
       - name: 'Generate Artifact Attestation'
@@ -1108,7 +1108,7 @@ jobs:
         if: (steps.signpath-sign.outcome == 'success')
         uses: actions/upload-artifact@v7
         with:
-          name: warzone2100_installers_signed
+          name: warzone2126_installers_signed
           path: '${{ github.workspace }}\signed-installers\*'
           if-no-files-found: 'error'
       - name: Output Result
@@ -1140,7 +1140,7 @@ jobs:
         uses: actions/download-artifact@v8
         with:
           # Includes the release artifacts: installer, debug symbols, and archive
-          pattern: 'warzone2100_win_*'
+          pattern: 'warzone2126_win_*'
           path: ./upload-assets
           merge-multiple: true
       - name: List Assets
@@ -1149,7 +1149,7 @@ jobs:
         if: success() && env.WZ_CI_SIGN_RELEASE_BUILDS == 'true' && (needs.sign-release-installers.outputs.signedfiles == 'true')
         uses: actions/download-artifact@v8
         with:
-          name: 'warzone2100_installers_signed'
+          name: 'warzone2126_installers_signed'
           path: ./upload-assets-signed
           merge-multiple: true
       - name: Download Manifest-Signed Archives
@@ -1176,7 +1176,7 @@ jobs:
         working-directory: '${{ github.workspace }}/upload-assets/'
         run: |
           SOURCE_TAG="${WZ_GITHUB_REF#refs/tags/}"
-          for file in ./warzone2100_win_*; do
+          for file in ./warzone2126_win_*; do
             echo "Uploading: $file"
             gh release upload "${SOURCE_TAG}" "$file"
           done
@@ -1217,22 +1217,22 @@ jobs:
       - name: Download Archive Artifact
         uses: actions/download-artifact@v8
         with:
-          name: 'warzone2100_win_${{ matrix.architecture }}_archive'
+          name: 'warzone2126_win_${{ matrix.architecture }}_archive'
           path: ./dl-archive
       - name: Extract archive
         run: |
-          ZIPFILE="./dl-archive/warzone2100_win_${WZ_TARGET_ARCH}_archive.zip"
+          ZIPFILE="./dl-archive/warzone2126_win_${WZ_TARGET_ARCH}_archive.zip"
           unzip -o "${ZIPFILE}" -d "${OUTPUTDIR}" && rm "${ZIPFILE}"
       - name: Download Debug Symbols Artifact
         continue-on-error: true
         uses: actions/download-artifact@v8
         with:
-          name: 'warzone2100_win_${{ matrix.architecture }}_DEBUGSYMBOLS'
+          name: 'warzone2126_win_${{ matrix.architecture }}_DEBUGSYMBOLS'
           path: ./dl-archive
       - name: Extract Debug Symbols
         continue-on-error: true
         run: |
-          ZIPFILE="./dl-archive/warzone2100_win_${WZ_TARGET_ARCH}.DEBUGSYMBOLS.7z"
+          ZIPFILE="./dl-archive/warzone2126_win_${WZ_TARGET_ARCH}.DEBUGSYMBOLS.7z"
           7z x "${ZIPFILE}" -o${OUTPUTDIR} -aos && rm "${ZIPFILE}"
       - name: Cleanup breakpad symbols
         run: |

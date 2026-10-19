@@ -180,7 +180,7 @@ jobs:
           echo "OUTPUT_DIR=${OUTPUT_DIR}"
           echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
           mkdir -p "${OUTPUT_DIR}"
-          OUTPUT_FILE_NAME="warzone2100_${{ matrix.output-suffix }}_${{ matrix.arch }}.deb"
+          OUTPUT_FILE_NAME="warzone2126_${{ matrix.output-suffix }}_${{ matrix.arch }}.deb"
           cp "warzone2100.deb" "${OUTPUT_DIR}/${OUTPUT_FILE_NAME}"
           echo "Generated .deb: \"${OUTPUT_FILE_NAME}\""
           echo "  -> SHA512: $(sha512sum "${OUTPUT_DIR}/${OUTPUT_FILE_NAME}")"
@@ -200,10 +200,10 @@ jobs:
           FULL_CMAKE_PATH: '${{ steps.settings.outputs.WZ_FULL_CMAKE_PATH }}'
         run: |
           mkdir -p "${GITHUB_WORKSPACE}/output/debugsymbols"
-          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e GITHUB_SHA -e GITHUB_REF -e GITHUB_HEAD_REF -e GITHUB_BASE_REF -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cpack --config "./CPackConfig.cmake" -D CPACK_PACKAGE_FILE_NAME="warzone2100_debugsymbols" -D CPACK_COMPONENTS_ALL="DebugSymbols;AdditionalDebugSymbols" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -G 7Z -C "Release"
+          docker run --rm -w "${GITHUB_WORKSPACE}/build" -e "CI=true" -e GITHUB_WORKFLOW -e GITHUB_ACTIONS -e GITHUB_REPOSITORY -e GITHUB_WORKSPACE -e GITHUB_SHA -e GITHUB_REF -e GITHUB_HEAD_REF -e GITHUB_BASE_REF -e MAKEFLAGS -v "${GITHUB_WORKSPACE}:${GITHUB_WORKSPACE}" ubuntu cpack --config "./CPackConfig.cmake" -D CPACK_PACKAGE_FILE_NAME="warzone2126_debugsymbols" -D CPACK_COMPONENTS_ALL="DebugSymbols;AdditionalDebugSymbols" -D CPACK_INCLUDE_TOPLEVEL_DIRECTORY=OFF -D CPACK_ARCHIVE_COMPONENT_INSTALL=ON -G 7Z -C "Release"
           # Rename + move the archive
-          WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH="${GITHUB_WORKSPACE}/output/debugsymbols/warzone2100_${{ matrix.output-suffix }}_${{ matrix.arch }}.DEBUGSYMBOLS.7z"
-          mv "./warzone2100_debugsymbols.7z" "${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}"
+          WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH="${GITHUB_WORKSPACE}/output/debugsymbols/warzone2126_${{ matrix.output-suffix }}_${{ matrix.arch }}.DEBUGSYMBOLS.7z"
+          mv "./warzone2126_debugsymbols.7z" "${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}"
           echo "WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH=${WZ_FULL_OUTPUT_DEBUG_SYMBOLS_PATH}" >> $GITHUB_ENV
       - name: 'Upload Artifact - (Debug Symbols)'
         uses: actions/upload-artifact@v7
@@ -293,7 +293,7 @@ jobs:
         if: success() && vars.WZ_BUILDMANIFEST_KEY_ID != ''
         uses: actions/download-artifact@v8
         with:
-          pattern: 'warzone2100_*.deb'
+          pattern: 'warzone2126_*.deb'
           path: ./dl-debs
           merge-multiple: true
       - name: Sign Manifests
@@ -377,13 +377,13 @@ jobs:
       - name: Download .DEB Packages
         uses: actions/download-artifact@v8
         with:
-          pattern: 'warzone2100_*.deb'
+          pattern: 'warzone2126_*.deb'
           path: ./upload-assets
           merge-multiple: true
       - name: Download Debug Symbols
         uses: actions/download-artifact@v8
         with:
-          pattern: 'warzone2100_*.DEBUGSYMBOLS.7z'
+          pattern: 'warzone2126_*.DEBUGSYMBOLS.7z'
           path: ./upload-assets
           merge-multiple: true
       - name: List Assets
@@ -487,14 +487,14 @@ jobs:
           echo "OUTPUT_DIR=${OUTPUT_DIR}"
           echo "OUTPUT_DIR=${OUTPUT_DIR}" >> $GITHUB_ENV
           mkdir -p "${OUTPUT_DIR}"
-          cp "${{ github.workspace }}/build/warzone2100.tar.xz" "${OUTPUT_DIR}/warzone2100_src.tar.xz"
-          echo "Generated warzone2100 tarball: \"warzone2100_src.tar.xz\""
-          echo "  -> SHA512: $(sha512sum "${OUTPUT_DIR}/warzone2100_src.tar.xz")"
-          echo "  -> Size (bytes): $(stat -c %s "${OUTPUT_DIR}/warzone2100_src.tar.xz")"
+          cp "${{ github.workspace }}/build/warzone2100.tar.xz" "${OUTPUT_DIR}/warzone2126_src.tar.xz"
+          echo "Generated warzone2100 tarball: \"warzone2126_src.tar.xz\""
+          echo "  -> SHA512: $(sha512sum "${OUTPUT_DIR}/warzone2126_src.tar.xz")"
+          echo "  -> Size (bytes): $(stat -c %s "${OUTPUT_DIR}/warzone2126_src.tar.xz")"
       - uses: actions/upload-artifact@v7
         if: success()
         with:
-          name: warzone2100_src
+          name: warzone2126_src
           path: ${{ env.OUTPUT_DIR }}
           if-no-files-found: 'error'
       - name: Generate artifact attestation
@@ -503,12 +503,12 @@ jobs:
         uses: actions/attest-build-provenance@v3
         continue-on-error: true
         with:
-          subject-path: '${{ env.OUTPUT_DIR }}/warzone2100_src.tar.xz'
+          subject-path: '${{ env.OUTPUT_DIR }}/warzone2126_src.tar.xz'
       - name: Upload source tarball to release
         if: success() && (github.event_name == 'workflow_run' && github.event.workflow_run.name == 'Draft Tag Release')
         run: |
           SOURCE_TAG="${WZ_GITHUB_REF#refs/tags/}"
-          gh release upload "${SOURCE_TAG}" "${OUTPUT_DIR}/warzone2100_src.tar.xz"
+          gh release upload "${SOURCE_TAG}" "${OUTPUT_DIR}/warzone2126_src.tar.xz"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           GH_REPO: ${{ github.repository }}
