@@ -39,7 +39,7 @@ void main()
 	float ao = texture(ssaoTexture, aoUv).r;
 	// A is SSAO weight (1 = apply). Water prepass writes 0, so lakes get no AO.
 	float weight = texture(prepassNormals, sceneUv).a;
-	vec3 litAo = scene * mix(1.0, ao, ssaoIntensity * weight);
+	vec3 litAo = scene * max(mix(1.0, ao, ssaoIntensity * weight), 0.0);
 
 	#ifdef NEWGL
 	FragColor = vec4(litAo, 1.0);

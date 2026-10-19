@@ -1098,6 +1098,9 @@ namespace gfx_api
 		glm::vec4 hazeSunColour; // rgb, w = sun glow
 		glm::vec4 hazeShape;     // x = horizon sharpness, y = sky brightness, zw = camera pivot (render x, z) relative to the camera
 		glm::vec4 haze;          // x = start, y = end (world units from the pivot, square distance), z = strength (0 = off)
+		// Warzone 2126 cloud shadows: soft shadows of drifting clouds over the scene
+		glm::vec4 cloud;         // x = coverage (0..1), y = strength (0 = off), z = 1 / size, w = cloud height above the camera
+		glm::vec4 cloudOffset;   // xy = camera (render x, z) plus wind drift, z = edge softness
 	};
 
 	template<>

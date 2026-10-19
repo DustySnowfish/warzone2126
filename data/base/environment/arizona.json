@@ -14,5 +14,13 @@
 		"sunDisc": 1.0,
 		"brightness": 1.0,
 		"bandFade": 0.35
+	},
+	"clouds": {
+		"coverage": 0.5,
+		"strength": 0.4,
+		"size": 2000,
+		"height": 1800,
+		"softness": 0.14,
+		"wind": [45, 18]
 	}
 }

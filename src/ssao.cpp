@@ -99,12 +99,14 @@ struct Tuning
 };
 
 constexpr Tuning DEFAULT_TUNING = {
-	.radius = 0.07f,
+	// Warzone 2126: wider and stronger than upstream, so contact shadows and crevices read
+	// at RTS camera distances (upstream: radius 0.07, rangeScale 0.5, intensity 1.3)
+	.radius = 0.1f,
 	.biasFactor = 0.00002f,
 	.minBias = 0.025f,
-	.rangeScale = 0.5f,
+	.rangeScale = 0.6f,
 	.blurDepthSigma = 0.0015f,
-	.intensity = 1.3f,
+	.intensity = 2.2f,
 };
 
 Tuning s_tuning = DEFAULT_TUNING;

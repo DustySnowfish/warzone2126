@@ -16,6 +16,8 @@ layout(std140) uniform cbuffer {
 	vec4 hazeSunColour; // w = sun glow
 	vec4 hazeShape;     // x = horizon sharpness, y = sky brightness, zw = pivot (render x, z) relative to the camera
 	vec4 haze;          // x = start, y = end (square distance from the pivot), z = strength
+	vec4 cloud;         // x = coverage, y = strength (0 = off), z = 1 / size, w = height above the camera
+	vec4 cloudOffset;   // xy = camera (render x, z) plus wind drift, z = edge softness
 };
 uniform sampler2D sceneTexture;
 uniform sampler2D bloomTexture;
@@ -42,12 +44,18 @@ varying vec2 texCoords;
 // runs into the sky instead of ending in a hard (or black) edge. Display-encoded in and out.
 vec3 wzApplyHaze(vec3 encoded, vec2 t, float depth)
 {
-	if (haze.z <= 0.0 || depth >= 0.9999)
+	if ((haze.z <= 0.0 && cloud.y <= 0.0) || depth >= 0.9999)
 	{
 		return encoded;
 	}
 	vec4 p = invViewProj * vec4(CLIP_FROM_TEXCOORD(t), depth * 2.0 - 1.0, 1.0);
 	vec3 rel = p.xyz / p.w; // camera-relative position
+	// Cloud shadows darken the lit scene (display-encoded, so scale by the encoded factor)
+	encoded *= pow(wzCloudShadow(rel, hazeSunDir.xyz, cloud, cloudOffset), 1.0 / 2.2);
+	if (haze.z <= 0.0)
+	{
+		return encoded;
+	}
 	vec2 fromPivot = abs(rel.xz - hazeShape.zw);
 	float squareDistance = max(fromPivot.x, fromPivot.y);
 	float amount = smoothstep(haze.x, haze.y, squareDistance) * haze.z;

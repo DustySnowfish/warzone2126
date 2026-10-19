@@ -76,6 +76,8 @@
 #include <cmath>
 #include <vector>
 
+#include "lib/gamelib/gtime.h"
+
 #include <nlohmann/json.hpp>
 
 namespace environment_light
@@ -162,6 +164,14 @@ struct EnvParams
 	float hazeStart = 0.55f;
 	float hazeEnd = 0.92f;
 	float hazeStrength = 1.f;
+	// Cloud shadows (off unless the file has a "clouds" block)
+	float cloudCoverage = 0.45f;
+	float cloudStrength = 0.f;
+	float cloudSize = 2600.f;     // world units across one cloud cell
+	float cloudHeight = 1800.f;   // world units above the camera
+	float cloudSoftness = 0.12f;
+	float cloudWindX = 40.f;      // world units per second
+	float cloudWindY = 15.f;
 };
 
 struct State
@@ -323,6 +333,22 @@ bool parseEnv(const std::string& path, EnvParams& out)
 		out.skySunDisc = jsonFloat(sky, "sunDisc", 1.f, 0.f, 4.f);
 		out.skyBrightness = jsonFloat(sky, "brightness", 1.f, 0.f, 4.f);
 		out.skyBandFade = jsonFloat(sky, "bandFade", 0.3f, 0.f, 0.95f);
+	}
+	auto cloudsIt = doc.find("clouds");
+	if (cloudsIt != doc.end() && cloudsIt->is_object())
+	{
+		const nlohmann::json& clouds = *cloudsIt;
+		out.cloudCoverage = jsonFloat(clouds, "coverage", out.cloudCoverage, 0.f, 1.f);
+		out.cloudStrength = jsonFloat(clouds, "strength", 0.35f, 0.f, 1.f);
+		out.cloudSize = jsonFloat(clouds, "size", out.cloudSize, 200.f, 50000.f);
+		out.cloudHeight = jsonFloat(clouds, "height", out.cloudHeight, 0.f, 20000.f);
+		out.cloudSoftness = jsonFloat(clouds, "softness", out.cloudSoftness, 0.01f, 0.5f);
+		auto windIt = clouds.find("wind");
+		if (windIt != clouds.end() && windIt->is_array() && windIt->size() == 2 && (*windIt)[0].is_number() && (*windIt)[1].is_number())
+		{
+			out.cloudWindX = std::max(-2000.f, std::min(2000.f, (*windIt)[0].get<float>()));
+			out.cloudWindY = std::max(-2000.f, std::min(2000.f, (*windIt)[1].get<float>()));
+		}
 	}
 	auto hazeIt = doc.find("haze");
 	if (hazeIt != doc.end() && hazeIt->is_object())
@@ -588,12 +614,13 @@ bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix)
 
 bool hazeActive()
 {
-	return state.haveSky && state.sky.hazeStrength > 0.f && gfx_api::context::get().hdrActive();
+	return state.haveSky && (state.sky.hazeStrength > 0.f || state.sky.cloudStrength > 0.f) && gfx_api::context::get().hdrActive();
 }
 
 void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 {
 	constants.haze = glm::vec4(0.f);
+	constants.cloud = glm::vec4(0.f);
 	if (!hazeActive() || !pie_IsInGame3DFrameContextReady())
 	{
 		return;
@@ -612,6 +639,16 @@ void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 	// The classic renderer draws a square of terrain around the pivot; haze completes before its edge
 	const float halfDrawn = static_cast<float>(world_coord(std::min(visibleTiles.x, visibleTiles.y) / 2 - 2));
 	constants.haze = glm::vec4(halfDrawn * p.hazeStart, halfDrawn * p.hazeEnd, p.hazeStrength, 0.f);
+	if (p.cloudStrength > 0.f && state.sunDir.y > 0.f)
+	{
+		// Drift with display time; wrap far beyond any map so float precision holds
+		const double seconds = static_cast<double>(graphicsTime) / 1000.0;
+		const double wrap = static_cast<double>(p.cloudSize) * 512.0;
+		const float driftX = static_cast<float>(std::fmod(seconds * p.cloudWindX, wrap));
+		const float driftY = static_cast<float>(std::fmod(seconds * p.cloudWindY, wrap));
+		constants.cloud = glm::vec4(p.cloudCoverage, p.cloudStrength, 1.f / p.cloudSize, p.cloudHeight);
+		constants.cloudOffset = glm::vec4(fc.cameraPos.x - driftX, fc.cameraPos.z - driftY, p.cloudSoftness, 0.f);
+	}
 }
 
 float skyBandFade()

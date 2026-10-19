@@ -848,7 +848,8 @@ bool loadConfig()
 		war_setProjectileLighting(value.value_or(true));
 	}
 	{
-		std::string ssaoValue = iniGetString("ssao", "off").value();
+		// Warzone 2126: new key so ambient occlusion is on (high) by default, also for existing settings files
+		std::string ssaoValue = iniGetString("ssao2126", "high").value();
 		if (ssaoValue == "low")
 		{
 			war_setSsaoMode(SSAO_MODE::LOW);
@@ -1151,11 +1152,11 @@ bool saveConfig()
 	iniSetBool("projectileLights", war_getProjectileLighting());
 	switch (war_getSsaoMode())
 	{
-		case SSAO_MODE::OFF: iniSetString("ssao", "off"); break;
-		case SSAO_MODE::LOW: iniSetString("ssao", "low"); break;
-		case SSAO_MODE::NORMAL: iniSetString("ssao", "normal"); break;
-		case SSAO_MODE::HIGH: iniSetString("ssao", "high"); break;
-		case SSAO_MODE::ULTRA: iniSetString("ssao", "ultra"); break;
+		case SSAO_MODE::OFF: iniSetString("ssao2126", "off"); break;
+		case SSAO_MODE::LOW: iniSetString("ssao2126", "low"); break;
+		case SSAO_MODE::NORMAL: iniSetString("ssao2126", "normal"); break;
+		case SSAO_MODE::HIGH: iniSetString("ssao2126", "high"); break;
+		case SSAO_MODE::ULTRA: iniSetString("ssao2126", "ultra"); break;
 	}
 	switch (war_getSsrMode())
 	{

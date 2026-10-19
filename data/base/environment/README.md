@@ -19,3 +19,20 @@ Keys (all optional; colours are 0..255 sRGB, as in an image editor):
 | sky | | The visible sky dome, drawn behind the cloud band. Sub-keys: `zenith`, `horizon`, `horizonSharpness`, `sunGlow` (default to the values above), `sunDisc` (1, brightness of the sun disc), `brightness` (1), `bandFade` (0.35, how much of the top of the cloud band fades into the dome) |
 
 For lighting, only the colours matter, not the overall brightness: the game scales the environment to the map's ambient light level. Without a file, PBR models use a flat ambient light.
+
+## Cloud shadows
+
+An optional `clouds` block casts soft shadows of drifting clouds over the map (needs HDR). Without it there are no cloud shadows.
+
+```json
+"clouds": { "coverage": 0.5, "strength": 0.4, "size": 2000, "height": 1800, "softness": 0.14, "wind": [45, 18] }
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| coverage | 0.45 | Share of the sky covered by cloud, 0..1 |
+| strength | 0.35 | How dark the shadows are, 0..1 (0 = off) |
+| size | 2600 | Size of a cloud, game units (128 per tile) |
+| height | 1800 | Height of the cloud layer above the camera, game units; shadows follow the sun direction |
+| softness | 0.12 | Width of the soft shadow edge |
+| wind | [40, 15] | Drift in game units per second (x east, y towards the bottom of the map) |

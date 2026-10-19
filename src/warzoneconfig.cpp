@@ -128,7 +128,7 @@ struct WARZONE_GLOBALS
 	int bloomIntensity = 60;
 	int colourGrading = 100; // percent strength of the per-map colour grade
 	bool taa = true; // temporal anti-aliasing (needs HDR)
-	SSAO_MODE ssaoMode = SSAO_MODE::OFF; // screen-space ambient occlusion (default off)
+	SSAO_MODE ssaoMode = SSAO_MODE::HIGH; // screen-space ambient occlusion (Warzone 2126: default high)
 	SSR_MODE ssrMode = SSR_MODE::OFF; // screen-space reflections (default off)
 	// UI config
 	bool groupsMenuEnabled = true;
