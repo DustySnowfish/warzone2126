@@ -94,6 +94,7 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "fire", { 12, 4 } },
 		{ "debris", { 16, 4 } },
 		{ "scorch", { 20, 3 } },
+		{ "select", { 23, 1 } },
 	};
 	return sets;
 }
@@ -220,6 +221,7 @@ struct State
 	std::vector<EffectLight> lights;
 	std::unordered_map<uint32_t, TrailState> trails;
 	std::unordered_map<uint32_t, TrailState> vehicleTrails;
+	std::vector<gfx_api::ParticleInstance> frameRings; // drawn this frame only (selection rings)
 	std::unordered_map<std::string, PropulsionVfx> byPropulsion;
 	uint32_t frameCounter = 0;
 	std::mt19937 rng { 2126u };
@@ -610,6 +612,12 @@ float frameAlpha(int frame, float u, float v)
 		const float radius = 0.45f + 0.35f * valueNoise(angle * 1.3f + 10.f, static_cast<float>(frame), frame * 3);
 		return 1.f - smoothstep(radius - 0.04f, radius, r);
 	}
+	case 23: // selection / order ring: soft band with a faint inner glow
+	{
+		const float band = std::exp(-(r - 0.78f) * (r - 0.78f) * 260.f);
+		const float glow = 0.18f * (1.f - smoothstep(0.2f, 0.78f, r)) * smoothstep(0.3f, 0.78f, r);
+		return std::min(1.f, band + glow) * (1.f - smoothstep(0.92f, 1.f, r));
+	}
 	case 20: case 21: case 22: // scorch mark: dark centre, blotchy fading edge, radial streaks
 	{
 		const float angle = std::atan2(v, u);
@@ -809,6 +817,22 @@ void clear()
 	s.trails.clear();
 }
 
+void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha)
+{
+	if (!s.loaded)
+	{
+		return;
+	}
+	gfx_api::ParticleInstance inst;
+	const glm::vec3 p = toRender(position);
+	const float ground = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(position.x), static_cast<int>(position.y)));
+	inst.positionSize = glm::vec4(p.x, ground + 3.f, p.z, diameter);
+	inst.colour = glm::vec4(rgb, alpha);
+	inst.params = glm::vec4(0.f, 23.f, 0.f, 2.f); // ring frame, lies on the ground, unlit
+	inst.velocity = glm::vec4(0.f);
+	s.frameRings.push_back(inst);
+}
+
 bool hasEffect(const std::string& effectName)
 {
 	return s.loaded && s.effects.count(effectName) != 0;
@@ -937,6 +961,7 @@ size_t liveCount()
 
 void update(LightingData& lightData)
 {
+	s.frameRings.clear();
 	++s.frameCounter;
 	const float dt = static_cast<float>(deltaGraphicsTime) / 1000.f;
 	if (dt > 0.f)
@@ -997,7 +1022,7 @@ void update(LightingData& lightData)
 
 void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 {
-	if (s.alive.empty() || s.atlas == nullptr || s.quad == nullptr || s.instanceBuffers.empty())
+	if ((s.alive.empty() && s.frameRings.empty()) || s.atlas == nullptr || s.quad == nullptr || s.instanceBuffers.empty())
 	{
 		return;
 	}
@@ -1031,6 +1056,7 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 			s.alphaInstances.push_back(inst);
 		}
 	}
+	s.additiveInstances.insert(s.additiveInstances.end(), s.frameRings.begin(), s.frameRings.end());
 	// Alpha-blended particles back to front
 	std::sort(s.sortKeys.begin(), s.sortKeys.end(), [](const std::pair<float, size_t>& a, const std::pair<float, size_t>& b) { return a.first > b.first; });
 	std::vector<gfx_api::ParticleInstance> combined;

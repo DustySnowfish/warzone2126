@@ -23,6 +23,8 @@
 
 // this has to be first
 #include "lib/framework/frame.h"
+
+#include <random>
 #include "lib/framework/math_ext.h"
 #include "lib/framework/frameresource.h"
 #include "lib/framework/object_list_iteration.h"
@@ -834,10 +836,20 @@ bool sound_Play3DSample(TRACK *psTrack, AUDIO_SAMPLE *psSample)
 #if defined(WZ_OS_UNIX) && !defined(WZ_OS_MAC)
 	// HACK: this is a workaround for a bug in the 64bit implementation of OpenAL on GNU/Linux
 	// The AL_PITCH value really should be 1.0.
-	alSourcef(psSample->iSample, AL_PITCH, 1.001f);
+	ALfloat basePitch = 1.001f;
 #else
-	alSourcef(psSample->iSample, AL_PITCH, 1.0f);
+	ALfloat basePitch = 1.0f;
 #endif
+	// Warzone 2126: vary the pitch of one-shot battlefield sounds (shots, impacts, explosions)
+	// by up to about a semitone, so repeated weapons do not sound like one sample on a loop.
+	// Display-only randomness (not the game's synchronised random numbers).
+	if (!sound_TrackLooped(psSample->iTrack))
+	{
+		static std::minstd_rand pitchRng(2126u);
+		std::uniform_real_distribution<float> variation(0.94f, 1.06f);
+		basePitch *= variation(pitchRng);
+	}
+	alSourcef(psSample->iSample, AL_PITCH, basePitch);
 
 	sound_SetObjectPosition(psSample);
 	alSourcefv(psSample->iSample, AL_VELOCITY, zero);

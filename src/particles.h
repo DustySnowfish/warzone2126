@@ -34,6 +34,7 @@
 #include "lib/framework/vector.h"
 
 #include <glm/fwd.hpp>
+#include <glm/vec3.hpp>
 #include <string>
 
 struct WEAPON_STATS;
@@ -52,6 +53,10 @@ void clear();
 void update(LightingData& lightData);
 /// Draw the particles into the current scene pass.
 void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
+
+/// A glowing ring on the ground for this frame only (selection rings). `rgb` is linear and may
+/// exceed 1 to glow with HDR bloom.
+void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha);
 
 /// True when an effect with this name is defined.
 bool hasEffect(const std::string& effectName);

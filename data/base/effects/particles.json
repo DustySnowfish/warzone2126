@@ -150,5 +150,19 @@
 			{"texture": "scorch", "blend": "alpha", "orient": "ground", "lit": false, "count": 1, "life": [25000, 35000], "size": [70, 75.60000000000001], "sizeJitter": 0.15, "speed": 0, "colour": [{"rgb": [0.05, 0.04, 0.035], "alpha": 0.8}, {"t": 0.75, "rgb": [0.06, 0.05, 0.045], "alpha": 0.68}, {"rgb": [0.07, 0.06, 0.05], "alpha": 0}]}
 		],
 		"light": {"rgb": [1.0, 0.65, 0.3], "range": 494, "intensity": 3.0, "life": 260}
+	},
+	"order_move": {
+		"layers": [
+			{"texture": "select", "blend": "additive", "orient": "ground", "lit": false, "count": 1, "life": [380, 380], "size": [150, 40], "sizeJitter": 0, "speed": 0, "rotation": [0, 0], "colour": [{"rgb": [0.3, 1.0, 0.5], "intensity": 1.6, "alpha": 0.9}, {"rgb": [0.3, 1.0, 0.5], "intensity": 1.0, "alpha": 0}]},
+			{"texture": "select", "blend": "additive", "orient": "ground", "lit": false, "count": 1, "life": [520, 520], "size": [40, 120], "sizeJitter": 0, "speed": 0, "rotation": [0, 0], "colour": [{"rgb": [0.3, 1.0, 0.5], "intensity": 1.6, "alpha": 0.6}, {"rgb": [0.3, 1.0, 0.5], "intensity": 1.0, "alpha": 0}]}
+		]
+	},
+	"build_sparks": {
+		"layers": [
+			{"texture": "core", "blend": "additive", "count": 1, "life": [60, 110], "size": [34, 14], "speed": 0, "colour": [{"rgb": [0.75, 0.88, 1.0], "intensity": 7, "alpha": 1}, {"rgb": [0.5, 0.7, 1.0], "intensity": 2, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [3, 7], "life": [250, 600], "size": [10, 4], "speed": [150, 380], "direction": "hemisphere", "stretch": 2.5, "gravity": 900, "drag": 0.6, "colour": [{"rgb": [1.0, 0.9, 0.6], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.5, 0.15], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "count": [0, 1], "life": [700, 1100], "size": [14, 60], "speed": [10, 25], "direction": "up", "spread": 30, "rise": 30, "drag": 1, "spin": [10, 40], "colour": [{"rgb": [0.7, 0.7, 0.72], "alpha": 0}, {"t": 0.15, "rgb": [0.7, 0.7, 0.72], "alpha": 0.3}, {"rgb": [0.75, 0.75, 0.76], "alpha": 0}]}
+		],
+		"light": {"rgb": [0.6, 0.8, 1.0], "range": 220, "intensity": 1.6, "life": 90}
 	}
 }

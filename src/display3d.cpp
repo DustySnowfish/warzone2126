@@ -52,6 +52,7 @@
 #endif
 #include <glm/gtx/transform.hpp>
 #include <glm/gtx/matrix_interpolation.hpp>
+#include <random>
 
 #include "loop.h"
 #include "atmos.h"
@@ -128,6 +129,8 @@ static void	display3DProjectiles(const glm::mat4 &viewMatrix, const glm::mat4 &p
 static void	emitProjectileLights(LightingData &lightData);
 static void	drawDroidAndStructureSelections();
 static void	drawDroidSelections();
+static void	queueSelectionRings();
+static void	emitConstructionSparks(const STRUCTURE *psStructure);
 static void	drawStructureSelections();
 static void displayBlueprints(const glm::mat4 &viewMatrix, const glm::mat4 &perspectiveViewMatrix);
 static void	processSensorTarget();
@@ -1391,6 +1394,7 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	wzPerfBegin(PERF_EFFECTS, "3D scene - effects");
 	processEffects(perspectiveViewMatrix, lightData);
 	particles::update(lightData);
+	queueSelectionRings();
 	atmosUpdateSystem(gameWorld.map);
 	avUpdateTiles(gameWorld.map);
 	emitProjectileLights(lightData);
@@ -3191,6 +3195,7 @@ static bool renderWallSection(STRUCTURE *psStructure, const glm::mat4 &viewMatri
 		{
 			pie_Draw3DShape(getFactionDisplayIMD(faction, psStructure->sDisplay.imd->displayModel()), 0, getPlayerColour(psStructure->player),
 							brightness, pie_HEIGHT_SCALED | pie_SHADOW | ecmFlag, static_cast<int>(structHeightScale(psStructure) * pie_RAISE_SCALE), modelMatrix, viewMatrix, stretch);
+			emitConstructionSparks(psStructure);
 		}
 	}
 	else
@@ -4171,9 +4176,66 @@ void assignSensorTarget(BASE_OBJECT *psObj)
 	psSensorObj = psObj;
 }
 
+/// Warzone 2126: welding flashes and sparks along the rising top of a structure while trucks build it
+static void emitConstructionSparks(const STRUCTURE *psStructure)
+{
+	if (psStructure->lastBuildRate <= 0 || gamePaused() || !particles::hasEffect("build_sparks"))
+	{
+		return;
+	}
+	// About six bursts a second for a one-tile building, more for bigger ones (display-only randomness)
+	static std::minstd_rand rng(2126u);
+	std::uniform_real_distribution<float> unit(0.f, 1.f);
+	const Vector2i size = psStructure->size();
+	const float rate = 6.f * std::sqrt(static_cast<float>(std::max(1, size.x * size.y)));
+	const float dt = static_cast<float>(realTimeAdjustedIncrement(1.f));
+	if (unit(rng) > rate * dt)
+	{
+		return;
+	}
+	const float top = structHeightScale(psStructure) * static_cast<float>(psStructure->sDisplay.imd->max.y);
+	const float halfX = static_cast<float>(size.x * TILE_UNITS) * 0.4f;
+	const float halfY = static_cast<float>(size.y * TILE_UNITS) * 0.4f;
+	const Vector3f at(static_cast<float>(psStructure->pos.x) + (unit(rng) * 2.f - 1.f) * halfX,
+	                  static_cast<float>(psStructure->pos.y) + (unit(rng) * 2.f - 1.f) * halfY,
+	                  static_cast<float>(psStructure->pos.z) + std::max(top, 8.f));
+	particles::spawn("build_sparks", at);
+}
+
+/// Warzone 2126: glowing rings on the ground under the player's selected units, coloured by health
+static void queueSelectionRings()
+{
+	if (selectedPlayer >= MAX_PLAYERS)
+	{
+		return;
+	}
+	for (const DROID *psDroid : gameWorld.objects.droids[selectedPlayer])
+	{
+		if (!psDroid->selected || psDroid->died || psDroid->isFlying() || psDroid->visibleForLocalDisplay() != UBYTE_MAX)
+		{
+			continue;
+		}
+		const Spacetime st = interpolateObjectSpacetime(psDroid, graphicsTime);
+		const float radius = psDroid->sDisplay.imd != nullptr ? static_cast<float>(psDroid->sDisplay.imd->radius) : 50.f;
+		const float diameter = std::max(110.f, std::min(radius * 3.1f, 320.f));
+		const float health = psDroid->originalBody > 0 ? std::min(1.f, static_cast<float>(psDroid->body) / static_cast<float>(psDroid->originalBody)) : 1.f;
+		// Green at full health, through yellow to red; slightly over 1 so it glows a little with HDR
+		const glm::vec3 healthy(0.25f, 1.2f, 0.45f);
+		const glm::vec3 hurt(1.3f, 1.0f, 0.15f);
+		const glm::vec3 critical(1.4f, 0.18f, 0.1f);
+		const glm::vec3 rgb = health > 0.5f ? glm::mix(hurt, healthy, (health - 0.5f) * 2.f) : glm::mix(critical, hurt, health * 2.f);
+		particles::frameRing(Vector3f(static_cast<float>(st.pos.x), static_cast<float>(st.pos.y), 0.f), diameter, rgb, 0.85f);
+	}
+}
+
 /// Set everything up for when the player selects the destination
 void	assignDestTarget()
 {
+	// Warzone 2126: a marker pulses on the ground where the order was given
+	if (particles::hasEffect("order_move"))
+	{
+		particles::spawn("order_move", Vector3f(static_cast<float>(mousePos.x), static_cast<float>(mousePos.y), static_cast<float>(map_Height(gameWorld.map, mousePos.x, mousePos.y))));
+	}
 	bDestTargetting = true;
 	lastDestAssignation = realTime;
 	destTargetX = mouseX();
@@ -4227,6 +4289,10 @@ static void processSensorTarget()
 /// Draw a graphical effect after selecting a destination
 static void processDestinationTarget()
 {
+	if (bDestTargetting && particles::hasEffect("order_move"))
+	{
+		bDestTargetting = false; // Warzone 2126: the ground marker replaces the corner box
+	}
 	if (bDestTargetting)
 	{
 		if ((realTime - lastDestAssignation) < DEST_TARGET_TIME)
