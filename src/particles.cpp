@@ -760,6 +760,11 @@ void clear()
 	s.trails.clear();
 }
 
+bool hasEffect(const std::string& effectName)
+{
+	return s.loaded && s.effects.count(effectName) != 0;
+}
+
 void spawn(const std::string& effectName, const Vector3f& position, const Vector3f& direction, float scale)
 {
 	spawnNamed(effectName, toRender(position), toRender(direction), scale);

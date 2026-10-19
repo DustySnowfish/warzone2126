@@ -68,6 +68,7 @@
 #include "cmddroid.h"
 #include "feature.h"
 #include "mapgrid.h"
+#include "particles.h"
 #include "projectile.h"
 #include "intdisplay.h"
 #include "display.h"
@@ -4061,7 +4062,15 @@ void structureUpdate(STRUCTURE *psBuilding, GameWorld& world)
 				dv.z = psBuilding->pos.y + breadthScatter - rand() % (2 * breadthScatter);
 				dv.y = psBuilding->pos.z;
 				dv.y += (psBuilding->sDisplay.imd->max.y * 3) / 4;
-				addEffect(&dv, EFFECT_SMOKE, SMOKE_TYPE_DRIFTING_HIGH, false, nullptr, 0, effectTime);
+				const char* damageEffect = damage > 65536 / 2 ? "damage_fire" : "damage_smoke";
+				if (particles::hasEffect(damageEffect))
+				{
+					particles::spawn(damageEffect, Vector3f(dv.x, dv.z, dv.y), Vector3f(0.f, 0.f, 0.f), 1.5f);
+				}
+				else
+				{
+					addEffect(&dv, EFFECT_SMOKE, SMOKE_TYPE_DRIFTING_HIGH, false, nullptr, 0, effectTime);
+				}
 				psBuilding->lastEmission = effectTime;
 			}
 		}
@@ -4886,7 +4895,13 @@ bool destroyStruct(STRUCTURE *psDel, unsigned impactTime, GameWorld& world)
 		widthScatter = TILE_UNITS;
 		breadthScatter = TILE_UNITS;
 		heightScatter = TILE_UNITS;
-		for (i = 0; i < (bMinor ? 2 : 4); ++i)  // only add two for walls - gets crazy otherwise
+		const char* destroyedEffect = bMinor ? "unit_destroyed" : "structure_destroyed";
+		if (particles::hasEffect(destroyedEffect))
+		{
+			const float size = static_cast<float>(std::max(psDel->pStructureType->baseWidth, psDel->pStructureType->baseBreadth));
+			particles::spawn(destroyedEffect, Vector3f(psDel->pos.x, psDel->pos.y, psDel->pos.z + 32), Vector3f(0.f, 0.f, 0.f), bMinor ? 0.8f : std::min(1.6f, 0.6f + 0.25f * size));
+		}
+		for (i = 0; i < (particles::hasEffect(destroyedEffect) ? 0 : (bMinor ? 2 : 4)); ++i)  // only add two for walls - gets crazy otherwise
 		{
 			pos.x = psDel->pos.x + widthScatter - rand() % (2 * widthScatter);
 			pos.z = psDel->pos.y + breadthScatter - rand() % (2 * breadthScatter);

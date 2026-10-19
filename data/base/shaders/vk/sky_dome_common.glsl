@@ -16,6 +16,8 @@ vec3 wzSkyDomeColour(vec3 d, vec3 zenith, vec3 horizon, vec3 ground, vec3 sunDir
 	else
 	{
 		c = mix(horizon, ground, min(1.0, -d.y * 4.0));
+		// Looking steeply down past the map edge: dim ground (like the out-of-bounds terrain), not bright sky
+		c = mix(c, ground * 0.45, smoothstep(0.15, 0.55, -d.y));
 	}
 	float s = max(dot(d, sunDir), 0.0);
 	c += sunColour * (sunGlow * pow(s, 8.0));
@@ -36,6 +38,8 @@ vec3 wzSkyDome(vec2 texCoords, mat4 invViewProj, vec3 zenith, vec3 horizon, vec3
 	else
 	{
 		c = mix(horizon, ground, min(1.0, -d.y * 4.0));
+		// Looking steeply down past the map edge: dim ground (like the out-of-bounds terrain), not bright sky
+		c = mix(c, ground * 0.45, smoothstep(0.15, 0.55, -d.y));
 	}
 	float s = max(dot(d, sunDir), 0.0);
 	c += sunColour * (params.y * pow(s, 8.0));

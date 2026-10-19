@@ -71,5 +71,43 @@
 		"layers": [
 			{"texture": "dust", "blend": "alpha", "count": [6, 10], "life": [500, 900], "size": [16.0, 48.0], "speed": [150, 320], "direction": "up", "spread": 25, "gravity": 700, "drag": 1, "lit": true, "colour": [{"rgb": [0.9, 0.95, 1.0], "alpha": 0.9}, {"rgb": [0.85, 0.9, 0.95], "alpha": 0}]}
 		]
+	},
+	"unit_destroyed": {
+		"layers": [
+			{"texture": "core", "blend": "additive", "count": 1, "life": [140, 200], "size": [190, 90], "speed": 0, "colour": [{"rgb": [1, 0.93, 0.78], "intensity": 10, "alpha": 1}, {"rgb": [1, 0.5, 0.15], "intensity": 2, "alpha": 0}]},
+			{"texture": "ring", "blend": "additive", "count": 1, "life": [260, 340], "size": [50, 420], "speed": 0, "colour": [{"rgb": [1, 0.85, 0.6], "intensity": 2.5, "alpha": 0.7}, {"rgb": [1, 0.7, 0.45], "intensity": 1, "alpha": 0}]},
+			{"texture": "fire", "blend": "additive", "count": [16, 22], "life": [350, 700], "size": [60, 150], "speed": [80, 220], "direction": "hemisphere", "drag": 3.2, "rise": 45, "spin": [20, 90], "offset": 14, "colour": [{"rgb": [1, 0.85, 0.5], "intensity": 6, "alpha": 1}, {"t": 0.45, "rgb": [1, 0.45, 0.12], "intensity": 2.5, "alpha": 0.85}, {"rgb": [0.4, 0.15, 0.04], "intensity": 1, "alpha": 0}]},
+			{"texture": "fire", "blend": "additive", "count": [5, 8], "life": [1800, 2800], "size": [40, 20], "speed": [5, 20], "direction": "up", "spread": 40, "rise": 30, "offset": 24, "spin": [20, 60], "colour": [{"rgb": [1, 0.7, 0.3], "intensity": 4, "alpha": 0}, {"t": 0.1, "rgb": [1, 0.6, 0.25], "intensity": 4, "alpha": 0.9}, {"rgb": [0.6, 0.2, 0.05], "intensity": 1, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [30, 44], "life": [400, 900], "size": [20, 6], "speed": [350, 900], "direction": "hemisphere", "stretch": 2.0, "gravity": 800, "drag": 0.8, "colour": [{"rgb": [1, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "count": [9, 13], "life": [3000, 5000], "size": [90, 340], "speed": [20, 90], "direction": "hemisphere", "rise": 45, "drag": 1.1, "offset": 20, "spin": [5, 20], "colour": [{"rgb": [0.2, 0.18, 0.17], "alpha": 0}, {"t": 0.08, "rgb": [0.2, 0.18, 0.17], "alpha": 0.9}, {"rgb": [0.45, 0.43, 0.41], "alpha": 0}]},
+			{"texture": "dust", "blend": "alpha", "count": [5, 8], "life": [1000, 1700], "size": [70, 280], "speed": [140, 300], "direction": "hemisphere", "drag": 4, "offset": 12, "colour": [{"rgb": [0.78, 0.62, 0.48], "alpha": 0.7}, {"rgb": [0.75, 0.62, 0.5], "alpha": 0}]},
+			{"texture": "debris", "blend": "alpha", "count": [14, 20], "life": [900, 1600], "size": [14, 14], "speed": [300, 650], "direction": "up", "spread": 65, "gravity": 1000, "spin": [180, 720], "colour": [{"rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"t": 0.85, "rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"rgb": [0.2, 0.19, 0.18], "alpha": 0}]}
+		],
+		"light": {"rgb": [1, 0.6, 0.26], "range": 900, "intensity": 4.5, "life": 520}
+	},
+	"structure_destroyed": {
+		"layers": [
+			{"texture": "core", "blend": "additive", "count": 1, "life": [140, 200], "size": [304, 144], "speed": 0, "colour": [{"rgb": [1, 0.93, 0.78], "intensity": 10, "alpha": 1}, {"rgb": [1, 0.5, 0.15], "intensity": 2, "alpha": 0}]},
+			{"texture": "ring", "blend": "additive", "count": 1, "life": [260, 340], "size": [80, 672], "speed": 0, "colour": [{"rgb": [1, 0.85, 0.6], "intensity": 2.5, "alpha": 0.7}, {"rgb": [1, 0.7, 0.45], "intensity": 1, "alpha": 0}]},
+			{"texture": "fire", "blend": "additive", "count": [24, 33], "life": [350, 700], "size": [96, 240], "speed": [80, 220], "direction": "hemisphere", "drag": 3.2, "rise": 45, "spin": [20, 90], "offset": 56, "colour": [{"rgb": [1, 0.85, 0.5], "intensity": 6, "alpha": 1}, {"t": 0.45, "rgb": [1, 0.45, 0.12], "intensity": 2.5, "alpha": 0.85}, {"rgb": [0.4, 0.15, 0.04], "intensity": 1, "alpha": 0}]},
+			{"texture": "fire", "blend": "additive", "count": [8, 12], "life": [1800, 2800], "size": [64, 32], "speed": [5, 20], "direction": "up", "spread": 40, "rise": 30, "offset": 96, "spin": [20, 60], "colour": [{"rgb": [1, 0.7, 0.3], "intensity": 4, "alpha": 0}, {"t": 0.1, "rgb": [1, 0.6, 0.25], "intensity": 4, "alpha": 0.9}, {"rgb": [0.6, 0.2, 0.05], "intensity": 1, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [45, 66], "life": [400, 900], "size": [32, 10], "speed": [350, 900], "direction": "hemisphere", "stretch": 2.0, "gravity": 800, "drag": 0.8, "colour": [{"rgb": [1, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "count": [14, 20], "life": [4500, 7000], "size": [144, 544], "speed": [20, 90], "direction": "hemisphere", "rise": 45, "drag": 1.1, "offset": 80, "spin": [5, 20], "colour": [{"rgb": [0.2, 0.18, 0.17], "alpha": 0}, {"t": 0.08, "rgb": [0.2, 0.18, 0.17], "alpha": 0.9}, {"rgb": [0.45, 0.43, 0.41], "alpha": 0}]},
+			{"texture": "dust", "blend": "alpha", "count": [8, 12], "life": [1000, 1700], "size": [112, 448], "speed": [140, 300], "direction": "hemisphere", "drag": 4, "offset": 48, "colour": [{"rgb": [0.78, 0.62, 0.48], "alpha": 0.7}, {"rgb": [0.75, 0.62, 0.5], "alpha": 0}]},
+			{"texture": "debris", "blend": "alpha", "count": [21, 30], "life": [900, 1600], "size": [22, 22], "speed": [300, 650], "direction": "up", "spread": 65, "gravity": 1000, "spin": [180, 720], "colour": [{"rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"t": 0.85, "rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"rgb": [0.2, 0.19, 0.18], "alpha": 0}]}
+		],
+		"light": {"rgb": [1, 0.58, 0.24], "range": 1400, "intensity": 6, "life": 800}
+	},
+	"damage_smoke": {
+		"layers": [
+			{"texture": "smoke", "blend": "alpha", "count": 1, "life": [1600, 2400], "size": [30, 150], "speed": [10, 30], "direction": "up", "spread": 25, "rise": 70, "drag": 0.6, "offset": 10, "spin": [10, 40], "colour": [{"rgb": [0.18, 0.17, 0.16], "alpha": 0}, {"t": 0.12, "rgb": [0.2, 0.19, 0.18], "alpha": 0.75}, {"rgb": [0.4, 0.39, 0.38], "alpha": 0}]}
+		]
+	},
+	"damage_fire": {
+		"layers": [
+			{"texture": "fire", "blend": "additive", "count": [1, 2], "life": [400, 700], "size": [34, 14], "speed": [10, 30], "direction": "up", "spread": 25, "rise": 60, "offset": 10, "spin": [30, 90], "colour": [{"rgb": [1, 0.8, 0.4], "intensity": 4, "alpha": 0}, {"t": 0.15, "rgb": [1, 0.6, 0.25], "intensity": 4, "alpha": 0.9}, {"rgb": [0.6, 0.2, 0.05], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "count": 1, "life": [1800, 2600], "size": [36, 170], "speed": [10, 30], "direction": "up", "spread": 25, "rise": 80, "drag": 0.6, "offset": 10, "spin": [10, 40], "colour": [{"rgb": [0.1, 0.09, 0.09], "alpha": 0}, {"t": 0.15, "rgb": [0.12, 0.11, 0.1], "alpha": 0.85}, {"rgb": [0.35, 0.34, 0.33], "alpha": 0}]}
+		],
+		"light": {"rgb": [1, 0.55, 0.2], "range": 260, "intensity": 1.2, "life": 500}
 	}
 }

@@ -53,6 +53,9 @@ void update(LightingData& lightData);
 /// Draw the particles into the current scene pass.
 void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 
+/// True when an effect with this name is defined.
+bool hasEffect(const std::string& effectName);
+
 /// Play a named effect. `direction` (world, may be zero) orients cone emitters.
 void spawn(const std::string& effectName, const Vector3f& position, const Vector3f& direction = Vector3f(0.f, 0.f, 0.f), float scale = 1.f);
 

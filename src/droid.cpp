@@ -65,6 +65,7 @@
 #include "cmddroid.h"
 #include "fpath.h"
 #include "pathfinding_backend.h"
+#include "particles.h"
 #include "projectile.h"
 #include "mission.h"
 #include "levels.h"
@@ -685,6 +686,10 @@ static void removeDroidFX(DROID *psDel, unsigned impactTime)
 		{
 			addEffect(&pos, EFFECT_EXPLOSION, EXPLOSION_TYPE_LARGE, false, nullptr, 0, impactTime);
 		}
+		else if (particles::hasEffect("unit_destroyed"))
+		{
+			particles::spawn("unit_destroyed", Vector3f(psDel->pos.x, psDel->pos.y, psDel->pos.z + 24));
+		}
 		else
 		{
 			addEffect(&pos, EFFECT_DESTRUCTION, DESTRUCTION_TYPE_DROID, false, nullptr, 0, impactTime);
@@ -980,7 +985,16 @@ void droidUpdate(DROID *psDroid)
 				dv.y = psDroid->pos.z;
 
 				dv.y += (psDroid->sDisplay.imd->max.y * 2);
-				addEffect(&dv, EFFECT_SMOKE, SMOKE_TYPE_DRIFTING_SMALL, false, nullptr, 0, effectTime);
+				const char* damageEffect = percentDamage >= 60 ? "damage_fire" : "damage_smoke";
+				if (particles::hasEffect(damageEffect))
+				{
+					// Particles rise on their own, so start them at the top of the unit
+					particles::spawn(damageEffect, Vector3f(psDroid->pos.x, psDroid->pos.y, psDroid->pos.z + psDroid->sDisplay.imd->max.y));
+				}
+				else
+				{
+					addEffect(&dv, EFFECT_SMOKE, SMOKE_TYPE_DRIFTING_SMALL, false, nullptr, 0, effectTime);
+				}
 				psDroid->lastEmission = effectTime;
 			}
 		}
