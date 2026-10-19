@@ -1,17 +1,111 @@
 {
 	"subclass": {
-		"MACHINE GUN": { "muzzle": "mg_muzzle", "hit": "bullet_hit", "miss": "bullet_dirt", "water": "water_splash", "replaceImpact": true },
-		"A-A GUN": { "muzzle": "mg_muzzle" },
-		"CANNON": { "muzzle": "cannon_muzzle", "hit": "cannon_hit", "miss": "cannon_hit", "water": "water_splash", "replaceImpact": true },
-		"GAUSS": { "muzzle": "cannon_muzzle", "hit": "cannon_hit", "miss": "cannon_hit", "water": "water_splash" },
-		"ROCKET": { "muzzle": "rocket_muzzle", "trail": "rocket_trail", "trailSpacing": 18, "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash", "replaceImpact": true },
-		"SLOW ROCKET": { "muzzle": "rocket_muzzle", "trail": "rocket_trail", "trailSpacing": 18, "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash", "replaceImpact": true },
-		"MISSILE": { "muzzle": "rocket_muzzle", "trail": "rocket_trail", "trailSpacing": 16, "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash" },
-		"SLOW MISSILE": { "muzzle": "rocket_muzzle", "trail": "rocket_trail", "trailSpacing": 16, "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash" },
-		"MORTARS": { "muzzle": "mortar_muzzle", "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash", "replaceImpact": true },
-		"HOWITZERS": { "muzzle": "mortar_muzzle", "hit": "explosion_medium", "miss": "explosion_medium", "water": "water_splash", "scale": 1.4 }
+		"MACHINE GUN": {
+			"muzzle": "mg_muzzle",
+			"hit": "bullet_hit",
+			"miss": "bullet_dirt",
+			"water": "water_splash",
+			"replaceImpact": true
+		},
+		"A-A GUN": {
+			"muzzle": "mg_muzzle"
+		},
+		"CANNON": {
+			"muzzle": "cannon_muzzle",
+			"hit": "cannon_hit",
+			"miss": "cannon_miss",
+			"water": "water_splash",
+			"replaceImpact": true
+		},
+		"GAUSS": {
+			"muzzle": "cannon_muzzle",
+			"hit": "cannon_hit",
+			"miss": "cannon_hit",
+			"water": "water_splash"
+		},
+		"ROCKET": {
+			"muzzle": "rocket_muzzle",
+			"trail": "rocket_trail",
+			"trailSpacing": 18,
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash",
+			"replaceImpact": true
+		},
+		"SLOW ROCKET": {
+			"muzzle": "rocket_muzzle",
+			"trail": "rocket_trail",
+			"trailSpacing": 18,
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash",
+			"replaceImpact": true
+		},
+		"MISSILE": {
+			"muzzle": "rocket_muzzle",
+			"trail": "rocket_trail",
+			"trailSpacing": 16,
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash"
+		},
+		"SLOW MISSILE": {
+			"muzzle": "rocket_muzzle",
+			"trail": "rocket_trail",
+			"trailSpacing": 16,
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash"
+		},
+		"MORTARS": {
+			"muzzle": "mortar_muzzle",
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash",
+			"replaceImpact": true
+		},
+		"HOWITZERS": {
+			"muzzle": "mortar_muzzle",
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash",
+			"scale": 1.4
+		}
 	},
 	"weapons": {
-		"MG3Mk1": { "muzzle": "mg_muzzle", "hit": "bullet_hit", "miss": "bullet_dirt", "water": "water_splash", "replaceImpact": true, "scale": 1.15 }
+		"MG3Mk1": {
+			"muzzle": "mg_muzzle",
+			"hit": "bullet_hit",
+			"miss": "bullet_dirt",
+			"water": "water_splash",
+			"replaceImpact": true,
+			"scale": 1.15
+		}
+	},
+	"propulsion": {
+		"wheeled": {
+			"ground": "dust_wheels",
+			"water": "spray_hover",
+			"spacing": 48,
+			"minSpeed": 60
+		},
+		"half-tracked": {
+			"ground": "dust_halftracks",
+			"water": "spray_hover",
+			"spacing": 44,
+			"minSpeed": 50
+		},
+		"tracked": {
+			"ground": "dust_tracks",
+			"water": "spray_hover",
+			"spacing": 40,
+			"minSpeed": 40
+		},
+		"hover": {
+			"ground": "dust_hover",
+			"water": "spray_hover",
+			"spacing": 36,
+			"minSpeed": 60
+		}
 	}
 }

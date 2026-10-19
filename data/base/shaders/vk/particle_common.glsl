@@ -12,7 +12,15 @@ vec3 wzParticleCorner(vec2 corner, vec4 positionSize, vec4 params, vec4 velocity
 	vec3 axisX = right;
 	vec3 axisY = up;
 	float lengthScale = 1.0;
-	if (params.z > 0.0)
+	if (params.w > 1.5)
+	{
+		// Lies flat on the ground (render y is up), turned by its rotation
+		float c = cos(params.x);
+		float s = sin(params.x);
+		axisX = vec3(c, 0.0, s);
+		axisY = vec3(-s, 0.0, c);
+	}
+	else if (params.z > 0.0)
 	{
 		vec3 v = velocity.xyz - forward * dot(velocity.xyz, forward);
 		float vl = length(v);

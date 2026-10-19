@@ -64,6 +64,11 @@ void weaponFired(const WEAPON_STATS* weapon, const Vector3f& muzzlePosition, con
 /// A projectile in flight; call every frame it is drawn. `id` identifies the projectile.
 void weaponTrail(const WEAPON_STATS* weapon, uint32_t id, const Vector3f& position, const Vector3f& velocityDirection);
 enum class ImpactKind { Hit, Miss, Water };
+
+/// A vehicle drawn this frame (call every frame it is drawn). `propulsion` is a key of the
+/// "propulsion" block of weapon_vfx.json (wheeled, tracked, half-tracked, hover, legged).
+/// Emits dust (or spray over water) behind it while it moves.
+void vehicleMoving(uint32_t id, const char* propulsion, const Vector3f& position, float speed, bool overWater, float scale = 1.f);
 void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind);
 
 /// True when a weapon has effects that replace its classic sprite effect for this event.

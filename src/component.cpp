@@ -1028,6 +1028,20 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 		position.y += bobTransporterHeight();
 	}
 
+	// Warzone 2126: dust or spray behind moving vehicles (display only)
+	if (!psDroid->isFlying())
+	{
+		static const char* const kPropulsionKeys[PROPULSION_TYPE_NUM] = { "wheeled", "tracked", "legged", "hover", "lift", "propellor", "half-tracked" };
+		const PROPULSION_TYPE propType = psDroid->getPropulsionStats()->propulsionType;
+		if (propType < PROPULSION_TYPE_NUM)
+		{
+			const bool overWater = terrainType(mapTile(gameWorld.map, map_coord(st.pos.x), map_coord(st.pos.y))) == TER_WATER;
+			const BODY_SIZE bodySize = psDroid->getBodyStats()->size;
+			const float bodyScale = bodySize == SIZE_HEAVY ? 1.3f : (bodySize == SIZE_LIGHT ? 0.8f : 1.f);
+			particles::vehicleMoving(psDroid->id, kPropulsionKeys[propType], Vector3f(static_cast<float>(st.pos.x), static_cast<float>(st.pos.y), static_cast<float>(position.y) + 8.f), static_cast<float>(std::abs(psDroid->sMove.speed)), overWater, bodyScale);
+		}
+	}
+
 	/* Get all the pitch,roll,yaw info */
 	rotation.y = -st.rot.direction;
 	rotation.x = st.rot.pitch;

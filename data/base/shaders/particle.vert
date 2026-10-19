@@ -41,7 +41,7 @@ void main()
 	vec3 world = wzParticleCorner(vertex, particlePositionSize, particleParams, particleVelocity, cameraRight.xyz, cameraUp.xyz, cameraForward.xyz);
 	uv = wzParticleUV(vertex, particleParams.y, atlas.xy);
 	vec3 rgb = particleColour.rgb;
-	if (particleParams.w > 0.5)
+	if (mod(particleParams.w, 2.0) > 0.5)
 	{
 		// Lit (smoke, dust): sky light plus a soft wrap of the sun
 		rgb *= ambient.rgb + sunColour.rgb * 0.6;

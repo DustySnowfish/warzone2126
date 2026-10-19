@@ -31,6 +31,8 @@
 #include "particles.h"
 
 #include "objectdef.h"
+#include "map.h"
+#include "game_world.h"
 #include "lighting.h"
 #include "stats.h"
 #include "statsdef.h"
@@ -91,6 +93,7 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "smoke", { 8, 4 } },
 		{ "fire", { 12, 4 } },
 		{ "debris", { 16, 4 } },
+		{ "scorch", { 20, 3 } },
 	};
 	return sets;
 }
@@ -131,6 +134,7 @@ struct Layer
 	bool lit = false;
 	float offset = 0.f;              // spawn radius
 	float rise = 0.f;                // constant upward speed added (buoyant smoke)
+	bool ground = false;             // lies flat on the terrain (scorch marks) instead of facing the camera
 };
 
 struct LightDef
@@ -159,6 +163,15 @@ struct WeaponVfx
 	float scale = 1.f;
 	bool replaceMuzzle = false;
 	bool replaceImpact = false;
+};
+
+/// Dust or spray behind a moving vehicle, per propulsion type (weapon_vfx.json "propulsion")
+struct PropulsionVfx
+{
+	std::string ground;      // effect on land
+	std::string water;       // effect over water
+	float spacing = 40.f;    // game units travelled between puffs
+	float minSpeed = 40.f;   // below this speed (game units per second) nothing is emitted
 };
 
 // ---------------------------------------------------------------------------------------
@@ -206,6 +219,8 @@ struct State
 	std::vector<Particle> alive;
 	std::vector<EffectLight> lights;
 	std::unordered_map<uint32_t, TrailState> trails;
+	std::unordered_map<uint32_t, TrailState> vehicleTrails;
+	std::unordered_map<std::string, PropulsionVfx> byPropulsion;
 	uint32_t frameCounter = 0;
 	std::mt19937 rng { 2126u };
 
@@ -355,6 +370,7 @@ Layer parseLayer(const nlohmann::json& j, const std::string& effectName)
 	{
 		l.colour.push_back(ColourKey());
 	}
+	l.ground = j.value("orient", std::string("camera")) == "ground";
 	l.rotation = readRange(j, "rotation", l.rotation);
 	l.spin = readRange(j, "spin", l.spin);
 	l.stretch = readFloat(j, "stretch", 0.f);
@@ -410,6 +426,7 @@ bool loadDefinitions()
 	s.bySubclass.clear();
 	s.byWeaponId.clear();
 	s.weaponCache.clear();
+	s.byPropulsion.clear();
 	nlohmann::json effects;
 	if (!readJsonFile(kEffectsFile, effects))
 	{
@@ -451,6 +468,23 @@ bool loadDefinitions()
 			for (auto it = sub->begin(); it != sub->end(); ++it)
 			{
 				s.bySubclass.emplace(it.key(), parseWeaponVfx(it.value()));
+			}
+		}
+		auto props = weapons.find("propulsion");
+		if (props != weapons.end() && props->is_object())
+		{
+			for (auto it = props->begin(); it != props->end(); ++it)
+			{
+				if (!it.value().is_object())
+				{
+					continue;
+				}
+				PropulsionVfx v;
+				v.ground = it.value().value("ground", std::string());
+				v.water = it.value().value("water", std::string());
+				v.spacing = std::max(4.f, readFloat(it.value(), "spacing", v.spacing));
+				v.minSpeed = std::max(0.f, readFloat(it.value(), "minSpeed", v.minSpeed));
+				s.byPropulsion.emplace(it.key(), v);
 			}
 		}
 		auto ids = weapons.find("weapons");
@@ -576,6 +610,15 @@ float frameAlpha(int frame, float u, float v)
 		const float radius = 0.45f + 0.35f * valueNoise(angle * 1.3f + 10.f, static_cast<float>(frame), frame * 3);
 		return 1.f - smoothstep(radius - 0.04f, radius, r);
 	}
+	case 20: case 21: case 22: // scorch mark: dark centre, blotchy fading edge, radial streaks
+	{
+		const float angle = std::atan2(v, u);
+		const float n = fbm(u * 3.f + 3.f * frame, v * 3.f, frame * 5, 5);
+		const float streaks = 0.5f + 0.5f * valueNoise(angle * 3.5f + 20.f, static_cast<float>(frame), frame * 9);
+		const float radius = 0.55f + 0.3f * streaks + 0.15f * n;
+		const float body = 1.f - smoothstep(radius * 0.35f, radius, r);
+		return std::max(0.f, std::min(1.f, body * (0.65f + 0.5f * n)));
+	}
 	default:
 		return 0.f;
 	}
@@ -679,6 +722,12 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 			p.frame = static_cast<float>(layer.frames.first + std::min(layer.frames.count - 1, static_cast<int>(random01() * static_cast<float>(layer.frames.count))));
 			p.scale = scale;
 			p.layer = &layer;
+			if (layer.ground)
+			{
+				// Rest on the terrain just under the effect (render z is minus the map y)
+				p.position.y = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(p.position.x), static_cast<int>(-p.position.z))) + 3.f;
+				p.velocity = glm::vec3(0.f);
+			}
 			s.alive.push_back(p);
 		}
 	}
@@ -777,6 +826,48 @@ void weaponFired(const WEAPON_STATS* weapon, const Vector3f& muzzlePosition, con
 	{
 		spawnNamed(vfx->muzzle, toRender(muzzlePosition), toRender(muzzleDirection), vfx->scale);
 	}
+}
+
+void vehicleMoving(uint32_t id, const char* propulsion, const Vector3f& position, float speed, bool overWater, float scale)
+{
+	auto vfxIt = s.byPropulsion.find(propulsion);
+	if (vfxIt == s.byPropulsion.end())
+	{
+		return;
+	}
+	const PropulsionVfx& vfx = vfxIt->second;
+	const std::string& effect = overWater ? vfx.water : vfx.ground;
+	const glm::vec3 pos = toRender(position);
+	auto it = s.vehicleTrails.find(id);
+	if (it == s.vehicleTrails.end())
+	{
+		TrailState t;
+		t.last = pos;
+		t.seenFrame = s.frameCounter;
+		s.vehicleTrails.emplace(id, t);
+		return;
+	}
+	TrailState& t = it->second;
+	const glm::vec3 delta = pos - t.last;
+	const float dist = glm::length(delta);
+	if (!effect.empty() && speed >= vfx.minSpeed && dist > 1e-3f && dist < 512.f)
+	{
+		const glm::vec3 dir = delta / dist;
+		float along = vfx.spacing - t.carry;
+		int guard = 0;
+		while (along <= dist && guard++ < 8)
+		{
+			spawnNamed(effect, t.last + dir * along, -dir, scale);
+			along += vfx.spacing;
+		}
+		t.carry = dist - (along - vfx.spacing);
+	}
+	else
+	{
+		t.carry = 0.f;
+	}
+	t.last = pos;
+	t.seenFrame = s.frameCounter;
 }
 
 void weaponTrail(const WEAPON_STATS* weapon, uint32_t id, const Vector3f& position, const Vector3f&)
@@ -887,6 +978,10 @@ void update(LightingData& lightData)
 	{
 		it = (s.frameCounter - it->second.seenFrame > 3) ? s.trails.erase(it) : std::next(it);
 	}
+	for (auto it = s.vehicleTrails.begin(); it != s.vehicleTrails.end();)
+	{
+		it = (s.frameCounter - it->second.seenFrame > 3) ? s.vehicleTrails.erase(it) : std::next(it);
+	}
 	// Effect lights go to the engine's point lights (render space back to light coordinates)
 	for (const EffectLight& l : s.lights)
 	{
@@ -924,7 +1019,7 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 		inst.positionSize = glm::vec4(p.position, p.sizeStart + (p.sizeEnd - p.sizeStart) * t);
 		inst.colour = colourAt(*p.layer, t);
 		const float speed = glm::length(p.velocity);
-		inst.params = glm::vec4(p.rotation, p.frame, p.layer->stretch / std::max(p.scale, 0.01f), p.layer->lit ? 1.f : 0.f);
+		inst.params = glm::vec4(p.rotation, p.frame, p.layer->stretch / std::max(p.scale, 0.01f), (p.layer->lit ? 1.f : 0.f) + (p.layer->ground ? 2.f : 0.f));
 		inst.velocity = glm::vec4(speed > 1e-3f ? p.velocity / speed * std::min(speed / 100.f, 8.f) : glm::vec3(0.f), 0.f);
 		if (p.layer->additive)
 		{

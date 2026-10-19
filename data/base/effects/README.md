@@ -19,7 +19,7 @@ Layer keys (a value in `[a, b]` form is a random range):
 
 | Key | Default | Meaning |
 |---|---|---|
-| texture | glow | `glow`, `core`, `spark`, `ring`, `star`, `dust`, `smoke`, `fire`, `debris` |
+| texture | glow | `glow`, `core`, `spark`, `ring`, `star`, `dust`, `smoke`, `fire`, `debris`, `scorch` |
 | blend | additive | `additive` (light: fire, flashes, sparks) or `alpha` (smoke, dust, debris) |
 | count | 1 | Particles spawned |
 | life | 300 | Lifetime, ms |
@@ -34,6 +34,7 @@ Layer keys (a value in `[a, b]` form is a random range):
 | rotation | [0, 360] | Starting rotation, degrees |
 | spin | 0 | Rotation speed, degrees per second (random direction) |
 | stretch | 0 | Lengthens the particle along its motion (sparks) |
+| orient | camera | `camera` (faces the camera) or `ground` (lies flat on the terrain under the effect; scorch marks) |
 | lit | alpha layers | Darkened and tinted by the scene light (smoke, dust) |
 | colour | white | List of keys `{ "t": 0..1, "rgb": [r, g, b], "intensity": 1, "alpha": 1 }`; `t` defaults to evenly spaced. Intensity above 1 glows (bloom) with HDR on |
 
@@ -49,3 +50,14 @@ Which effect each weapon plays. `subclass` covers every weapon of a class (`MACH
 | replaceImpact | `true` hides the classic impact sprite (when the new effect is complete) |
 | replaceMuzzle | `true` hides the classic muzzle flash model |
 | scale | Scales all sizes, speeds and ranges of this weapon's effects |
+
+## Vehicle dust (weapon_vfx.json "propulsion")
+
+Moving vehicles leave dust behind them, or spray over water. Keys are propulsion types: `wheeled`, `half-tracked`, `tracked`, `hover`, `legged`. Heavy bodies scale the effect by 1.3, light bodies by 0.8.
+
+| Key | Meaning |
+|---|---|
+| ground | Effect on land |
+| water | Effect over water |
+| spacing | Game units travelled between puffs |
+| minSpeed | Below this speed (game units per second) nothing is emitted |
