@@ -54,6 +54,11 @@ constexpr int kMaxRiseAboveOriginal = 40;
 constexpr int64_t kRimWidth1024 = 360;
 // Rim height as a fraction of the crater depth, in 1/1024
 constexpr int kRimHeight1024 = 230;
+// Hull-down: ground this far (world units) above a unit's base, between it and the shooter
+constexpr int kHullDownFull = 24;           // about 0.75 m: hull covered
+constexpr int kHullDownPartial = 12;        // about 0.4 m: partly covered
+constexpr unsigned kHullDownFullReduction = 35;    // percent less direct-fire damage
+constexpr unsigned kHullDownPartialReduction = 15;
 // Impacts this far above the ground (airbursts, hits high on a big target) leave no crater
 constexpr int kMaxImpactHeightAboveGround = 160;
 
@@ -246,6 +251,55 @@ void projectileImpact(GameWorld& world, const WEAPON_STATS* weapon, unsigned pla
 	{
 		++s.craters;
 	}
+}
+
+unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const Vector3i& origin, const BASE_OBJECT* target, unsigned damage)
+{
+	if (weapon == nullptr || target == nullptr || target->type != OBJ_DROID)
+	{
+		return damage;
+	}
+	if (weapon->movementModel != MM_DIRECT && weapon->movementModel != MM_HOMINGDIRECT)
+	{
+		return damage; // artillery comes down from above
+	}
+	const DROID* psDroid = static_cast<const DROID*>(target);
+	if (psDroid->isFlying())
+	{
+		return damage;
+	}
+	const int64_t dx = origin.x - target->pos.x;
+	const int64_t dy = origin.y - target->pos.y;
+	const int64_t length = i64Sqrt(static_cast<uint64_t>(dx * dx + dy * dy));
+	if (length < 2 * TILE_UNITS)
+	{
+		return damage; // point blank: no cover
+	}
+	// How far the ground close to the target rises above the line from the shooter to the
+	// target's base: a ridge crest or crater rim in front of the target covers its lower hull,
+	// while an even slope up to the shooter does not
+	const int64_t dz = origin.z - target->pos.z;
+	int rise = INT32_MIN;
+	for (int k = 1; k <= 4; ++k)
+	{
+		const int64_t step = 48 * k;
+		const int sx = static_cast<int>(target->pos.x + dx * step / length);
+		const int sy = static_cast<int>(target->pos.y + dy * step / length);
+		if (worldOnMap(world.map, sx, sy))
+		{
+			const int lineZ = static_cast<int>(target->pos.z + dz * step / length);
+			rise = std::max(rise, map_Height(world.map, sx, sy) - lineZ);
+		}
+	}
+	if (rise >= kHullDownFull)
+	{
+		return damage * (100 - kHullDownFullReduction) / 100;
+	}
+	if (rise >= kHullDownPartial)
+	{
+		return damage * (100 - kHullDownPartialReduction) / 100;
+	}
+	return damage;
 }
 
 unsigned craterCount()

@@ -1367,6 +1367,8 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 		{
 			// Calculate the damage the weapon does to its target
 			unsigned int damage = calcDamage(weaponDamage(*psStats, psObj->player), psStats->weaponEffect, psObj->psDest);
+			// Warzone 2126: units behind a ridge or inside a crater take less direct fire (hull-down)
+			damage = terrain_deform::coverDamage(gameWorld, psStats, psObj->src, psObj->psDest, damage);
 
 			// If we are in a multi-player game and the attacker is our responsibility
 			if (bMultiPlayer && psObj->psSource)

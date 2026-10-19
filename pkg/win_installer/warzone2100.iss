@@ -210,7 +210,7 @@ SourceDir={#SOURCE_DIR}
 
 // Output Settings
 OutputDir=output
-OutputBaseFilename=warzone2100_win_installer
+OutputBaseFilename=warzone2126_win_installer
 OutputManifestFile=setup-manifest.txt
 
 // App Information

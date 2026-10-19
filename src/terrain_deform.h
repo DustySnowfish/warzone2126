@@ -34,6 +34,7 @@
 struct WEAPON_STATS;
 struct WorldMapState;
 struct GameWorld;
+struct BASE_OBJECT;
 
 namespace terrain_deform
 {
@@ -48,6 +49,10 @@ void projectileImpact(GameWorld& world, const WEAPON_STATS* weapon, unsigned pla
 /// Dig a crater (negative depth) or raise a mound (positive height) centred on world (x, y).
 /// `radius` and `depth` are world units. Returns whether any height changed.
 bool deform(GameWorld& world, int x, int y, int radius, int depth);
+
+/// Direct fire at a ground unit that sits behind a ridge or inside a crater (hull-down) does
+/// less damage. `origin` is where the shot came from. Returns the damage to apply.
+unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const Vector3i& origin, const BASE_OBJECT* target, unsigned damage);
 
 /// Total craters dug this game (for tests and benchmarks).
 unsigned craterCount();
