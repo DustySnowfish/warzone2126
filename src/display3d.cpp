@@ -130,6 +130,7 @@ static void	emitProjectileLights(LightingData &lightData);
 static void	drawDroidAndStructureSelections();
 static void	drawDroidSelections();
 static void	queueSelectionRings();
+static void	queueEarthworkPreview();
 static void	emitConstructionSparks(const STRUCTURE *psStructure);
 static void	drawStructureSelections();
 static void displayBlueprints(const glm::mat4 &viewMatrix, const glm::mat4 &perspectiveViewMatrix);
@@ -1395,6 +1396,7 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	processEffects(perspectiveViewMatrix, lightData);
 	particles::update(lightData);
 	queueSelectionRings();
+	queueEarthworkPreview();
 	atmosUpdateSystem(gameWorld.map);
 	avUpdateTiles(gameWorld.map);
 	emitProjectileLights(lightData);
@@ -4200,6 +4202,33 @@ static void emitConstructionSparks(const STRUCTURE *psStructure)
 	                  static_cast<float>(psStructure->pos.y) + (unit(rng) * 2.f - 1.f) * halfY,
 	                  static_cast<float>(psStructure->pos.z) + std::max(top, 8.f));
 	particles::spawn("build_sparks", at);
+}
+
+/// Warzone 2126: markers around the earthwork area being placed (amber raise, blue lower)
+static void queueEarthworkPreview()
+{
+	Vector2i lo, hi;
+	bool lower = false;
+	if (!earthworkPlacementPreview(lo, hi, lower))
+	{
+		return;
+	}
+	const glm::vec3 rgb = lower ? glm::vec3(0.35f, 0.7f, 1.6f) : glm::vec3(1.6f, 0.95f, 0.25f);
+	const float pulse = 0.6f + 0.3f * std::sin(static_cast<float>(realTime) * 0.006f);
+	// Corner markers on every tile corner of the area, a bigger one on the outer corners
+	for (int ty = lo.y; ty <= hi.y + 1; ++ty)
+	{
+		for (int tx = lo.x; tx <= hi.x + 1; ++tx)
+		{
+			const bool edge = tx == lo.x || tx == hi.x + 1 || ty == lo.y || ty == hi.y + 1;
+			const bool corner = (tx == lo.x || tx == hi.x + 1) && (ty == lo.y || ty == hi.y + 1);
+			if (!edge)
+			{
+				continue;
+			}
+			particles::frameRing(Vector3f(static_cast<float>(world_coord(tx)), static_cast<float>(world_coord(ty)), 0.f), corner ? 70.f : 40.f, rgb, pulse);
+		}
+	}
 }
 
 /// Warzone 2126: glowing rings on the ground under the player's selected units, coloured by health

@@ -27,6 +27,7 @@
 #include "lib/framework/frame.h"
 #include "lib/framework/trig.h"
 #include "lib/gamelib/gtime.h"
+#include "lib/netplay/sync_debug.h"
 
 #include "objectdef.h"
 #include "orderdef.h"
@@ -198,6 +199,7 @@ bool deform(GameWorld& world, int x, int y, int radius, int depth)
 	const int y1 = std::min(map.height - 1, map_coord(y + reach) + 1);
 
 	bool changed = false;
+	int64_t heightSum = 0; // for the sync check: what changed, in a form every client must match
 	for (int ty = y0; ty <= y1; ++ty)
 	{
 		for (int tx = x0; tx <= x1; ++tx)
@@ -218,9 +220,11 @@ bool deform(GameWorld& world, int x, int y, int radius, int depth)
 			{
 				setTileHeight(map, tx, ty, target);
 				changed = true;
+				heightSum += target * (tx + 1) + ty;
 			}
 		}
 	}
+	syncDebug("Crater (%d,%d) r%d d%d sum%d", x, y, radius, depth, static_cast<int>(heightSum & 0x7fffffff));
 	if (changed)
 	{
 		resettleObjects(world, x, y, reach);
@@ -297,6 +301,10 @@ unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const V
 			rise = std::max(rise, map_Height(world.map, sx, sy) - lineZ);
 		}
 	}
+	if (rise >= kHullDownPartial)
+	{
+		syncDebug("Cover %d target %u rise %d", static_cast<int>(damage), target->id, rise);
+	}
 	if (rise >= kHullDownFull)
 	{
 		return damage * (100 - kHullDownFullReduction) / 100;
@@ -333,6 +341,7 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 	const int ty1 = map_coord(std::max(a.y, b.y)) + 1;
 	bool finished = true;
 	bool changed = false;
+	int64_t heightSum = 0;
 	for (int ty = ty0 - 1; ty <= ty1 + 1; ++ty)
 	{
 		for (int tx = tx0 - 1; tx <= tx1 + 1; ++tx)
@@ -358,12 +367,14 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 			const int next = current < target ? std::min(target, current + kEarthworkStep) : std::max(target, current - kEarthworkStep);
 			setTileHeight(map, tx, ty, next);
 			changed = true;
+			heightSum += next * (tx + 1) + ty;
 			if (next != target)
 			{
 				finished = false;
 			}
 		}
 	}
+	syncDebug("Earthwork (%d,%d)-(%d,%d) %s sum%d done%d", tx0, ty0, tx1, ty1, lower ? "lower" : "raise", static_cast<int>(heightSum & 0x7fffffff), finished ? 1 : 0);
 	if (changed)
 	{
 		const int cx = world_coord(tx0 + tx1) / 2;

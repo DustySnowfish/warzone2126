@@ -2413,12 +2413,12 @@ static void earthworkAtMouse(bool lower, bool add)
 
 void kf_EarthworkRaise()
 {
-	earthworkAtMouse(false, false);
+	startEarthworkPlacement(false);
 }
 
 void kf_EarthworkLower()
 {
-	earthworkAtMouse(true, false);
+	startEarthworkPlacement(true);
 }
 
 void kf_EarthworkRaiseQueued()

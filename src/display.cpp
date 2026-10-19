@@ -857,6 +857,108 @@ static OrderSource pointerOrderSource()
 }
 
 //don't want to do any of these whilst in the Intelligence Screen
+// Warzone 2126 earthwork placement: entered with the raise/lower keys (or build menu buttons).
+// Click for a 3x3 tile area or drag a rectangle (up to 8x8 tiles); release to order the
+// selected trucks. Shift on release queues the order and stays in placement mode.
+// Right-click cancels.
+namespace
+{
+struct EarthworkPlacement
+{
+	bool active = false;
+	bool lower = false;
+	bool dragging = false;
+	Vector2i startTile { 0, 0 };
+};
+EarthworkPlacement earthworkPlacement;
+constexpr int kEarthworkMaxTiles = 8;
+
+void earthworkCurrentRect(Vector2i& lo, Vector2i& hi)
+{
+	const int maxX = static_cast<int>(gameWorld.map.width) - 3;
+	const int maxY = static_cast<int>(gameWorld.map.height) - 3;
+	const Vector2i mouse(std::max(2, std::min(mouseTileX, maxX)), std::max(2, std::min(mouseTileY, maxY)));
+	if (!earthworkPlacement.dragging || earthworkPlacement.startTile == mouse)
+	{
+		lo = mouse - Vector2i(1, 1);
+		hi = mouse + Vector2i(1, 1);
+		return;
+	}
+	const Vector2i s = earthworkPlacement.startTile;
+	// Limit the far corner so the area stays within the largest allowed size
+	const Vector2i e(s.x + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.x - s.x, kEarthworkMaxTiles - 1)),
+	                 s.y + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.y - s.y, kEarthworkMaxTiles - 1)));
+	lo = Vector2i(std::min(s.x, e.x), std::min(s.y, e.y));
+	hi = Vector2i(std::max(s.x, e.x), std::max(s.y, e.y));
+}
+}
+
+void startEarthworkPlacement(bool lower)
+{
+	if (selectedPlayer >= MAX_PLAYERS)
+	{
+		return;
+	}
+	bool haveTruck = false;
+	for (const DROID* psDroid : gameWorld.objects.droids[selectedPlayer])
+	{
+		haveTruck = haveTruck || (psDroid->selected && psDroid->isConstructionDroid());
+	}
+	if (!haveTruck)
+	{
+		return;
+	}
+	kill3DBuilding();
+	earthworkPlacement.active = true;
+	earthworkPlacement.lower = lower;
+	earthworkPlacement.dragging = false;
+}
+
+bool earthworkPlacementPreview(Vector2i& loTile, Vector2i& hiTile, bool& lower)
+{
+	if (!earthworkPlacement.active)
+	{
+		return false;
+	}
+	earthworkCurrentRect(loTile, hiTile);
+	lower = earthworkPlacement.lower;
+	return true;
+}
+
+/// Handles mouse input while placing an earthwork. Returns true when it used the input.
+static bool processEarthworkPlacement()
+{
+	if (!earthworkPlacement.active)
+	{
+		return false;
+	}
+	if (mouseReleased(MOUSE_RMB) || keyPressed(KEY_ESC))
+	{
+		earthworkPlacement = EarthworkPlacement();
+		return true;
+	}
+	if (mousePressed(MOUSE_LMB))
+	{
+		earthworkPlacement.dragging = true;
+		earthworkPlacement.startTile = Vector2i(mouseTileX, mouseTileY);
+	}
+	if (mouseReleased(MOUSE_LMB))
+	{
+		Vector2i lo, hi;
+		earthworkCurrentRect(lo, hi);
+		const bool queue = keyDown(KEY_LSHIFT) || keyDown(KEY_RSHIFT);
+		OrderSourceScope orderScope(pointerOrderSource());
+		orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), earthworkPlacement.lower, queue);
+		audio_PlayTrack(ID_SOUND_SELECT);
+		earthworkPlacement.dragging = false;
+		if (!queue)
+		{
+			earthworkPlacement.active = false;
+		}
+	}
+	return true;
+}
+
 void processMouseClickInput()
 {
 	UDWORD	i;
@@ -872,6 +974,11 @@ void processMouseClickInput()
 	}
 	selection = establishSelection(selectedPlayer);
 	ASSERT(selection <= POSSIBLE_SELECTIONS, "Weirdy selection!");
+
+	if (processEarthworkPlacement())
+	{
+		return;
+	}
 
 	if (gestureActive)
 	{

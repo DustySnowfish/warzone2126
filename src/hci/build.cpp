@@ -23,6 +23,8 @@
 #include "lib/widget/label.h"
 #include "lib/widget/bar.h"
 #include "build.h"
+#include "../display.h"
+#include "lib/ivis_opengl/pieblitfunc.h"
 #include "../objmem.h"
 #include "../order.h"
 #include "../qtscript.h"
@@ -560,6 +562,42 @@ private:
 	std::shared_ptr<BuildController> controller;
 };
 
+/// Warzone 2126: build menu button that starts earthwork placement (raise or lower ground)
+class EarthworkButton: public W_BUTTON
+{
+public:
+	explicit EarthworkButton(bool lower): lower(lower) {}
+
+	void display(int xOffset, int yOffset) override
+	{
+		const int x0 = xOffset + x();
+		const int y0 = yOffset + y();
+		const int w = width();
+		const int h = height();
+		const bool highlight = (getState() & WBUT_HIGHLIGHT) != 0;
+		pie_BoxFill(x0, y0, x0 + w, y0 + h, highlight ? pal_RGBA(70, 70, 110, 220) : pal_RGBA(30, 30, 60, 200));
+		iV_Box(x0, y0, x0 + w - 1, y0 + h - 1, highlight ? WZCOL_WHITE : pal_RGBA(120, 120, 170, 255));
+		const PIELIGHT ground = pal_RGBA(200, 150, 90, 255);
+		const PIELIGHT arrow = lower ? pal_RGBA(110, 180, 255, 255) : pal_RGBA(255, 190, 70, 255);
+		const int baseY = y0 + h * 3 / 4;
+		const int left = x0 + 3;
+		const int right = x0 + w - 4;
+		const int midX = x0 + w / 2;
+		const int bump = lower ? h / 5 : -h / 5;
+		// Ground line with a mound (raise) or a dip (lower) in the middle
+		iV_Lines({ glm::ivec4(left, baseY, midX - w / 4, baseY), glm::ivec4(midX - w / 4, baseY, midX, baseY + bump),
+		           glm::ivec4(midX, baseY + bump, midX + w / 4, baseY), glm::ivec4(midX + w / 4, baseY, right, baseY) }, ground);
+		// Arrow
+		const int tipY = lower ? y0 + h / 2 : y0 + 3;
+		const int tailY = lower ? y0 + 3 : y0 + h / 2;
+		const int head = lower ? -3 : 3;
+		iV_Lines({ glm::ivec4(midX, tailY, midX, tipY), glm::ivec4(midX, tipY, midX - 3, tipY + head), glm::ivec4(midX, tipY, midX + 3, tipY + head) }, arrow);
+	}
+
+private:
+	bool lower;
+};
+
 class BuildStatsForm: public ObjectStatsForm
 {
 private:
@@ -593,6 +631,25 @@ private:
 		BaseWidget::initialize();
 		addObsoleteButton();
 		addFavoriteButton();
+		addEarthworkButtons();
+	}
+
+	void addEarthworkButtons()
+	{
+		const int w = AtlasImage(IntImages, IMAGE_FDP_UP).width();
+		const int h = AtlasImage(IntImages, IMAGE_FDP_UP).height();
+		for (int i = 0; i < 2; ++i)
+		{
+			const bool lower = i == 1;
+			auto button = std::make_shared<EarthworkButton>(lower);
+			attach(button);
+			// After the obsolete and favourite toggles (each one image wide), narrower so both fit the panel
+			button->setGeometry(4 * 3 + w * 3 + 6 + i * (w - 1), STAT_SLDY, w - 3, h);
+			button->setTip(lower ? _("Lower Ground: drag an area for the selected trucks to dig ( ] )") : _("Raise Ground: drag an area for the selected trucks to build up ( [ )"));
+			button->addOnClickHandler([lower](W_BUTTON &) {
+				startEarthworkPlacement(lower);
+			});
+		}
 	}
 
 	void addObsoleteButton()
