@@ -89,6 +89,9 @@ void	setDrawTerrainShadows(bool val);
 bool	getDrawTerrainShadows();
 
 bool	getCameraAccel();
+/// Warzone 2126: tilt the camera with zoom (flatter close in, more top-down far out)
+bool	getCameraZoomTilt();
+void	setCameraZoomTilt(bool val);
 void	setCameraAccel(bool val);
 
 void	setEdgeScrollOutsideWindowBounds(bool val);

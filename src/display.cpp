@@ -199,10 +199,13 @@ static MOUSE_TARGET	itemUnderMouse(BASE_OBJECT **ppObjUnderCursor);
 static bool bShakingPermitted = true;
 
 static auto viewDistanceAnimation = Animation<float>(realTime);
+// Warzone 2126: true while the running zoom animation came from the player (not a script)
+static bool viewDistanceAnimationByPlayer = false;
 static uint32_t viewDistanceIncrementCooldownTime = 0;
 
 void animateToViewDistance(float target, float speed)
 {
+	viewDistanceAnimationByPlayer = false;
 	const float distance = std::abs(target - getViewDistance());
 	const double duration = (speed > 0 && distance > 1) ? glm::log(distance) * 100 * DEFAULT_VIEW_DISTANCE_ANIMATION_SPEED / speed : 0;
 	viewDistanceAnimation
@@ -229,14 +232,46 @@ void incrementViewDistance(float amount)
 	}
 
 	animateToViewDistance(target);
+	viewDistanceAnimationByPlayer = true;
+}
+
+// Warzone 2126 zoom tilt: the camera looks flatter (more cinematic) when zoomed in and more
+// top-down when zoomed out. Only the change of the curve is applied, so a pitch the player
+// set by hand keeps its offset.
+static bool cameraZoomTilt = true;
+
+bool getCameraZoomTilt()
+{
+	return cameraZoomTilt;
+}
+
+void setCameraZoomTilt(bool val)
+{
+	cameraZoomTilt = val;
+}
+
+static float zoomTiltPitchDegrees(float distance)
+{
+	// -40 at the default distance (the classic starting pitch), -24 close in, -58 far out
+	const float t = glm::clamp((distance - 900.f) / (4600.f - 900.f), 0.f, 1.f);
+	const float eased = t * t * (3.f - 2.f * t);
+	return -24.f + (-58.f + 24.f) * eased;
 }
 
 static void updateViewDistanceAnimation()
 {
 	if (viewDistanceAnimation.isActive())
 	{
+		const float before = getViewDistance();
 		viewDistanceAnimation.update();
-		setViewDistance(viewDistanceAnimation.getCurrent());
+		const float after = viewDistanceAnimation.getCurrent();
+		setViewDistance(after);
+		if (cameraZoomTilt && viewDistanceAnimationByPlayer)
+		{
+			const float deltaDegrees = zoomTiltPitchDegrees(after) - zoomTiltPitchDegrees(before);
+			const int pitch = playerPos.r.x + static_cast<int>(DEG(deltaDegrees));
+			playerPos.r.x = glm::clamp(pitch, static_cast<int>(DEG(360 + MIN_PLAYER_X_ANGLE)), static_cast<int>(DEG(360 + MAX_PLAYER_X_ANGLE)));
+		}
 	}
 }
 
@@ -1202,6 +1237,7 @@ void processGestureInput()
 				target = std::clamp(target, static_cast<float>(MINDISTANCE), static_cast<float>((!NETisReplay()) ? MAXDISTANCE : MAXDISTANCE_REPLAY));
 
 				animateToViewDistance(target, 0);
+				viewDistanceAnimationByPlayer = true;
 				updateViewDistanceAnimation();
 			}
 			processedGesture = true;

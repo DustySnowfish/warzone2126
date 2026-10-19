@@ -1264,6 +1264,25 @@ std::shared_ptr<OptionsForm> makeControlsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("controls.camZoomTilt", N_("Camera Tilt With Zoom"), N_("Tilt the camera towards the horizon when zooming in, and towards top-down when zooming out."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(getCameraZoomTilt());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				setCameraZoomTilt(newValue);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("controls.mouse.rotateCamera", N_("Mouse Rotate"), "");
 		auto valueChanger = OptionsDropdown<optional<MOUSE_KEY_CODE>>::make(
 			[]() {

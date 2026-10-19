@@ -440,6 +440,7 @@ bool loadConfig()
 	setGroupButtonEnabled(war_getGroupsMenuEnabled());
 	war_setOptionsButtonVisibility(iniGetInteger("optionsButtonVisibility", war_getOptionsButtonVisibility()).value());
 	setCameraAccel(iniGetBool("cameraAccel", true).value());
+	setCameraZoomTilt(iniGetBool("cameraZoomTilt2126", true).value());
 	setDrawShadows(iniGetBool("shadows", true).value());
 	war_setSoundEnabled(iniGetBool("sound", true).value());
 	setInvertMouseStatus(iniGetBool("mouseflip", true).value());
@@ -1002,6 +1003,7 @@ bool saveConfig()
 	iniSetBool("radarJump", war_GetRadarJump());		// radar jump
 	iniSetInteger("lodDistanceBias", war_getLODDistanceBiasPercentage());
 	iniSetBool("cameraAccel", getCameraAccel());		// camera acceleration
+	iniSetBool("cameraZoomTilt2126", getCameraZoomTilt());
 	iniSetInteger("shake", (int)getShakeStatus());		// screenshake
 	iniSetBool("weather", atmosGetWeatherEnabled());
 	iniSetInteger("groupmenu", (int)war_getGroupsMenuEnabled());		// groups menu
