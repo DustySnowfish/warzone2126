@@ -14,6 +14,8 @@ layout(set = 2, binding = 2) uniform sampler2DArray tex_sm;
 layout(set = 2, binding = 3) uniform sampler2D lightmap_tex;
 // depth map
 layout(set = 2, binding = 4) uniform sampler2DArrayShadow shadowMap;
+// Warzone 2126: map environment for the sky reflection
+layout(set = 2, binding = 5) uniform sampler2D TextureEnvironment;
 
 layout(location = 1) in vec4 uv1_uv2;
 layout(location = 2) in vec2 uvLightmap;
@@ -31,6 +33,7 @@ layout(location = 0) out vec4 FragColor;
 #include "light.glsl"
 #include "pointlights.glsl"
 #include "water_normals.glsl"
+#include "water_2126.glsl"
 
 vec3 blendAddEffectLighting(vec3 a, vec3 b) {
 	return min(a + b, vec3(1.0));
@@ -72,6 +75,9 @@ vec4 main_bumpMapping()
 	finalColor.rgb = ambientColor.rgb + diffuseColor.rgb + specColor.rgb;
 	finalColor.rgb = mix(finalColor.rgb, (finalColor.rgb+vec3(1.0,0.8,0.63))*0.5, fresnel);
 	finalColor.a = (ambientColor.a + diffuseColor.a + specColor.a) * (1.0-depth);
+
+	// Warzone 2126: sky reflection and shoreline foam
+	finalColor = wz2126WaterSurface(finalColor, N, normalize(eyeVec), depth, sqrt(max(noise, 0.0)) * 1.4, envOn, min((ambientLight.rgb + diffuseLight.rgb) * 0.9, vec3(1.0)));
 
 	vec4 lightmap = texture(lightmap_tex, uvLightmap, 0.0);
 	finalColor.rgb = blendAddEffectLighting(finalColor.rgb, (lightmap.rgb / 1.5f)); // additive color (from environmental point lights / effects)

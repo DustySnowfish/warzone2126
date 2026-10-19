@@ -21,7 +21,7 @@ layout(std140) uniform cbuffer {
 	int viewportWidth;
 	int viewportHeight;
 	int bucketDimensionUsed;
-	float pad1;
+	float envOn; // Warzone 2126: 1 when TextureEnvironment holds the map environment
 	float pad2;
 	// Last because its length follows the grid dimension
 	ivec4 bucketOffsetAndSize[WZ_BUCKET_DIMENSION * WZ_BUCKET_DIMENSION];

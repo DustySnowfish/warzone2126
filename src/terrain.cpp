@@ -2484,9 +2484,12 @@ void drawWaterHighImpl(const glm::mat4 &ModelViewProjection, const glm::mat4& vi
 		waterTexturesHigh.tex_nm,
 		waterTexturesHigh.tex_sm,
 		lightmap_texture,
-		shadowMap);
+		shadowMap,
+		// Warzone 2126: the map environment for the sky reflection (any texture when there is none; envOn is then 0)
+		pie_GetEnvironmentMap() != nullptr ? static_cast<gfx_api::abstract_texture*>(pie_GetEnvironmentMap()) : static_cast<gfx_api::abstract_texture*>(lightmap_texture));
 	PSO::get().bind_vertex_buffers(waterVBO);
 	auto dimension = gfx_api::context::get().getSceneRenderTargetDimensions();
+	const float envOn = pie_GetEnvironmentMap() != nullptr ? 1.f : 0.f;
 	gfx_api::constant_buffer_type<SHADER_WATER_HIGH> uniforms = {
 		ModelViewProjection, viewMatrix, lightmapValues.ModelUVLightmap, {shadowCascades.shadowMVPMatrix[0], shadowCascades.shadowMVPMatrix[1], shadowCascades.shadowMVPMatrix[2]},
 		glm::vec4(cameraPos, 0), glm::vec4(glm::normalize(sunPos), 0),
@@ -2494,7 +2497,7 @@ void drawWaterHighImpl(const glm::mat4 &ModelViewProjection, const glm::mat4& vi
 		{shadowCascades.shadowCascadeSplit[0], shadowCascades.shadowCascadeSplit[1], shadowCascades.shadowCascadeSplit[2], pie_getPerspectiveZFar()}, shadowCascades.shadowMapSize,
 		waterOffset*10, gfx_api::context::get().getSceneMipLodBias(),
 		static_cast<int>(dimension.first), static_cast<int>(dimension.second),
-		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), 0.f, 0.f,
+		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), envOn, 0.f,
 		getCurrentLightingManager().getPointLightBuckets().bucketOffsetAndSize
 	};
 	PSO::get().template set_uniforms_at<0>(uniforms, gfx_api::globals_block_active_size<gfx_api::constant_buffer_type<SHADER_WATER_HIGH>>());

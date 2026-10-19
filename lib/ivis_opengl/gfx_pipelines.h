@@ -486,7 +486,8 @@ namespace gfx_api
 		texture_description<1, sampler_type::anisotropic_repeat, kSampler_tex_nm, pixel_format_target::texture_2d_array>, // normal maps
 		texture_description<2, sampler_type::anisotropic_repeat, kSampler_tex_sm, pixel_format_target::texture_2d_array>, // specular maps
 		texture_description<3, sampler_type::bilinear, kSampler_lightmap_tex>, // lightmap
-		texture_description<4, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>  // depth / shadow map
+		texture_description<4, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>,  // depth / shadow map
+		texture_description<5, sampler_type::bilinear_repeat, kSampler_TextureEnvironment> // Warzone 2126: environment for the sky reflection
 	>, SHADER_WATER_HIGH>;
 
 	template<>
