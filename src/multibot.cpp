@@ -31,6 +31,7 @@
 #include "droiddef.h"
 #include "stats.h"
 #include "move.h"						// for ordering droids
+#include "terrain_deform.h"
 #include "objmem.h"
 #include "power.h"						// for powercalculated
 #include "order.h"
@@ -499,9 +500,17 @@ void sendDroidInfo(DROID *psDroid, DroidOrder const &order, bool add, const Orde
 			return;  // No point ordering things to build if they can't build anything.
 		}
 	}
-	if (order.type == DORDER_LINEBUILD)
+	if (order.type == DORDER_LINEBUILD || order.type == DORDER_EARTHWORK)
 	{
 		info.pos2 = order.pos2;
+	}
+	if (order.type == DORDER_EARTHWORK)
+	{
+		if (!psDroid->isConstructionDroid())
+		{
+			return;
+		}
+		info.direction = order.direction;
 	}
 	if (order.type == DORDER_BUILDMODULE)
 	{
@@ -537,6 +546,7 @@ static bool validOrderForNetLoc(DROID_ORDER order)
 	case DORDER_RECYCLE:
 	case DORDER_BUILD:
 	case DORDER_LINEBUILD:
+	case DORDER_EARTHWORK:
 		return true;
 	default:
 		return validOrderForLoc(order);
@@ -562,6 +572,7 @@ static bool validOrderForNetQueue(DROID_ORDER order)
 	case DORDER_RECOVER:
 	case DORDER_BUILD:
 	case DORDER_LINEBUILD:
+	case DORDER_EARTHWORK:
 		return true;
 	default:
 		return false;
@@ -645,6 +656,11 @@ static bool validDroidInfoOrderData(QueuedDroidInfo const &info, DROID_ORDER_DAT
 		return false;
 	}
 	if (info.order == DORDER_LINEBUILD && !worldOnMap(gameWorld.map, sOrder.pos2))
+	{
+		return false;
+	}
+	if (info.order == DORDER_EARTHWORK && (!worldOnMap(gameWorld.map, sOrder.pos) || !worldOnMap(gameWorld.map, sOrder.pos2) || sOrder.direction > 1
+	                                       || std::abs(sOrder.pos2.x - sOrder.pos.x) > terrain_deform::kEarthworkMaxSize || std::abs(sOrder.pos2.y - sOrder.pos.y) > terrain_deform::kEarthworkMaxSize))
 	{
 		return false;
 	}

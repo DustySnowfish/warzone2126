@@ -78,7 +78,7 @@ enum DroidOrderType
 	DORDER_PATROL,          /**< move between two way points. */
 	DORDER_REARM,           /**< 32 - order a vtol to rearming pad. */
 	DORDER_RECOVER,         /**< pick up an artifact. */
-	DORDER_UNUSED_6,
+	DORDER_EARTHWORK,       /**< Warzone 2126: raise (direction 0) or lower (direction 1) the ground in the tile rectangle pos..pos2 (world coordinates). */
 	DORDER_RTR_SPECIFIED,   /**< return to repair at a specified repair center. */
 	DORDER_CIRCLE = 40,     /**< circles target location and engage. */
 	DORDER_HOLD,            /**< hold position until given next order. */

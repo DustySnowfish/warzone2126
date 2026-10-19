@@ -2397,6 +2397,40 @@ void	kf_ToggleMouseInvert()
 }
 
 // --------------------------------------------------------------------------
+// Warzone 2126 earthworks: the selected trucks raise or lower a 3x3 tile area centred on the
+// tile under the mouse; the queued variants add it to the trucks' order lists
+static void earthworkAtMouse(bool lower, bool add)
+{
+	if (selectedPlayer >= MAX_PLAYERS)
+	{
+		return;
+	}
+	const int cx = std::max(2, std::min(map_coord(mousePos.x), gameWorld.map.width - 3));
+	const int cy = std::max(2, std::min(map_coord(mousePos.y), gameWorld.map.height - 3));
+	orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(cx - 1), world_coord(cy - 1)), Vector2i(world_coord(cx + 1), world_coord(cy + 1)), lower, add);
+	audio_PlayTrack(ID_SOUND_SELECT);
+}
+
+void kf_EarthworkRaise()
+{
+	earthworkAtMouse(false, false);
+}
+
+void kf_EarthworkLower()
+{
+	earthworkAtMouse(true, false);
+}
+
+void kf_EarthworkRaiseQueued()
+{
+	earthworkAtMouse(false, true);
+}
+
+void kf_EarthworkLowerQueued()
+{
+	earthworkAtMouse(true, true);
+}
+
 void	kf_ToggleShakeStatus(void)
 {
 	if (getShakeStatus())

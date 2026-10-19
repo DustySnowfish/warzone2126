@@ -35,9 +35,13 @@ struct WEAPON_STATS;
 struct WorldMapState;
 struct GameWorld;
 struct BASE_OBJECT;
+struct DROID;
 
 namespace terrain_deform
 {
+
+/// Largest earthwork area side, world units (orders with a bigger rectangle are rejected).
+constexpr int kEarthworkMaxSize = 8 * 128;
 
 /// Forget per-map state (call when the map is shut down).
 void reset();
@@ -53,6 +57,13 @@ bool deform(GameWorld& world, int x, int y, int radius, int depth);
 /// Direct fire at a ground unit that sits behind a ridge or inside a crater (hull-down) does
 /// less damage. `origin` is where the shot came from. Returns the damage to apply.
 unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const Vector3i& origin, const BASE_OBJECT* target, unsigned damage);
+
+/// One work step of a truck on its DORDER_EARTHWORK order (raise or lower the ground in the
+/// order's rectangle a little towards its target). Returns true when the earthwork is complete.
+bool earthworkStep(GameWorld& world, DROID* psDroid);
+
+/// One work step on the tile rectangle with world corners a and b (no cadence check).
+bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower);
 
 /// Total craters dug this game (for tests and benchmarks).
 unsigned craterCount();

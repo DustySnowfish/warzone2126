@@ -26,8 +26,10 @@
 
 #include "lib/framework/frame.h"
 #include "lib/framework/trig.h"
+#include "lib/gamelib/gtime.h"
 
 #include "objectdef.h"
+#include "orderdef.h"
 #include "droid.h"
 #include "feature.h"
 #include "game_world.h"
@@ -54,6 +56,10 @@ constexpr int kMaxRiseAboveOriginal = 40;
 constexpr int64_t kRimWidth1024 = 360;
 // Rim height as a fraction of the crater depth, in 1/1024
 constexpr int kRimHeight1024 = 230;
+// Earthworks: raised or dug this far from the original ground, with a ramp ring at half height
+constexpr int kEarthworkHeight = 96;        // world units (3 m)
+constexpr int kEarthworkStep = 2;           // world units per truck per work step
+constexpr unsigned kEarthworkStepMs = 250;  // game time between work steps
 // Hull-down: ground this far (world units) above a unit's base, between it and the shooter
 constexpr int kHullDownFull = 24;           // about 0.75 m: hull covered
 constexpr int kHullDownPartial = 12;        // about 0.4 m: partly covered
@@ -300,6 +306,73 @@ unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const V
 		return damage * (100 - kHullDownPartialReduction) / 100;
 	}
 	return damage;
+}
+
+bool earthworkStep(GameWorld& world, DROID* psDroid)
+{
+	const DroidOrder& order = psDroid->order;
+	if (!worldOnMap(world.map, order.pos) || !worldOnMap(world.map, order.pos2))
+	{
+		return true;
+	}
+	// Work at a fixed game-time cadence, the same on every client
+	if (gameTime / kEarthworkStepMs == (gameTime - deltaGameTime) / kEarthworkStepMs)
+	{
+		return false;
+	}
+	return earthworkApply(world, order.pos, order.pos2, order.direction != 0);
+}
+
+bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
+{
+	WorldMapState& map = world.map;
+	ensureOriginal(map);
+	const int tx0 = map_coord(std::min(a.x, b.x));
+	const int ty0 = map_coord(std::min(a.y, b.y));
+	const int tx1 = map_coord(std::max(a.x, b.x)) + 1; // corners of the last tile
+	const int ty1 = map_coord(std::max(a.y, b.y)) + 1;
+	bool finished = true;
+	bool changed = false;
+	for (int ty = ty0 - 1; ty <= ty1 + 1; ++ty)
+	{
+		for (int tx = tx0 - 1; tx <= tx1 + 1; ++tx)
+		{
+			if (tx < 0 || ty < 0 || tx >= map.width || ty >= map.height || !cornerMovable(map, tx, ty))
+			{
+				continue;
+			}
+			const bool inner = tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1;
+			const int amount = inner ? kEarthworkHeight : kEarthworkHeight / 2;
+			const int original = s.originalHeights[static_cast<size_t>(tx + ty * map.width)];
+			const int target = lower ? std::max(0, original - amount) : original + amount;
+			const int current = map_TileHeight(map, tx, ty);
+			if (current == target)
+			{
+				continue;
+			}
+			// The ramp ring never undoes a deeper or higher neighbouring earthwork
+			if (!inner && (lower ? current < target : current > target))
+			{
+				continue;
+			}
+			const int next = current < target ? std::min(target, current + kEarthworkStep) : std::max(target, current - kEarthworkStep);
+			setTileHeight(map, tx, ty, next);
+			changed = true;
+			if (next != target)
+			{
+				finished = false;
+			}
+		}
+	}
+	if (changed)
+	{
+		const int cx = world_coord(tx0 + tx1) / 2;
+		const int cy = world_coord(ty0 + ty1) / 2;
+		resettleObjects(world, cx, cy, world_coord(std::max(tx1 - tx0, ty1 - ty0)) + 2 * TILE_UNITS);
+		initLighting(map, static_cast<UDWORD>(std::max(0, tx0 - 2)), static_cast<UDWORD>(std::max(0, ty0 - 2)),
+		             static_cast<UDWORD>(std::min(map.width, tx1 + 3)), static_cast<UDWORD>(std::min(map.height, ty1 + 3)));
+	}
+	return finished;
 }
 
 unsigned craterCount()

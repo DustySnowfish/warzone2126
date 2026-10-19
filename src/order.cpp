@@ -34,6 +34,7 @@
 
 #include "objects.h"
 #include "order.h"
+#include "terrain_deform.h"
 #include "ordersource.h"
 #include "action.h"
 #include "map.h"
@@ -574,6 +575,32 @@ bool orderUpdateDroid(DROID *psDroid)
 			psDroid->order = DroidOrder(DORDER_NONE);
 		}
 		break;
+	case DORDER_EARTHWORK:
+	{
+		// Warzone 2126: work once the truck is close to the area
+		const Vector2i centre = (psDroid->order.pos + psDroid->order.pos2) / 2;
+		const int64_t dx = psDroid->pos.x - centre.x;
+		const int64_t dy = psDroid->pos.y - centre.y;
+		const int64_t reach = std::max(std::abs(psDroid->order.pos2.x - psDroid->order.pos.x), std::abs(psDroid->order.pos2.y - psDroid->order.pos.y)) / 2 + TILE_UNITS * 2;
+		const bool close = dx * dx + dy * dy <= reach * reach;
+		if (!close)
+		{
+			if (psDroid->action == DACTION_NONE)
+			{
+				actionDroid(psDroid, DACTION_MOVE, centre.x, centre.y);
+			}
+			break;
+		}
+		if (psDroid->action == DACTION_MOVE)
+		{
+			actionDroid(psDroid, DACTION_NONE);
+		}
+		if (psDroid->action == DACTION_NONE && terrain_deform::earthworkStep(gameWorld, psDroid))
+		{
+			psDroid->order = DroidOrder(DORDER_NONE);
+		}
+		break;
+	}
 	case DORDER_RECOVER:
 		if (psDroid->order.psObj == nullptr)
 		{
@@ -1602,6 +1629,17 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 		actionDroid(psDroid, DACTION_BUILD, psOrder->pos.x, psOrder->pos.y);
 		objTrace(psDroid->id, "Starting new construction effort of %s", psOrder->psStats ? getStatsName(psOrder->psStats) : "NULL");
 		break;
+	case DORDER_EARTHWORK:
+		// Warzone 2126: go to the area, then raise or lower the ground there (see orderUpdateDroid)
+		if (!psDroid->isConstructionDroid() || !worldOnMap(gameWorld.map, psOrder->pos) || !worldOnMap(gameWorld.map, psOrder->pos2))
+		{
+			break;
+		}
+		psDroid->order = *psOrder;
+		psDroid->order.psObj = nullptr;
+		psDroid->order.psStats = nullptr;
+		actionDroid(psDroid, DACTION_MOVE, (psOrder->pos.x + psOrder->pos2.x) / 2, (psOrder->pos.y + psOrder->pos2.y) / 2);
+		break;
 	case DORDER_BUILDMODULE:
 		{
 			//build a module onto the structure
@@ -2047,6 +2085,21 @@ void orderDroidLoc(DROID *psDroid, DROID_ORDER order, UDWORD x, UDWORD y, QUEUE_
 }
 
 
+/** Warzone 2126: order the selected trucks to raise or lower the ground in a tile rectangle (world corners a and b). */
+void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, bool lower, bool add)
+{
+	ASSERT_PLAYER_OR_RETURN(, player);
+	const Vector2i lo(std::min(a.x, b.x), std::min(a.y, b.y));
+	const Vector2i hi(std::max(a.x, b.x), std::max(a.y, b.y));
+	for (DROID* psCurr : gameWorld.objects.droids[player])
+	{
+		if (psCurr->selected && psCurr->isConstructionDroid())
+		{
+			sendDroidInfo(psCurr, DroidOrder(DORDER_EARTHWORK, nullptr, lo, hi, lower ? 1 : 0), add, currentOrderSource());
+		}
+	}
+}
+
 /** This function attributes the order's location to (pX,pY) if the order is the same as the droid.
  * Returns true if it was attributed and false if not.
  */
@@ -2463,6 +2516,10 @@ bool orderDroidList(DROID *psDroid)
 		case DORDER_LINEBUILD:
 			ASSERT(sOrder.psObj == nullptr, "Extra %s parameters.", getDroidOrderName(sOrder.type));
 			sOrder.psObj = nullptr;
+			break;
+		case DORDER_EARTHWORK:
+			sOrder.psObj = nullptr;
+			sOrder.psStats = nullptr;
 			break;
 		default:
 			ASSERT(false, "orderDroidList: Invalid order");
@@ -4352,7 +4409,7 @@ const char *getDroidOrderName(DROID_ORDER order)
 	case DORDER_PATROL:                   return "DORDER_PATROL";
 	case DORDER_REARM:                    return "DORDER_REARM";
 	case DORDER_RECOVER:                  return "DORDER_RECOVER";
-	case DORDER_UNUSED_6:                 return "DORDER_UNUSED_6";
+	case DORDER_EARTHWORK:                return "DORDER_EARTHWORK";
 	case DORDER_RTR_SPECIFIED:            return "DORDER_RTR_SPECIFIED";
 	case DORDER_CIRCLE:                   return "DORDER_CIRCLE";
 	case DORDER_HOLD:                     return "DORDER_HOLD";
@@ -4401,7 +4458,7 @@ const char *getDroidOrderKey(DROID_ORDER order)
 	case DORDER_PATROL:                   return "P";
 	case DORDER_REARM:                    return "RE";
 	case DORDER_RECOVER:                  return "RCV";
-	case DORDER_UNUSED_6:                 return "Err";
+	case DORDER_EARTHWORK:                return "E";
 	case DORDER_RTR_SPECIFIED:            return "RTR";
 	case DORDER_CIRCLE:                   return "C";
 	case DORDER_HOLD:                     return "H";

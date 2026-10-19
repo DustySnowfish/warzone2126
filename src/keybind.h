@@ -150,6 +150,11 @@ void kf_ResearchTreeSelectPrevious();
 void kf_ResearchTreeNextPerspective();
 void kf_ResearchTreePreviousPerspective();
 void kf_ToggleShakeStatus();
+// Warzone 2126 earthworks: selected trucks raise or lower a 3x3 tile area under the mouse
+void kf_EarthworkRaise();
+void kf_EarthworkLower();
+void kf_EarthworkRaiseQueued();
+void kf_EarthworkLowerQueued();
 void kf_ToggleMouseInvert();
 void kf_BifferBaker();
 void kf_SetDifficultyLevel(const DIFFICULTY_LEVEL level);

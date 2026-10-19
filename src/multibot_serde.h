@@ -108,7 +108,11 @@ struct QueuedDroidInfo
 					return direction < z.direction ? -1 : 1;
 				}
 			}
-			if (order == DORDER_LINEBUILD)
+			if (order == DORDER_EARTHWORK && direction != z.direction)
+			{
+				return direction < z.direction ? -1 : 1;
+			}
+			if (order == DORDER_LINEBUILD || order == DORDER_EARTHWORK)
 			{
 				if (pos2.x != z.pos2.x)
 				{
@@ -207,9 +211,13 @@ inline void NETQueuedDroidInfo(SerdeContext& c, typename SerdeFnArgT<SerdeContex
 			NETuint32_t(c, info.structRef);
 			NETuint16_t(c, info.direction);
 		}
-		if (info.order == DORDER_LINEBUILD)
+		if (info.order == DORDER_LINEBUILD || info.order == DORDER_EARTHWORK)
 		{
 			NETVector2i(c, info.pos2);
+		}
+		if (info.order == DORDER_EARTHWORK)
+		{
+			NETuint16_t(c, info.direction);
 		}
 		if (info.order == DORDER_BUILDMODULE)
 		{
