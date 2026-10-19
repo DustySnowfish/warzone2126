@@ -37,6 +37,7 @@
 #include <wzmaplib/map.h>
 
 #include "map.h"
+#include "terrain_deform.h"
 #include "corridor_map.h"
 #include "terrain.h"
 #include "hci.h"
@@ -1540,6 +1541,7 @@ bool mapShutdown()
 	fpathActiveBackend().waitForIdle();
 
 	mapDecals = nullptr;
+	terrain_deform::reset();
 	free(floodbucket);
 	gwShutDown(gameWorld.map);
 	gameWorld.map = {};

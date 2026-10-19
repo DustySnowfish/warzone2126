@@ -733,7 +733,9 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 			if (layer.ground)
 			{
 				// Rest on the terrain just under the effect (render z is minus the map y)
-				p.position.y = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(p.position.x), static_cast<int>(-p.position.z))) + 3.f;
+				const int gx = std::max(0, std::min(static_cast<int>(p.position.x), world_coord(gameWorld.map.width) - 1));
+				const int gy = std::max(0, std::min(static_cast<int>(-p.position.z), world_coord(gameWorld.map.height) - 1));
+				p.position.y = static_cast<float>(map_Height(gameWorld.map, gx, gy)) + 3.f;
 				p.velocity = glm::vec3(0.f);
 			}
 			s.alive.push_back(p);
@@ -825,6 +827,10 @@ void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, f
 	}
 	gfx_api::ParticleInstance inst;
 	const glm::vec3 p = toRender(position);
+	if (!worldOnMap(gameWorld.map, static_cast<int>(position.x), static_cast<int>(position.y)))
+	{
+		return;
+	}
 	const float ground = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(position.x), static_cast<int>(position.y)));
 	inst.positionSize = glm::vec4(p.x, ground + 3.f, p.z, diameter);
 	inst.colour = glm::vec4(rgb, alpha);

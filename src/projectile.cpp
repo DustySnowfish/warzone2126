@@ -46,6 +46,7 @@
 #include "order.h"
 #include "projectile.h"
 #include "particles.h"
+#include "terrain_deform.h"
 #include "visibility.h"
 #include "group.h"
 #include "cmddroid.h"
@@ -1247,6 +1248,9 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 	{
 		tileSetFire(gameWorld.map, psObj->pos.x, psObj->pos.y, psStats->upgrade[psObj->player].periodicalDamageTime);
 	}
+
+	// Warzone 2126: heavy artillery, bombs and the laser satellite leave craters (game state, synchronised)
+	terrain_deform::projectileImpact(gameWorld, psStats, psObj->player, psObj->pos);
 
 	// Set the effects position and radius
 	position.x = psObj->pos.x;
