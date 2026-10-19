@@ -81,6 +81,13 @@ out vec4 FragColor;
 #include "light.glsl"
 #include "pointlights.frag"
 
+#define WZ_TEXARR(tex, uvw) texture2DArray(tex, uvw, WZ_MIP_LOAD_BIAS)
+#define WZ_GROUND_NO(i) fgrounds[i]
+#define WZ_GROUND_WEIGHT(i) fgroundWeights[i]
+#define WZ_UV_GROUND uvGround
+#define WZ_POS_MODEL posModelSpace
+#include "terrain_ground_2126.glsl"
+
 vec3 getGroundUv(int i) {
 	uint groundNo = fgrounds[i];
 	return vec3(uvGround * groundScale[groundNo/4u][groundNo%4u], float(groundNo));
@@ -154,18 +161,15 @@ vec4 doBumpMapping(BumpData b, vec3 groundLightDir, vec3 groundHalfVec) {
 
 vec4 main_bumpMapping() {
 	BumpData bump;
-	bump.color = vec4(0.f);
-	bump.N = vec3(0.f);
-	bump.gloss = 0.f;
-	getGroundBM(0, bump);
-	getGroundBM(1, bump);
-	getGroundBM(2, bump);
-	getGroundBM(3, bump);
+	// Warzone 2126: height blending, cliff side projection and anti-tiling
+	wz2126SampleGround(bump.color, bump.N, bump.gloss);
 
 	if (tile >= 0) {
 		vec3 uv = vec3(uvDecal, float(tile));
 		vec4 decalColor = texture2DArray(decalTex, uv, WZ_MIP_LOAD_BIAS);
 		float a = decalColor.a;
+		// Warzone 2126: painted decals stretch on steep faces; let the side-projected ground show there
+		a *= wz2126DecalSlopeFade();
 		// blend color, normal and gloss with ground ones based on alpha
 		bump.color = (1.f - a)*bump.color + a*vec4(decalColor.rgb, 1.f);
 		vec3 n = texture2DArray(decalNormal, uv, WZ_MIP_LOAD_BIAS).xyz;
