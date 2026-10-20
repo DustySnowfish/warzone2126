@@ -87,19 +87,22 @@
 			"ground": "dust_wheels",
 			"water": "spray_hover",
 			"spacing": 48,
-			"minSpeed": 60
+			"minSpeed": 60,
+			"marks": "marks_wheels"
 		},
 		"half-tracked": {
 			"ground": "dust_halftracks",
 			"water": "spray_hover",
 			"spacing": 44,
-			"minSpeed": 50
+			"minSpeed": 50,
+			"marks": "marks_halftracks"
 		},
 		"tracked": {
 			"ground": "dust_tracks",
 			"water": "spray_hover",
 			"spacing": 40,
-			"minSpeed": 40
+			"minSpeed": 40,
+			"marks": "marks_tracks"
 		},
 		"hover": {
 			"ground": "dust_hover",

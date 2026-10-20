@@ -66,6 +66,8 @@ namespace
 constexpr const char* kEffectsFile = "effects/particles.json";
 constexpr const char* kWeaponFile = "effects/weapon_vfx.json";
 constexpr size_t kMaxParticles = 24000;
+// Long-lived ground marks (tracks, scorches) may use at most this many of them
+constexpr size_t kMaxGroundMarks = 7000;
 constexpr size_t kMaxLights = 96;
 constexpr int kAtlasColumns = 8;
 constexpr int kAtlasRows = 4;
@@ -95,6 +97,8 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "debris", { 16, 4 } },
 		{ "scorch", { 20, 3 } },
 		{ "select", { 23, 1 } },
+		{ "tracks", { 24, 1 } },
+		{ "tyres", { 25, 1 } },
 	};
 	return sets;
 }
@@ -136,6 +140,8 @@ struct Layer
 	float offset = 0.f;              // spawn radius
 	float rise = 0.f;                // constant upward speed added (buoyant smoke)
 	bool ground = false;             // lies flat on the terrain (scorch marks) instead of facing the camera
+	bool align = false;              // ground layers: turned to the effect's direction (track marks)
+	float bounce = -1.f;             // >= 0: collides with the terrain and bounces back this fraction of its speed
 };
 
 struct LightDef
@@ -171,6 +177,7 @@ struct PropulsionVfx
 {
 	std::string ground;      // effect on land
 	std::string water;       // effect over water
+	std::string marks;       // ground marks left behind (tracks, tyre marks), at every puff
 	float spacing = 40.f;    // game units travelled between puffs
 	float minSpeed = 40.f;   // below this speed (game units per second) nothing is emitted
 };
@@ -222,6 +229,7 @@ struct State
 	std::unordered_map<uint32_t, TrailState> trails;
 	std::unordered_map<uint32_t, TrailState> vehicleTrails;
 	std::vector<gfx_api::ParticleInstance> frameRings; // drawn this frame only (selection rings)
+	size_t groundMarks = 0;                            // live particles of ground layers
 	std::unordered_map<std::string, PropulsionVfx> byPropulsion;
 	uint32_t frameCounter = 0;
 	std::mt19937 rng { 2126u };
@@ -373,6 +381,8 @@ Layer parseLayer(const nlohmann::json& j, const std::string& effectName)
 		l.colour.push_back(ColourKey());
 	}
 	l.ground = j.value("orient", std::string("camera")) == "ground";
+	l.align = j.value("align", false);
+	l.bounce = readFloat(j, "bounce", -1.f);
 	l.rotation = readRange(j, "rotation", l.rotation);
 	l.spin = readRange(j, "spin", l.spin);
 	l.stretch = readFloat(j, "stretch", 0.f);
@@ -484,6 +494,7 @@ bool loadDefinitions()
 				PropulsionVfx v;
 				v.ground = it.value().value("ground", std::string());
 				v.water = it.value().value("water", std::string());
+				v.marks = it.value().value("marks", std::string());
 				v.spacing = std::max(4.f, readFloat(it.value(), "spacing", v.spacing));
 				v.minSpeed = std::max(0.f, readFloat(it.value(), "minSpeed", v.minSpeed));
 				s.byPropulsion.emplace(it.key(), v);
@@ -612,6 +623,18 @@ float frameAlpha(int frame, float u, float v)
 		const float radius = 0.45f + 0.35f * valueNoise(angle * 1.3f + 10.f, static_cast<float>(frame), frame * 3);
 		return 1.f - smoothstep(radius - 0.04f, radius, r);
 	}
+	case 24: case 25: // track marks (two treaded bands) and tyre marks (two thin bands), along u
+	{
+		const bool treads = frame == 24;
+		const float bandCentre = treads ? 0.5f : 0.45f;
+		const float bandHalf = treads ? 0.2f : 0.09f;
+		const float d = std::abs(std::abs(v) - bandCentre);
+		const float band = 1.f - smoothstep(bandHalf * 0.7f, bandHalf, d);
+		// Tread bars across the band, and soft ends so marks overlap into a continuous trail
+		const float tread = treads ? 0.65f + 0.35f * std::cos(u * 3.14159f * 7.f) : 1.f;
+		const float ends = 1.f - smoothstep(0.75f, 1.f, std::abs(u));
+		return band * tread * ends;
+	}
 	case 23: // selection / order ring: soft band with a faint inner glow
 	{
 		const float band = std::exp(-(r - 0.78f) * (r - 0.78f) * 260.f);
@@ -710,6 +733,10 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 		const int count = static_cast<int>(std::lround(pick(layer.count)));
 		for (int i = 0; i < count && s.alive.size() < kMaxParticles; ++i)
 		{
+			if (layer.ground && s.groundMarks >= kMaxGroundMarks)
+			{
+				break;
+			}
 			glm::vec3 d;
 			switch (layer.direction)
 			{
@@ -732,6 +759,12 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 			p.layer = &layer;
 			if (layer.ground)
 			{
+				++s.groundMarks;
+				if (layer.align && dirLen > 1e-4f)
+				{
+					p.rotation = std::atan2(axis.z, axis.x);
+					p.spin = 0.f;
+				}
 				// Rest on the terrain just under the effect (render z is minus the map y)
 				const int gx = std::max(0, std::min(static_cast<int>(p.position.x), world_coord(gameWorld.map.width) - 1));
 				const int gy = std::max(0, std::min(static_cast<int>(-p.position.z), world_coord(gameWorld.map.height) - 1));
@@ -817,6 +850,8 @@ void clear()
 	s.alive.clear();
 	s.lights.clear();
 	s.trails.clear();
+	s.vehicleTrails.clear();
+	s.groundMarks = 0;
 }
 
 void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha)
@@ -880,14 +915,23 @@ void vehicleMoving(uint32_t id, const char* propulsion, const Vector3f& position
 	TrailState& t = it->second;
 	const glm::vec3 delta = pos - t.last;
 	const float dist = glm::length(delta);
-	if (!effect.empty() && speed >= vfx.minSpeed && dist > 1e-3f && dist < 512.f)
+	const bool dusty = !effect.empty() && speed >= vfx.minSpeed;
+	const bool marking = !vfx.marks.empty() && !overWater;
+	if ((dusty || marking) && dist > 1e-3f && dist < 512.f)
 	{
 		const glm::vec3 dir = delta / dist;
 		float along = vfx.spacing - t.carry;
 		int guard = 0;
 		while (along <= dist && guard++ < 8)
 		{
-			spawnNamed(effect, t.last + dir * along, -dir, scale);
+			if (dusty)
+			{
+				spawnNamed(effect, t.last + dir * along, -dir, scale);
+			}
+			if (marking)
+			{
+				spawnNamed(vfx.marks, t.last + dir * along, dir, scale);
+			}
 			along += vfx.spacing;
 		}
 		t.carry = dist - (along - vfx.spacing);
@@ -978,6 +1022,10 @@ void update(LightingData& lightData)
 			p.age += dt;
 			if (p.age >= p.life)
 			{
+				if (p.layer->ground && s.groundMarks > 0)
+				{
+					--s.groundMarks;
+				}
 				p = s.alive.back();
 				s.alive.pop_back();
 				continue;
@@ -990,6 +1038,26 @@ void update(LightingData& lightData)
 			p.velocity.y -= layer.gravity * p.scale * dt;
 			p.position += p.velocity * dt;
 			p.rotation += p.spin * dt;
+			if (layer.bounce >= 0.f && p.velocity.y < 0.f)
+			{
+				// Debris lands on the terrain (render z is minus the map y) and bounces, skids and rolls
+				const int gx = std::max(0, std::min(static_cast<int>(p.position.x), world_coord(gameWorld.map.width) - 1));
+				const int gy = std::max(0, std::min(static_cast<int>(-p.position.z), world_coord(gameWorld.map.height) - 1));
+				const float ground = static_cast<float>(map_Height(gameWorld.map, gx, gy)) + p.sizeStart * 0.3f;
+				if (p.position.y < ground)
+				{
+					p.position.y = ground;
+					p.velocity.y = -p.velocity.y * layer.bounce;
+					p.velocity.x *= 0.55f;
+					p.velocity.z *= 0.55f;
+					p.spin *= 0.6f;
+					if (std::abs(p.velocity.y) < 30.f)
+					{
+						p.velocity = glm::vec3(0.f); // at rest
+						p.spin = 0.f;
+					}
+				}
+			}
 			++i;
 		}
 		for (size_t i = 0; i < s.lights.size();)

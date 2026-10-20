@@ -23,6 +23,8 @@
 */
 
 #include "lib/framework/frame.h"
+
+#include <unordered_map>
 #include "lib/ivis_opengl/piematrix.h"
 #include "lib/ivis_opengl/ivisdef.h"
 #include "lib/netplay/netplay.h"
@@ -30,6 +32,7 @@
 #include "action.h"
 #include "component.h"
 #include "particles.h"
+#include "wreck_physics.h"
 #include "display3d.h"
 #include "lib/ivis_opengl/pielighting.h"
 #include "warzoneconfig.h"
@@ -1007,6 +1010,83 @@ void displayComponentButtonObject(const DROID *psDroid, const Vector3i *Rotation
 
 /* Assumes matrix context is already set */
 // multiple turrets display removed the pointless mountRotation
+// Warzone 2126 suspension: a spring-damped hull pitch and roll on top of the terrain angle, driven
+// by acceleration, braking and weapon recoil. Display only (graphics time, no game state).
+namespace
+{
+struct HullSpring
+{
+	float pitch = 0.f, pitchVel = 0.f; // degrees, degrees per second (rotation about X: positive tips the nose down)
+	float roll = 0.f, rollVel = 0.f;
+	float lastSpeed = 0.f;
+	uint32_t lastTime = 0;
+	uint32_t lastShot = 0;
+};
+std::unordered_map<uint32_t, HullSpring> hullSprings;
+
+float recoilKick(const WEAPON_STATS* weapon)
+{
+	switch (weapon->weaponSubClass)
+	{
+	case WSC_CANNON: case WSC_GAUSS: case WSC_HOWITZERS: case WSC_MORTARS: return 2.2f;
+	case WSC_ROCKET: case WSC_SLOWROCKET: case WSC_MISSILE: case WSC_SLOWMISSILE: return 0.6f;
+	case WSC_MGUN: case WSC_AAGUN: return 0.25f;
+	default: return 0.4f;
+	}
+}
+
+glm::mat4 hullSuspension(const DROID* psDroid)
+{
+	const PROPULSION_TYPE propulsion = psDroid->getPropulsionStats()->propulsionType;
+	if (psDroid->isFlying() || propulsion == PROPULSION_TYPE_LEGGED || psDroid->isTransporter())
+	{
+		return glm::mat4(1.f);
+	}
+	if (hullSprings.size() > 4096)
+	{
+		hullSprings.clear(); // droids come and go; drop stale entries now and then
+	}
+	HullSpring& h = hullSprings[psDroid->id];
+	const float speed = static_cast<float>(psDroid->sMove.speed);
+	if (h.lastTime == 0 || graphicsTime < h.lastTime)
+	{
+		h.lastTime = graphicsTime;
+		h.lastSpeed = speed;
+	}
+	const float dt = std::min(0.1f, static_cast<float>(graphicsTime - h.lastTime) / 1000.f);
+	if (dt > 0.f)
+	{
+		// Accelerating squats the rear (nose up), braking dips the nose
+		const float accel = (speed - h.lastSpeed) / dt;
+		// (a positive rotation about X tips the nose down, so accelerating needs a negative pitch)
+		const float target = std::max(-3.5f, std::min(3.5f, -accel * 0.012f));
+		// Weapon recoil: a kick away from where the turret points
+		if (psDroid->numWeaps > 0 && psDroid->asWeaps[0].nStat > 0)
+		{
+			const uint32_t fired = psDroid->asWeaps[0].lastFired;
+			if (fired != h.lastShot && fired > h.lastTime - std::min(h.lastTime, 200u) && fired <= graphicsTime)
+			{
+				h.lastShot = fired;
+				const float kick = recoilKick(psDroid->getWeaponStats(0)) * 60.f;
+				const float yaw = UNDEG(psDroid->asWeaps[0].rot.direction);
+				h.pitchVel -= kick * std::cos(yaw); // firing forwards lifts the nose
+				h.rollVel -= kick * std::sin(yaw);
+			}
+		}
+		// Springs: underdamped, so a hard kick rocks once or twice and settles
+		const float k = 70.f;
+		const float c = 7.f;
+		h.pitchVel += (-k * (h.pitch - target) - c * h.pitchVel) * dt;
+		h.rollVel += (-k * h.roll - c * h.rollVel) * dt;
+		h.pitch = std::max(-6.f, std::min(6.f, h.pitch + h.pitchVel * dt));
+		h.roll = std::max(-5.f, std::min(5.f, h.roll + h.rollVel * dt));
+		h.lastSpeed = speed;
+		h.lastTime = graphicsTime;
+	}
+	return glm::rotate(glm::radians(h.pitch), glm::vec3(1.f, 0.f, 0.f)) * glm::rotate(glm::radians(h.roll), glm::vec3(0.f, 0.f, 1.f));
+}
+}
+
 void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const glm::mat4 &perspectiveViewMatrix)
 {
 	Vector3i position, rotation;
@@ -1052,7 +1132,8 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 	glm::mat4 modelMatrix = glm::translate(glm::vec3(position)) *
 		glm::rotate(UNDEG(rotation.y), glm::vec3(0.f, 1.f, 0.f)) *
 		glm::rotate(UNDEG(rotation.x), glm::vec3(1.f, 0.f, 0.f)) *
-		glm::rotate(UNDEG(rotation.z), glm::vec3(0.f, 0.f, 1.f));
+		glm::rotate(UNDEG(rotation.z), glm::vec3(0.f, 0.f, 1.f)) *
+		hullSuspension(psDroid);
 
 	if (psDroid->timeLastHit - graphicsTime < ELEC_DAMAGE_DURATION && psDroid->lastHitWeapon == WSC_ELECTRONIC)
 	{
@@ -1103,6 +1184,12 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 
 void destroyFXDroid(DROID *psDroid, unsigned impactTime, Vector3f &velocity)
 {
+	// Warzone 2126: vehicles break into physical pieces instead of the classic flying bits
+	if (!psDroid->isCyborg() && !psDroid->isTransporter() && psDroid->droidType != DROID_PERSON)
+	{
+		wreck_physics::droidDestroyed(psDroid);
+		return;
+	}
 	for (int i = 0; i < 5; ++i)
 	{
 		const iIMDBaseShape *psImd = nullptr;
