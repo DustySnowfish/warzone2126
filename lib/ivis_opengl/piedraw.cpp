@@ -549,9 +549,17 @@ PIELIGHT straightAlphaToPremultiplied(PIELIGHT colour)
 	return colour;
 }
 
+// Warzone 2126 hit feedback: flash strength (0-255) applied to the shapes drawn while it is set
+static int currentHitFlash = 0;
+
+void pie_SetHitFlash(float strength)
+{
+	currentHitFlash = static_cast<int>(std::max(0.f, std::min(1.f, strength)) * 255.f + 0.5f);
+}
+
 static inline gfx_api::Draw3DShapePerInstanceInterleavedData GenerateInstanceData(int frame, PIELIGHT colour, PIELIGHT teamcolour, int pieFlag, int pieFlagData, glm::mat4 const &modelMatrix, float stretchDepth)
 {
-	int ecmState = (pieFlag & pie_ECM) ? 1 : 0;
+	int ecmState = ((pieFlag & pie_ECM) ? 1 : 0) + 2 * currentHitFlash; // unpacked in tcmask_instanced.frag
 
 	/* Set translucency */
 	if (pieFlag & pie_ADDITIVE)

@@ -97,6 +97,7 @@
 #include "taa.h"
 #include "particles.h"
 #include "wreck_physics.h"
+#include "hit_feedback.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1590,6 +1591,7 @@ bool init3DView()
 	// Warzone 2126: particle effects (definitions re-read each level, so they can be tuned between games)
 	particles::initialise();
 	wreck_physics::clear();
+	hit_feedback::clear();
 
 	return true;
 }
@@ -1630,6 +1632,7 @@ void shutdown3DView_FullReset()
 	environment_light::shutdown();
 	particles::shutdown();
 	wreck_physics::clear();
+	hit_feedback::clear();
 	range_rings::shutdown();
 
 	setLightingManager(nullptr);
@@ -2982,6 +2985,7 @@ void renderStructure(STRUCTURE *psStructure, const glm::mat4 &viewMatrix, const 
 	MAPTILE *psTile = worldTile(gameWorld.map, psStructure->pos.x, psStructure->pos.y);
 
 	glm::mat4 modelMatrix = glm::translate(glm::vec3(dv)) * glm::rotate(UNDEG(-psStructure->rot.direction), glm::vec3(0.f, 1.f, 0.f));
+	const hit_feedback::ScopedFlash hitFlash(psStructure, psStructure->body, psStructure->structureBody()); // Warzone 2126
 
 	if (psStructure->pStructureType->type == REF_WALL || psStructure->pStructureType->type == REF_WALLCORNER
 	    || psStructure->pStructureType->type == REF_GATE)
@@ -3386,6 +3390,50 @@ static void drawStructureTargetOriginIcon(STRUCTURE *psStruct, int weapon_slot)
 }
 
 /// draw the health bar for the specified structure
+// Warzone 2126 health bar: thicker, smooth green-amber-red colour, quarter ticks, and a pale
+// "recent damage" trail that holds for a moment after a hit and then drains (hit_feedback).
+static PIELIGHT healthBarColour(float f)
+{
+	const glm::vec3 red(225.f, 55.f, 40.f), amber(240.f, 190.f, 45.f), green(85.f, 215.f, 75.f);
+	const glm::vec3 c = (f < 0.5f) ? glm::mix(red, amber, std::max(0.f, f) * 2.f) : glm::mix(amber, green, (std::min(1.f, f) - 0.5f) * 2.f);
+	return pal_RGBA(static_cast<UBYTE>(c.r), static_cast<UBYTE>(c.g), static_cast<UBYTE>(c.b), 255);
+}
+
+static void queueHealthBar(float left, float top, float width, float fraction, float trail, float cap, BatchedMultiRectRenderer& batchedMultiRectRenderer, size_t rectGroup)
+{
+	constexpr float h = 4.f;
+	fraction = std::max(0.f, std::min(cap, fraction));
+	trail = std::max(fraction, std::min(cap, trail));
+	batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(left - 1.f, top - 1.f, left + width + 1.f, top + h + 1.f, pal_RGBA(0, 0, 0, 190)), rectGroup);
+	if (cap < 1.f)
+	{
+		// Unbuilt part of a structure
+		batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(left + width * cap, top, left + width, top + h, pal_RGBA(60, 60, 60, 160)), rectGroup);
+	}
+	if (trail > fraction)
+	{
+		batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(left + width * fraction, top, left + width * trail, top + h, pal_RGBA(255, 238, 200, 235)), rectGroup);
+	}
+	if (fraction > 0.f)
+	{
+		const PIELIGHT c = healthBarColour(fraction);
+		PIELIGHT shade = c;
+		shade.byte.r = static_cast<UBYTE>(c.byte.r * 0.62f);
+		shade.byte.g = static_cast<UBYTE>(c.byte.g * 0.62f);
+		shade.byte.b = static_cast<UBYTE>(c.byte.b * 0.62f);
+		batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(left, top, left + width * fraction, top + h - 1.f, c), rectGroup);
+		batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(left, top + h - 1.f, left + width * fraction, top + h, shade), rectGroup);
+	}
+	if (width >= 40.f)
+	{
+		for (int q = 1; q < 4; ++q)
+		{
+			const float x = std::floor(left + width * 0.25f * static_cast<float>(q));
+			batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(x, top, x + 1.f, top + h, pal_RGBA(0, 0, 0, 120)), rectGroup);
+		}
+	}
+}
+
 static void queueStructureHealth(STRUCTURE *psStruct, BatchedMultiRectRenderer& batchedMultiRectRenderer, size_t rectGroup)
 {
 	int32_t		scrX, scrY, scrR;
@@ -3437,11 +3485,12 @@ static void queueStructureHealth(STRUCTURE *psStruct, BatchedMultiRectRenderer& 
 		powerCol = WZCOL_HEALTH_LOW;
 		powerColShadow = WZCOL_HEALTH_LOW_SHADOW;
 	}
-	health = (((width * 10000) / 100) * health) / 10000;
-	health *= 2;
-	batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(scrX - scrR - 1, scrY - 1, scrX - scrR + 2 * width + 1, scrY + 3, WZCOL_RELOAD_BACKGROUND), rectGroup);
-	batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(scrX - scrR, scrY, scrX - scrR + health, scrY + 1, powerCol), rectGroup);
-	batchedMultiRectRenderer.addRectF(PIERECT_DrawRequest_f(scrX - scrR, scrY + 1, scrX - scrR + health, scrY + 2, powerColShadow), rectGroup);
+	(void)powerCol;
+	(void)powerColShadow;
+	const float cap = scrR > 0 ? std::min(1.f, static_cast<float>(width) / static_cast<float>(scrR)) : 1.f;
+	const float fraction = static_cast<float>(health) / 100.f * cap;
+	const float trail = ctrlShiftDown() ? fraction : hit_feedback::trailFraction(psStruct, fraction) ;
+	queueHealthBar(static_cast<float>(scrX - scrR), static_cast<float>(scrY - 1), static_cast<float>(2 * scrR), fraction, trail, cap, batchedMultiRectRenderer, rectGroup);
 }
 
 /// draw the construction bar for the specified structure
@@ -3606,10 +3655,15 @@ static void queueDroidPowerBarsRects(DROID *psDroid, bool drawBox, BatchedMultiR
 		batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(psDroid->sDisplay.screenX + psDroid->sDisplay.screenR, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR - 7, psDroid->sDisplay.screenX + psDroid->sDisplay.screenR + 1, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 1, WZCOL_WHITE), rectGroup);
 	}
 
-	/* Power bars */
-	batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(psDroid->sDisplay.screenX - psDroid->sDisplay.screenR - 1, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 2, psDroid->sDisplay.screenX + psDroid->sDisplay.screenR + 1, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 6, WZCOL_RELOAD_BACKGROUND), rectGroup);
-	batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(psDroid->sDisplay.screenX - psDroid->sDisplay.screenR, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 3, psDroid->sDisplay.screenX - psDroid->sDisplay.screenR + damage, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 4, powerCol), rectGroup);
-	batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(psDroid->sDisplay.screenX - psDroid->sDisplay.screenR, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 4, psDroid->sDisplay.screenX - psDroid->sDisplay.screenR + damage, psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 5, powerColShadow), rectGroup);
+	/* Power bars (Warzone 2126 health bar) */
+	(void)powerCol;
+	(void)powerColShadow;
+	(void)damage;
+	{
+		const float fraction = psDroid->originalBody > 0 ? std::min(1.f, static_cast<float>(psDroid->body) / static_cast<float>(psDroid->originalBody)) : 1.f;
+		queueHealthBar(static_cast<float>(psDroid->sDisplay.screenX - psDroid->sDisplay.screenR), static_cast<float>(psDroid->sDisplay.screenY + psDroid->sDisplay.screenR + 3),
+		               static_cast<float>(2 * psDroid->sDisplay.screenR), fraction, hit_feedback::trailFraction(psDroid, fraction), 1.f, batchedMultiRectRenderer, rectGroup);
+	}
 	batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(
 		psDroid->sDisplay.screenX - psDroid->sDisplay.screenR - 3,
 		psDroid->sDisplay.screenY + psDroid->sDisplay.screenR,
@@ -3699,10 +3753,14 @@ static void queueDroidEnemyHealthBarsRects(DROID *psDroid, BatchedMultiRectRende
 	{
 		boxCol = WZCOL_WHITE;
 
-		/* Power bars */
-		batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(scrX - scrR - 1, scrY + scrR + 2, scrX + scrR + 1, scrY + scrR + 6, WZCOL_RELOAD_BACKGROUND), rectGroup);
-		batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(scrX - scrR, scrY + scrR + 3, scrX - scrR + damage, scrY + scrR + 4, powerCol), rectGroup);
-		batchedMultiRectRenderer.addRect(PIERECT_DrawRequest(scrX - scrR, scrY + scrR + 4, scrX - scrR + damage, scrY + scrR + 5, powerColShadow), rectGroup);
+		/* Power bars (Warzone 2126 health bar) */
+		(void)boxCol;
+		(void)powerColShadow;
+		(void)powerCol;
+		(void)damage;
+		const float fraction = std::max(0.f, std::min(1.f, mulH));
+		const float trail = ctrlShiftDown() ? fraction : hit_feedback::trailFraction(psDroid, fraction);
+		queueHealthBar(static_cast<float>(scrX - scrR), static_cast<float>(scrY + scrR + 3), static_cast<float>(2 * scrR), fraction, trail, 1.f, batchedMultiRectRenderer, rectGroup);
 	}
 }
 

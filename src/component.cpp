@@ -33,6 +33,7 @@
 #include "component.h"
 #include "particles.h"
 #include "wreck_physics.h"
+#include "hit_feedback.h"
 #include "display3d.h"
 #include "lib/ivis_opengl/pielighting.h"
 #include "warzoneconfig.h"
@@ -1091,6 +1092,7 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 {
 	Vector3i position, rotation;
 	Spacetime st = interpolateObjectSpacetime(psDroid, graphicsTime);
+	const hit_feedback::ScopedFlash hitFlash(psDroid, psDroid->body, psDroid->originalBody); // Warzone 2126
 
 	leftFirst = angleDelta(playerPos.r.y - st.rot.direction) <= 0;
 

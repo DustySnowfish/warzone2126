@@ -87,7 +87,10 @@ void main()
 {
 	// unpack inputs
 	vec2 texCoord = vec2(packed_ecmState_alphaTest_texCoord.z, packed_ecmState_alphaTest_texCoord.w);
-	bool ecmEffect = (packed_ecmState_alphaTest_texCoord.x > 0.f);
+	// Warzone 2126: .x packs the ECM flag (bit 0) and the hit flash (0-255) as ecm + 2 * flash
+	float ecmPacked = packed_ecmState_alphaTest_texCoord.x;
+	bool ecmEffect = (mod(ecmPacked, 2.0) > 0.5);
+	float hitFlash = floor(ecmPacked * 0.5 + 0.01) / 255.0;
 	bool alphaTest = (packed_ecmState_alphaTest_texCoord.y > 0.f);
 
 	vec4 diffuseMap = texture(Texture, texCoord, WZ_MIP_LOAD_BIAS);
@@ -195,6 +198,14 @@ void main()
 	if (ecmEffect)
 	{
 		fragColour.a = 0.66 + 0.66 * graphicsCycle;
+	}
+
+	if (hitFlash > 0.0)
+	{
+		// Warzone 2126 hit feedback: a short hot flash, brightest at the silhouette, that blooms with HDR on
+		float facing = abs(dot(N, normalize(cameraPos.xyz - posModelSpace)));
+		float rim = 1.0 - facing;
+		fragColour.rgb += hitFlash * vec3(1.0, 0.82, 0.62) * (0.45 + 1.4 * rim * rim);
 	}
 
 	if (shieldEffect != 0)

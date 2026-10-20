@@ -47,6 +47,8 @@ struct iIMDShape;
  *	Global ProtoTypes
  */
 /***************************************************************************/
+/// Warzone 2126 hit feedback: flash (0-1) for the shapes drawn until it is set back to 0
+void pie_SetHitFlash(float strength);
 bool pie_Draw3DShape(const iIMDShape *shape, int frame, int team, PIELIGHT colour, int pieFlag, int pieFlagData, const glm::mat4 &modelMatrix, const glm::mat4 &viewMatrix, float stretchDepth = 0.f, bool onlySingleLevel = false);
 void pie_Draw3DButton(const iIMDShape *shape, PIELIGHT teamcolour, const glm::mat4 &modelMatrix, const glm::mat4 &viewMatrix);
 
