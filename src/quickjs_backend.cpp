@@ -3747,6 +3747,7 @@ IMPL_JS_FUNC(orderDroid, wzapi::orderDroid)
 IMPL_JS_FUNC(orderDroidObj, wzapi::orderDroidObj)
 IMPL_JS_FUNC(orderDroidBuild, wzapi::orderDroidBuild)
 IMPL_JS_FUNC(orderDroidLoc, wzapi::orderDroidLoc)
+IMPL_JS_FUNC(orderDroidEarthwork, wzapi::orderDroidEarthwork)
 IMPL_JS_FUNC(setMissionTime, wzapi::setMissionTime)
 IMPL_JS_FUNC(getMissionTime, wzapi::getMissionTime)
 IMPL_JS_FUNC(setTransporterExit, wzapi::setTransporterExit)
@@ -4129,6 +4130,7 @@ bool quickjs_scripting_instance::registerFunctions(const std::string& scriptName
 	JS_REGISTER_FUNC(groupAdd, 2); // scripting_engine
 	JS_REGISTER_FUNC(groupSize, 1); // scripting_engine
 	JS_REGISTER_FUNC(orderDroidLoc, 4); // WZAPI
+	JS_REGISTER_FUNC(orderDroidEarthwork, 6); // WZAPI (Warzone 2126)
 	JS_REGISTER_FUNC(playerPower, 1); // WZAPI
 	JS_REGISTER_FUNC(queuedPower, 1); // WZAPI
 	JS_REGISTER_FUNC2(isStructureAvailable, 1, 2); // WZAPI

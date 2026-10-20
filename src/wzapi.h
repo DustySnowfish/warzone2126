@@ -1055,6 +1055,7 @@ namespace wzapi
 	researchResults findResearch(WZAPI_PARAMS(std::string researchName, optional<int> _player));
 	int32_t distBetweenTwoPoints(WZAPI_PARAMS(int32_t x1, int32_t y1, int32_t x2, int32_t y2));
 	bool orderDroidLoc(WZAPI_PARAMS(DROID *psDroid, int order_, int x, int y));
+	bool orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int x2, int y2, bool lower));
 	int32_t playerPower(WZAPI_PARAMS(int player));
 	int queuedPower(WZAPI_PARAMS(int player));
 	bool isStructureAvailable(WZAPI_PARAMS(std::string structureName, optional<int> _player));

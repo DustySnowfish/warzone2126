@@ -37,7 +37,8 @@ function truckFree(truck)
 	if (truck.order === DORDER_BUILD ||
 		truck.order === DORDER_HELPBUILD ||
 		truck.order === DORDER_LINEBUILD ||
-		truck.order === DORDER_DEMOLISH)
+		truck.order === DORDER_DEMOLISH ||
+		(typeof DORDER_EARTHWORK !== "undefined" && truck.order === DORDER_EARTHWORK))
 	{
 		return false;
 	}
@@ -545,6 +546,112 @@ function buildExtras()
 	return (buildBasicStructure(structures.extras, IMPORTANCE.PEACETIME) !== BUILDRET.UNAVAILABLE);
 }
 
+
+// Warzone 2126: raise defensive ridgelines between the base and the nearest enemy.
+// Units behind a ridge are hull-down (less direct-fire damage) and hidden from sight.
+let earthworksBuilt = 0;
+
+function nearestEnemyStart()
+{
+	let best;
+	let bestDist = Infinity;
+	for (let i = 0; i < maxPlayers; ++i)
+	{
+		if (i === me || !isEnemy(i) || !defined(startPositions[i]))
+		{
+			continue;
+		}
+		const d = distanceToBase(startPositions[i]);
+		if (d < bestDist)
+		{
+			bestDist = d;
+			best = startPositions[i];
+		}
+	}
+	return best;
+}
+
+function earthworkSiteClear(x1, y1, x2, y2)
+{
+	if (x1 < 2 || y1 < 2 || x2 >= mapWidth - 2 || y2 >= mapHeight - 2)
+	{
+		return false;
+	}
+	for (let x = x1; x <= x2; ++x)
+	{
+		for (let y = y1; y <= y2; ++y)
+		{
+			if (terrainType(x, y) === TER_WATER || terrainType(x, y) === TER_CLIFFFACE)
+			{
+				return false;
+			}
+		}
+	}
+	const cx = Math.round((x1 + x2) / 2);
+	const cy = Math.round((y1 + y2) / 2);
+	// Keep clear of buildings and oil (the ground next to structures cannot move anyway)
+	return enumRange(cx, cy, 4, ALL_PLAYERS, false).filter((obj) => (
+		obj.type === STRUCTURE || (obj.type === FEATURE && obj.stattype === OIL_RESOURCE)
+	)).length === 0;
+}
+
+let earthworkAttempts = 0;
+
+function buildEarthworks()
+{
+	if (typeof orderDroidEarthwork === "undefined" || earthworksBuilt >= 4 || earthworkAttempts >= 20 || throttled(120000))
+	{
+		return false;
+	}
+	if (gameTime < 240000 || enumTrucks().length < 4)
+	{
+		return false; // get the economy going first
+	}
+	const enemy = nearestEnemyStart();
+	if (!defined(enemy))
+	{
+		return false;
+	}
+	const dx = enemy.x - baseLocation.x;
+	const dy = enemy.y - baseLocation.y;
+	const len = Math.sqrt(dx * dx + dy * dy);
+	if (len < 20)
+	{
+		return false;
+	}
+	const ux = dx / len;
+	const uy = dy / len;
+	const across = Math.abs(dx) > Math.abs(dy); // enemy mostly east or west: the ridge runs north-south
+	const side = [0, 7, -7, 14][earthworksBuilt];
+	// A ridge across the approach, 10 to 18 tiles out (at most a third of the way); later ridges to either side
+	for (let reach = Math.min(18, len / 3); reach >= Math.min(10, len / 4); reach -= 2)
+	{
+		++earthworkAttempts;
+		const cx = Math.round(baseLocation.x + ux * reach - uy * side);
+		const cy = Math.round(baseLocation.y + uy * reach + ux * side);
+		const x1 = across ? cx - 1 : cx - 3;
+		const x2 = across ? cx : cx + 3;
+		const y1 = across ? cy - 3 : cy - 1;
+		const y2 = across ? cy + 3 : cy;
+		if (!earthworkSiteClear(x1, y1, x2, y2) || !safeSpot(cx, cy))
+		{
+			continue;
+		}
+		const trucks = getTwoFreeTrucks().filter((truck) => (droidCanReach(truck, cx, cy)));
+		if (trucks.length === 0)
+		{
+			return false;
+		}
+		trucks.forEach((truck) => {
+			orderDroidEarthwork(truck, x1, y1, x2, y2, false);
+		});
+		++earthworksBuilt;
+		return true;
+	}
+	++earthworksBuilt; // no usable site on this side: move on to the next one
+	return false;
+}
+
 _global.buildDefenses = function() {
 	if (chooseObjectType() !== 2)
 	{
@@ -634,6 +741,7 @@ _global.checkConstruction = function() {
 	}
 
 	if (functionSeries("construction", [
+		buildEarthworks,
 		finishStructures,
 		buildOrder,
 		buildExpand,
@@ -642,6 +750,7 @@ _global.checkConstruction = function() {
 		buildVtols,
 		buildExtras,
 		recycleDefenses,
+		buildEarthworks,
 		buildDefenses,
 	]))
 	{

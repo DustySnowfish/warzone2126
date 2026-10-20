@@ -872,6 +872,7 @@ namespace gfx_api
 	inline constexpr char kSampler_terrainBakedHeight[] = "terrainBakedHeight";
 	inline constexpr char kSampler_terrainBakedOffset[] = "terrainBakedOffset";
 	inline constexpr char kSampler_terrainBakedNormal[] = "terrainBakedNormal";
+	inline constexpr char kSampler_terrainDeform[] = "terrainDeform"; // Warzone 2126: crater depth per tile corner
 	inline constexpr char kSampler_tex1[] = "tex1";
 	inline constexpr char kSampler_tex2[] = "tex2";
 	inline constexpr char kSampler_tex[] = "tex";

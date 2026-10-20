@@ -76,6 +76,7 @@ struct State
 	int height = 0;
 	std::vector<int32_t> originalHeights; // tile corner heights before any crater
 	unsigned craters = 0;
+	unsigned changes = 0; // display: bumped whenever a height changes
 };
 
 State s;
@@ -219,6 +220,7 @@ bool deform(GameWorld& world, int x, int y, int radius, int depth)
 			if (target != current)
 			{
 				setTileHeight(map, tx, ty, target);
+				++s.changes;
 				changed = true;
 				heightSum += target * (tx + 1) + ty;
 			}
@@ -366,6 +368,7 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 			}
 			const int next = current < target ? std::min(target, current + kEarthworkStep) : std::max(target, current - kEarthworkStep);
 			setTileHeight(map, tx, ty, next);
+			++s.changes;
 			changed = true;
 			heightSum += next * (tx + 1) + ty;
 			if (next != target)
@@ -389,6 +392,20 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 unsigned craterCount()
 {
 	return s.craters;
+}
+
+unsigned changeCount()
+{
+	return s.changes;
+}
+
+int depthBelowOriginal(const WorldMapState& map, int x, int y)
+{
+	if (s.map != &map || s.originalHeights.empty() || x < 0 || y < 0 || x >= s.width || y >= s.height)
+	{
+		return 0;
+	}
+	return std::max(0, s.originalHeights[static_cast<size_t>(x + y * s.width)] - map_TileHeight(map, x, y));
 }
 
 } // namespace terrain_deform

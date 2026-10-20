@@ -319,7 +319,13 @@ namespace gfx_api
 	texture_description<6, sampler_type::anisotropic, kSampler_decalNormal, pixel_format_target::texture_2d_array>, // decal normal
 	texture_description<7, sampler_type::anisotropic, kSampler_decalSpecular, pixel_format_target::texture_2d_array>, // decal specular
 	texture_description<8, sampler_type::anisotropic, kSampler_decalHeight, pixel_format_target::texture_2d_array>,  // decal height
-	texture_description<9, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>  // depth / shadow map
+	texture_description<9, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>,  // depth / shadow map
+	// Warzone 2126: units 10-12 are the baked terrain fields in the tessellated variant (unused here, kept so
+	// the shared fragment shaders see the crater depth texture on the same unit in both)
+	texture_description<10, sampler_type::bilinear, kSampler_terrainBakedHeight>,
+	texture_description<11, sampler_type::bilinear, kSampler_terrainBakedOffset>,
+	texture_description<12, sampler_type::bilinear, kSampler_terrainBakedNormal>,
+	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: crater depth (same layout as the lightmap)
 	>, shader>;
 
 	using TerrainCombined_Classic = TerrainCombinedTemplate<REND_ALPHA, SHADER_TERRAIN_COMBINED_CLASSIC>;
@@ -359,7 +365,8 @@ namespace gfx_api
 	texture_description<9, sampler_type::bilinear_border, kSampler_shadowMap, pixel_format_target::depth_map, border_color::opaque_white>,  // depth / shadow map
 	tess_texture_description<10, sampler_type::bilinear, kSampler_terrainBakedHeight>, // baked terrain height
 	tess_texture_description<11, sampler_type::bilinear, kSampler_terrainBakedOffset>, // baked terrain outline offset
-	tess_texture_description<12, sampler_type::bilinear, kSampler_terrainBakedNormal>  // baked terrain normal
+	tess_texture_description<12, sampler_type::bilinear, kSampler_terrainBakedNormal>,  // baked terrain normal
+	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: crater depth (same layout as the lightmap)
 	>, shader>;
 
 	using TerrainCombinedTess_Medium = TerrainCombinedTessTemplate<SHADER_TERRAIN_COMBINED_MEDIUM_TESS>;

@@ -46,6 +46,15 @@ uniform sampler2DArray decalHeight;
 
 // shadow map
 uniform sampler2DArrayShadow shadowMap;
+uniform sampler2D terrainDeform; // Warzone 2126: crater depth
+float wzCraterHash(vec2 p) { return fract(sin(dot(p, vec2(12.9898, 78.233))) * 43758.5453); }
+float wzCraterNoise(vec2 p)
+{
+	vec2 i = floor(p);
+	vec2 f = fract(p);
+	f = f * f * (3.0 - 2.0 * f);
+	return mix(mix(wzCraterHash(i), wzCraterHash(i + vec2(1.0, 0.0)), f.x), mix(wzCraterHash(i + vec2(0.0, 1.0)), wzCraterHash(i + vec2(1.0, 1.0)), f.x), f.y);
+}
 
 
 // sun light colors/intensity:
@@ -179,6 +188,22 @@ vec4 main_bumpMapping() {
 		bump.gloss = (1.f - a)*bump.gloss + a*texture2DArray(decalSpecular, uv, WZ_MIP_LOAD_BIAS).r;
 	}
 	// Every lighting term below assumes unit length - but a weighted sum of unit normals is shorter than unit when they disagree (so normalize)
+	// Warzone 2126: deep craters stay dark, churned and rough after the scorch mark fades
+	{
+		float crater = texture(terrainDeform, uvLightmap, 0.f).r;
+		if (crater > 0.02)
+		{
+			float k = smoothstep(0.04, 0.45, crater);
+			vec2 cp = posModelSpace.xz * 0.045;
+			float n = wzCraterNoise(cp);
+			float n2 = wzCraterNoise(cp * 2.7 + 3.1);
+			float clod = mix(n, n2, 0.5);
+			vec3 churned = bump.color.rgb * vec3(0.56, 0.5, 0.46) * (0.72 + 0.5 * clod);
+			bump.color.rgb = mix(bump.color.rgb, churned, k * 0.9);
+			bump.gloss *= 1.0 - 0.7 * k;
+			bump.N = mix(bump.N, normalize(bump.N + vec3(n - 0.5, n2 - 0.5, 0.0) * 0.9), k);
+		}
+	}
 	bump.N = normalize(bump.N);
 	return doBumpMapping(bump, groundLightDir, groundHalfVec);
 }

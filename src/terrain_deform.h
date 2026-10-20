@@ -68,4 +68,10 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower);
 /// Total craters dug this game (for tests and benchmarks).
 unsigned craterCount();
 
+/// Display: counter bumped whenever a terrain height changes (to refresh display data).
+unsigned changeCount();
+
+/// Display: how far (world units) a tile corner is below its original height (0 if not dug).
+int depthBelowOriginal(const WorldMapState& map, int x, int y);
+
 } // namespace terrain_deform

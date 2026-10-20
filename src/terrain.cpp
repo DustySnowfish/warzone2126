@@ -65,6 +65,7 @@
 #include "lib/framework/math_ext.h"
 
 #include "terrain.h"
+#include "terrain_deform.h"
 #include "environment_light.h"
 #include "terrain_surface.h"
 #include "terrain_bake.h"
@@ -147,6 +148,10 @@ static size_t lightmapWidth;
 static size_t lightmapHeight;
 /// Lightmap image
 static std::unique_ptr<iV_Image> lightmapPixmap;
+// Warzone 2126: crater depth below the original ground per tile corner (red channel), lightmap layout
+static gfx_api::texture* deform_texture = nullptr;
+static std::unique_ptr<iV_Image> deformPixmap;
+static unsigned deformChangeSeen = ~0u;
 /// Lightmap values
 struct LightmapCalculatedValues
 {
@@ -1723,6 +1728,18 @@ bool initTerrain(WorldMapState& mapState)
 	lightmap_texture = gfx_api::context::get().create_texture(1, lightmapPixmap->width(), lightmapPixmap->height(), lightmapPixmap->pixel_format(), "mem::lightmap");
 
 	lightmap_texture->upload(0, *(lightmapPixmap.get()));
+
+	deformPixmap = std::make_unique<iV_Image>();
+	if (deformPixmap == nullptr || !deformPixmap->allocate(lightmapWidth, lightmapHeight, 4, true))
+	{
+		debug(LOG_FATAL, "Out of memory!");
+		abort();
+		return false;
+	}
+	delete deform_texture;
+	deform_texture = gfx_api::context::get().create_texture(1, deformPixmap->width(), deformPixmap->height(), deformPixmap->pixel_format(), "mem::terraindeform");
+	deform_texture->upload(0, *(deformPixmap.get()));
+	deformChangeSeen = ~0u;
 	terrainInitialised = true;
 	debug(LOG_TERRAIN, "initTerrain took %u ms", wzGetTicks() - initStartTime);
 
@@ -1760,6 +1777,9 @@ void shutdownTerrain()
 	delete lightmap_texture;
 	lightmap_texture = nullptr;
 	lightmapPixmap = nullptr;
+	delete deform_texture;
+	deform_texture = nullptr;
+	deformPixmap = nullptr;
 
 	delete groundTexArr; groundTexArr = nullptr;
 	delete groundNormalArr; groundNormalArr = nullptr;
@@ -2038,7 +2058,7 @@ static void drawTerrainCombinedmpl(const glm::mat4 &ModelViewProjection, const g
 		lightmap_texture,
 		groundTexArr, groundNormalArr, groundSpecularArr, groundHeightArr,
 		decalTexArr, decalNormalArr, decalSpecularArr, decalHeightArr,
-		shadowMap);
+		shadowMap, nullptr, nullptr, nullptr, deform_texture);
 	PSO::get().bind_vertex_buffers(terrainDecalVBO);
 	gfx_api::context::get().bind_index_buffer(*terrainDecalIndexVBO, gfx_api::index_type::u32);
 	glm::mat4 groundScale = glm::mat4(0);
@@ -2089,7 +2109,7 @@ static void drawTerrainCombinedTessImpl(const glm::mat4 &ModelViewProjection, co
 		groundTexArr, groundNormalArr, groundSpecularArr, groundHeightArr,
 		decalTexArr, decalNormalArr, decalSpecularArr, decalHeightArr,
 		shadowMap,
-		terrainBake::heightTexture(), terrainBake::offsetTexture(), terrainBake::normalTexture());
+		terrainBake::heightTexture(), terrainBake::offsetTexture(), terrainBake::normalTexture(), deform_texture);
 	PSO::get().bind_vertex_buffers(terrainDecalVBO);
 	gfx_api::context::get().bind_index_buffer(*terrainPatchIndexVBO, gfx_api::index_type::u32);
 	glm::mat4 groundScale = glm::mat4(0);
@@ -2182,6 +2202,23 @@ void perFrameTerrainUpdates(WorldMapState& mapState, const LightMap& lightMap)
 		updateLightMap(mapState, lightMap);
 
 		lightmap_texture->upload(0, *(lightmapPixmap.get()));
+	}
+
+	// Warzone 2126: crater depth texture, refreshed when the ground changes (and at most as often as the lightmap)
+	if (deform_texture && deformPixmap && terrain_deform::changeCount() != deformChangeSeen && realTime - lightmapLastUpdate < LIGHTMAP_REFRESH / 2)
+	{
+		deformChangeSeen = terrain_deform::changeCount();
+		unsigned char* px = deformPixmap->bmp_w();
+		for (int j = 0; j < mapState.height; ++j)
+		{
+			for (int i = 0; i < mapState.width; ++i)
+			{
+				// 255 = 160 world units or more below the original ground
+				const int depth = terrain_deform::depthBelowOriginal(mapState, i, j);
+				px[(i + j * lightmapWidth) * 4 + 0] = static_cast<unsigned char>(std::min(255, depth * 255 / 160));
+			}
+		}
+		deform_texture->upload(0, *(deformPixmap.get()));
 	}
 
 	///////////////////////////////////
