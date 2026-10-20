@@ -34,12 +34,16 @@
 #include <glm/fwd.hpp>
 
 struct DROID;
+struct STRUCTURE;
 
 namespace wreck_physics
 {
 
 /// A vehicle was destroyed: break it into pieces.
 void droidDestroyed(const DROID* psDroid);
+
+/// A structure was destroyed: it collapses into the ground, throws chunks and leaves smoking rubble.
+void structureDestroyed(const STRUCTURE* psStruct);
 
 /// Advance the pieces (call once per frame).
 void update();

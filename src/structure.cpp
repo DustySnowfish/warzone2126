@@ -69,6 +69,7 @@
 #include "feature.h"
 #include "mapgrid.h"
 #include "particles.h"
+#include "wreck_physics.h"
 #include "projectile.h"
 #include "intdisplay.h"
 #include "display.h"
@@ -4065,7 +4066,20 @@ void structureUpdate(STRUCTURE *psBuilding, GameWorld& world)
 				const char* damageEffect = damage > 65536 / 2 ? "damage_fire" : "damage_smoke";
 				if (particles::hasEffect(damageEffect))
 				{
-					particles::spawn(damageEffect, Vector3f(dv.x, dv.z, dv.y), Vector3f(0.f, 0.f, 0.f), 1.5f);
+					// Warzone 2126: fires and smoke stay at fixed spots on the roof (more spots as damage grows),
+					// with a tall smoke column once the building is badly damaged
+					const int spots = 1 + std::min(2, static_cast<int>(damage * 3 / 65536));
+					const uint32_t spot = psBuilding->lastEmission / std::max<UDWORD>(1, emissionInterval) % spots;
+					uint32_t h = psBuilding->id * 2654435761u + spot * 40503u;
+					const int wx = std::max(1, static_cast<int>(widthScatter) * 2);
+					const int wy = std::max(1, static_cast<int>(breadthScatter) * 2);
+					dv.x = psBuilding->pos.x - widthScatter + static_cast<int>((h >> 4) % static_cast<uint32_t>(wx));
+					dv.z = psBuilding->pos.y - breadthScatter + static_cast<int>((h >> 14) % static_cast<uint32_t>(wy));
+					particles::spawn(damageEffect, Vector3f(dv.x, dv.z, dv.y), Vector3f(0.f, 0.f, 0.f), 1.5f + 0.5f * static_cast<float>(spot));
+					if (damage > 65536 * 2 / 3 && spot == 0 && particles::hasEffect("structure_smoke_column"))
+					{
+						particles::spawn("structure_smoke_column", Vector3f(dv.x, dv.z, dv.y + 20), Vector3f(0.f, 0.f, 0.f), 1.f);
+					}
 				}
 				else
 				{
@@ -4942,15 +4956,9 @@ bool destroyStruct(STRUCTURE *psDel, unsigned impactTime, GameWorld& world)
 			pos.y += SHOCK_WAVE_HEIGHT;
 			addEffect(&pos, EFFECT_EXPLOSION, EXPLOSION_TYPE_SHOCKWAVE, false, nullptr, 0, impactTime);
 		}
-		/* As do wall sections */
-		else if (bMinor)
-		{
-			addEffect(&pos, EFFECT_DESTRUCTION, DESTRUCTION_TYPE_WALL_SECTION, false, nullptr, 0, impactTime);
-		}
-		else // and everything else goes here.....
-		{
-			addEffect(&pos, EFFECT_DESTRUCTION, DESTRUCTION_TYPE_STRUCTURE, false, nullptr, 0, impactTime);
-		}
+		// Warzone 2126: the building collapses into the ground, throws chunks and leaves rubble
+		// (replaces the classic flying debris sprites for walls and other structures)
+		wreck_physics::structureDestroyed(psDel);
 
 		// shake the screen if we're near enough and it is explosive in nature
 		if (clipXY(pos.x, pos.z))

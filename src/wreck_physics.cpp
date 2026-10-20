@@ -34,6 +34,8 @@
 
 #include "component.h"
 #include "droid.h"
+#include "faction.h"
+#include "structure.h"
 #include "game_world.h"
 #include "map.h"
 #include "miscimd.h"
@@ -67,6 +69,8 @@ constexpr float kSinkTime = 6.f;           // seconds of sinking into the ground
 constexpr float kSinkDepth = 60.f;         // world units
 constexpr float kSmokeTime = 14.f;         // seconds a hull keeps smoking
 constexpr size_t kMaxPieces = 600;
+constexpr float kCollapseTime = 2.4f;      // seconds for a building to sink out of sight
+constexpr float kRubbleLife = 120.f;       // seconds rubble stays
 
 struct Piece
 {
@@ -81,6 +85,16 @@ struct Piece
 	bool resting = false;
 	bool smokes = false;
 	float nextSmoke = 0.f;
+	float scale = 1.f;
+	float life = kLife;
+	uint8_t shade = 150;           // brightness of the burnt tint
+	// Building collapse: sinks and leans instead of free physics
+	bool collapse = false;
+	float collapseDepth = 0.f;
+	glm::vec3 leanAxis { 1.f, 0.f, 0.f };
+	float leanAngle = 0.f;
+	float footprint = 0.f;         // half size, for dust around the base
+	float nextDust = 0.f;
 };
 
 std::vector<Piece> pieces;
@@ -103,16 +117,11 @@ float groundAt(const glm::vec3& renderPos)
 	return static_cast<float>(map_Height(gameWorld.map, x, y));
 }
 
-void addPiece(const iIMDBaseShape* base, int team, const glm::vec3& pos, const glm::quat& rot, const glm::vec3& vel, const glm::vec3& angVel, bool smokes)
+Piece* addShape(const iIMDShape* shape, int team, const glm::vec3& pos, const glm::quat& rot, const glm::vec3& vel, const glm::vec3& angVel, bool smokes, float scale = 1.f)
 {
-	if (base == nullptr || pieces.size() >= kMaxPieces)
+	if (shape == nullptr || pieces.size() >= kMaxPieces)
 	{
-		return;
-	}
-	const iIMDShape* shape = base->displayModel();
-	if (shape == nullptr)
-	{
-		return;
+		return nullptr;
 	}
 	Piece p;
 	p.shape = shape;
@@ -121,9 +130,19 @@ void addPiece(const iIMDBaseShape* base, int team, const glm::vec3& pos, const g
 	p.vel = vel;
 	p.rot = rot;
 	p.angVel = angVel;
-	p.bottom = std::max(0.f, -static_cast<float>(shape->min.y));
+	p.scale = scale;
+	p.bottom = std::max(0.f, -static_cast<float>(shape->min.y)) * scale;
 	p.smokes = smokes;
 	pieces.push_back(p);
+	return &pieces.back();
+}
+
+void addPiece(const iIMDBaseShape* base, int team, const glm::vec3& pos, const glm::quat& rot, const glm::vec3& vel, const glm::vec3& angVel, bool smokes, float scale = 1.f)
+{
+	if (base != nullptr)
+	{
+		addShape(base->displayModel(), team, pos, rot, vel, angVel, smokes, scale);
+	}
 }
 
 } // anonymous namespace
@@ -175,6 +194,72 @@ void droidDestroyed(const DROID* psDroid)
 	}
 }
 
+void structureDestroyed(const STRUCTURE* psStruct)
+{
+	if (psStruct == nullptr || !psStruct->visibleForLocalDisplay() || psStruct->sDisplay.imd == nullptr)
+	{
+		return;
+	}
+	const STRUCTURE_TYPE type = psStruct->pStructureType->type;
+	const bool wall = type == REF_WALL || type == REF_WALLCORNER || type == REF_GATE;
+	const int team = getPlayerColour(psStruct->player);
+	const glm::vec3 base(static_cast<float>(psStruct->pos.x), static_cast<float>(psStruct->pos.z), -static_cast<float>(psStruct->pos.y));
+	const float size = static_cast<float>(std::max(psStruct->pStructureType->baseWidth, psStruct->pStructureType->baseBreadth));
+	const float half = size * TILE_UNITS * 0.5f;
+	const glm::quat rot = glm::angleAxis(-UNDEG(psStruct->rot.direction), glm::vec3(0.f, 1.f, 0.f));
+
+	// The building itself sinks and leans as it collapses (it has already left the game)
+	const iIMDShape* shape = getFactionDisplayIMD(getPlayerFaction(psStruct->player), psStruct->sDisplay.imd->displayModel());
+	if (!wall && psStruct->status == SS_BUILT)
+	{
+		if (Piece* p = addShape(shape, team, base, rot, glm::vec3(0.f), glm::vec3(0.f), true))
+		{
+			p->collapse = true;
+			p->resting = true;
+			p->bottom = 0.f;
+			p->life = kCollapseTime;
+			p->shade = 200;
+			p->collapseDepth = static_cast<float>(std::max(16, shape->max.y)) * 1.1f + 8.f;
+			const float a = rand01() * 6.2832f;
+			p->leanAxis = glm::vec3(std::cos(a), 0.f, std::sin(a));
+			p->leanAngle = randRange(0.08f, 0.16f);
+			p->footprint = half;
+		}
+	}
+
+	// Chunks thrown out of the blast
+	const int chunks = wall ? 2 : std::min(10, 3 + static_cast<int>(size) * 2);
+	for (int i = 0; i < chunks; ++i)
+	{
+		const float a = rand01() * 6.2832f;
+		const float out = randRange(120.f, 320.f) * (wall ? 0.6f : 1.f);
+		addPiece(getRandomDebrisImd(), team, base + glm::vec3(randRange(-half, half) * 0.5f, 30.f, randRange(-half, half) * 0.5f),
+		         glm::angleAxis(rand01() * 6.2832f, glm::normalize(glm::vec3(rand01() - 0.5f, rand01() + 0.1f, rand01() - 0.5f))),
+		         glm::vec3(std::cos(a) * out, randRange(260.f, 520.f), std::sin(a) * out),
+		         glm::vec3(randRange(-8.f, 8.f), randRange(-8.f, 8.f), randRange(-8.f, 8.f)), i == 0 && !wall, randRange(1.2f, 2.0f));
+	}
+
+	// Rubble left on the footprint, revealed as the building sinks
+	const int rubble = wall ? 2 : std::min(14, 4 + static_cast<int>(size * size) * 2);
+	for (int i = 0; i < rubble; ++i)
+	{
+		glm::vec3 pos = base + glm::vec3(randRange(-half, half) * 0.8f, 0.f, randRange(-half, half) * 0.8f);
+		const iIMDBaseShape* debris = getRandomDebrisImd();
+		const float scale = randRange(1.6f, 2.8f) * (wall ? 0.8f : 1.f);
+		if (Piece* p = addShape(debris ? debris->displayModel() : nullptr, team, pos,
+		                        glm::angleAxis(rand01() * 6.2832f, glm::vec3(0.f, 1.f, 0.f)) * glm::angleAxis(randRange(-0.5f, 0.5f), glm::vec3(1.f, 0.f, 0.f)),
+		                        glm::vec3(0.f), glm::vec3(0.f), false, scale))
+		{
+			p->pos.y = groundAt(p->pos) + p->bottom * 0.4f; // half buried
+			p->resting = true;
+			p->life = kRubbleLife + randRange(0.f, 20.f);
+			p->shade = 95;
+			p->smokes = (i % 3) == 0;
+			p->nextSmoke = randRange(0.f, 2.f);
+		}
+	}
+}
+
 void update()
 {
 	const float dt = std::min(0.1f, static_cast<float>(deltaGraphicsTime) / 1000.f);
@@ -186,10 +271,23 @@ void update()
 	{
 		Piece& p = pieces[i];
 		p.age += dt;
-		if (p.age >= kLife)
+		if (p.age >= p.life)
 		{
 			p = pieces.back();
 			pieces.pop_back();
+			continue;
+		}
+		if (p.collapse)
+		{
+			// Dust pouring out around the base while it goes down
+			if (p.age >= p.nextDust)
+			{
+				p.nextDust = p.age + 0.18f;
+				const float a = rand01() * 6.2832f;
+				const glm::vec3 at = p.pos + glm::vec3(std::cos(a) * p.footprint, 0.f, std::sin(a) * p.footprint);
+				particles::spawn("collapse_dust", Vector3f(at.x, -at.z, groundAt(at) + 8.f), Vector3f(0.f, 0.f, 1.f), std::max(0.8f, p.footprint / 120.f));
+			}
+			++i;
 			continue;
 		}
 		if (!p.resting)
@@ -234,10 +332,10 @@ void update()
 				p.pos.y = ground;
 			}
 		}
-		if (p.smokes && p.age < kSmokeTime && p.age >= p.nextSmoke)
+		if (p.smokes && p.age < (p.life > kLife ? 40.f : kSmokeTime) && p.age >= p.nextSmoke)
 		{
 			p.nextSmoke = p.age + randRange(0.35f, 0.7f);
-			particles::spawn(p.age < 4.f ? "damage_fire" : "damage_smoke", Vector3f(p.pos.x, -p.pos.z, p.pos.y + 10.f));
+			particles::spawn(p.age < 4.f ? "damage_fire" : "damage_smoke", Vector3f(p.pos.x, -p.pos.z, p.pos.y + 10.f), Vector3f(0.f, 0.f, 1.f), p.collapse ? 2.f : 1.f);
 		}
 		++i;
 	}
@@ -245,16 +343,29 @@ void update()
 
 void draw(const glm::mat4& viewMatrix)
 {
-	const PIELIGHT burnt = pal_RGBA(150, 138, 128, 255);
 	for (const Piece& p : pieces)
 	{
 		glm::vec3 pos = p.pos;
-		if (p.age > kLife - kSinkTime)
+		glm::quat rot = p.rot;
+		uint8_t shade = p.shade;
+		if (p.collapse)
 		{
-			pos.y -= kSinkDepth * (p.age - (kLife - kSinkTime)) / kSinkTime;
+			// Slow start then faster: the structure gives way and drops
+			const float t = std::min(1.f, p.age / kCollapseTime);
+			pos.y -= p.collapseDepth * t * t;
+			rot = glm::angleAxis(p.leanAngle * std::sqrt(t), p.leanAxis) * rot;
+			shade = static_cast<uint8_t>(200.f - 80.f * t);
 		}
-		const glm::mat4 model = glm::translate(pos) * glm::toMat4(p.rot);
-		pie_Draw3DShape(p.shape, 0, p.team, burnt, pie_SHADOW, 0, model, viewMatrix);
+		else if (p.age > p.life - kSinkTime)
+		{
+			pos.y -= kSinkDepth * p.scale * (p.age - (p.life - kSinkTime)) / kSinkTime;
+		}
+		glm::mat4 model = glm::translate(pos) * glm::toMat4(rot);
+		if (p.scale != 1.f)
+		{
+			model = model * glm::scale(glm::vec3(p.scale));
+		}
+		pie_Draw3DShape(p.shape, 0, p.team, pal_RGBA(shade, static_cast<uint8_t>(shade * 0.92f), static_cast<uint8_t>(shade * 0.86f), 255), pie_SHADOW, 0, model, viewMatrix);
 	}
 }
 
