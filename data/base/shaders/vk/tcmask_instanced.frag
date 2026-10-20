@@ -64,7 +64,8 @@ void main()
 	// Warzone 2126: .x packs the ECM flag (bit 0) and the hit flash (0-255) as ecm + 2 * flash
 	float ecmPacked = packed_ecmState_alphaTest_texCoord.x;
 	bool ecmEffect = (mod(ecmPacked, 2.0) > 0.5);
-	float hitFlash = floor(ecmPacked * 0.5 + 0.01) / 255.0;
+	float hitFlash = mod(floor(ecmPacked * 0.5 + 0.01), 256.0) / 255.0;
+	float revealCut = floor(ecmPacked / 512.0 + 0.001) - 1.0; // construction scan line height (local units), < 0 when off
 	bool alphaTest = (packed_ecmState_alphaTest_texCoord.y > 0.f);
 
 	vec4 diffuseMap = texture(Texture, texCoord, WZ_MIP_LOAD_BIAS);
@@ -175,6 +176,20 @@ void main()
 		fragColour.a = 0.66 + 0.66 * graphicsCycle;
 	}
 
+	if (revealCut >= 0.0)
+	{
+		// Warzone 2126 construction reveal: glowing band under the scan line; the squashed cap glows brightest
+		float below = revealCut - uvLightmap.z;
+		float band = clamp(1.0 - below / 14.0, 0.0, 1.0);
+		float cap = (below < 0.6) ? 1.0 : 0.0;
+		float pulse = 0.85 + 0.15 * sin(float(graphicsCycle) * 6.2832 * 3.0 + uvLightmap.z * 0.2);
+		vec3 scanColour = vec3(0.35, 0.85, 1.0);
+		// Cap: dark cross-section with a glowing build grid (world aligned, 32 units)
+		vec2 cell = abs(fract(posModelSpace.xz / 32.0) - 0.5);
+		float grid = smoothstep(0.42, 0.48, max(cell.x, cell.y));
+		fragColour.rgb = mix(fragColour.rgb, vec3(0.04, 0.10, 0.13), cap * 0.8);
+		fragColour.rgb += scanColour * (band * band * 2.2 * (1.0 - cap) + cap * (0.12 + 0.9 * grid)) * pulse;
+	}
 	if (hitFlash > 0.0)
 	{
 		// Warzone 2126 hit feedback: a short hot flash, brightest at the silhouette, that blooms with HDR on

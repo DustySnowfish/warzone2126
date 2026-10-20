@@ -49,6 +49,7 @@ void main()
 
 	// Implement building stretching to accommodate terrain
 	vec4 position = vertex;
+	{ float wzReveal = floor(instancePackedValues.y / 512.0); if (wzReveal > 0.5) { position.y = min(position.y, wzReveal - 1.0); } } // Warzone 2126 construction reveal: squash above the scan line
 	if (vertex.y <= 0.0) // use vertex here directly to help shader compiler optimization
 	{
 		// NOTE: 'stretch' may be:

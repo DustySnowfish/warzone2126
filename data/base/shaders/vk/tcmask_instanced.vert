@@ -59,12 +59,16 @@ void main()
 	}
 
 	// Lighting
-	posModelSpace = vec3(instanceModelMatrix * vertex);
+	// Warzone 2126 construction reveal: geometry above the scan line is squashed onto it, which caps the cut
+	vec4 wzVertex = vertex;
+	float wzReveal = floor(ecmState / 512.0);
+	if (wzReveal > 0.5) { wzVertex.y = min(wzVertex.y, wzReveal - 1.0); }
+	posModelSpace = vec3(instanceModelMatrix * wzVertex);
 	vec3 cameraVec = normalize(cameraPos.xyz - posModelSpace.xyz);
 	lightDir = -normalize(lightPosition.xyz);
 	halfVec = lightDir + cameraVec;
 
-	vec3 localPosition = vertex.xyz;
+	vec3 localPosition = wzVertex.xyz;
 
 	// Implement building stretching to accommodate terrain
 	if (vertex.y <= 0.0) // use vertex here directly to help shader compiler optimization

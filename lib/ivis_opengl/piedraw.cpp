@@ -557,9 +557,17 @@ void pie_SetHitFlash(float strength)
 	currentHitFlash = static_cast<int>(std::max(0.f, std::min(1.f, strength)) * 255.f + 0.5f);
 }
 
+// Warzone 2126 construction reveal: scan line height in model units + 1 (0 = off)
+static int currentRevealCut = 0;
+
+void pie_SetRevealCut(float localHeight)
+{
+	currentRevealCut = (localHeight < 0.f) ? 0 : std::min(4095, static_cast<int>(localHeight) + 1);
+}
+
 static inline gfx_api::Draw3DShapePerInstanceInterleavedData GenerateInstanceData(int frame, PIELIGHT colour, PIELIGHT teamcolour, int pieFlag, int pieFlagData, glm::mat4 const &modelMatrix, float stretchDepth)
 {
-	int ecmState = ((pieFlag & pie_ECM) ? 1 : 0) + 2 * currentHitFlash; // unpacked in tcmask_instanced.frag
+	int ecmState = ((pieFlag & pie_ECM) ? 1 : 0) + 2 * currentHitFlash + 512 * currentRevealCut; // unpacked in tcmask_instanced.vert/.frag
 
 	/* Set translucency */
 	if (pieFlag & pie_ADDITIVE)
