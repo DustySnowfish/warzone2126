@@ -461,3 +461,47 @@ players 2
 type    15
 dataset MULTI_CAM_1
 game    "multiplay/maps/W2126-Big512.gam"
+
+// W2126 random maps begin (generated)
+level   Random-128-Arizona
+players 2
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/2c-Random-128-Arizona.gam"
+
+level   Random-192-Urban
+players 4
+type    14
+dataset MULTI_CAM_2
+game    "multiplay/maps/4c-Random-192-Urban.gam"
+
+level   Random-256-Rockies
+players 4
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/4c-Random-256-Rockies.gam"
+
+level   Random-256-Arizona
+players 8
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/8c-Random-256-Arizona.gam"
+
+level   Random-384-Rockies
+players 8
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/8c-Random-384-Rockies.gam"
+
+level   Random-512-Arizona
+players 8
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/8c-Random-512-Arizona.gam"
+
+level   Random-512-Urban
+players 10
+type    14
+dataset MULTI_CAM_2
+game    "multiplay/maps/10c-Random-512-Urban.gam"
+// W2126 random maps end

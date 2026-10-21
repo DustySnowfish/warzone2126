@@ -519,8 +519,8 @@ static JSValue runMap_generateFractalValueNoise(JSContext *ctx, JSValueConst thi
 	SCRIPT_ASSERT_AND_RETURNERROR(ctx, scale >= 2, "scale must be >= 2");
 	SCRIPT_ASSERT_AND_RETURNERROR(ctx, crispness > 0, "crispness must be > 0");
 
-	SCRIPT_ASSERT_AND_RETURNERROR(ctx, width <= 256, "width must be <= 256");
-	SCRIPT_ASSERT_AND_RETURNERROR(ctx, height <= 256, "height must be <= 256");
+	SCRIPT_ASSERT_AND_RETURNERROR(ctx, width <= MAP_MAXWIDTH, "width must be <= MAP_MAXWIDTH");
+	SCRIPT_ASSERT_AND_RETURNERROR(ctx, height <= MAP_MAXHEIGHT, "height must be <= MAP_MAXHEIGHT");
 
 	uint32_t normalizeToRange = 0;
 	if (argc >= 6) {
@@ -620,7 +620,7 @@ static JSValue runMap_generateFractalValueNoise(JSContext *ctx, JSValueConst thi
 	}
 
 	uint32_t size = width * height;
-	SCRIPT_ASSERT_AND_RETURNERROR(ctx, size <= UINT16_MAX,
+	SCRIPT_ASSERT_AND_RETURNERROR(ctx, size <= MAP_MAXAREA, // Warzone 2126: was UINT16_MAX (up to 256x255)
 	                              "Requested data too large to fit into Array");
 
 	uint32_t maxLayerSize = (width + 1) * (height + 1);
