@@ -31,6 +31,7 @@
 #include "lib/netplay/sync_debug.h"
 
 #include "action.h"
+#include "console.h"
 #include "droid.h"
 #include "fpath.h"
 #include "pathfinding_backend.h"
@@ -178,11 +179,33 @@ void orderStart(DROID* psDroid, DROID_ORDER_DATA* psOrder)
 		psDroid->order.pos = exit->pos.xy();
 		psDroid->order.index = 0; // walking
 		actionDroid(psDroid, DACTION_MOVE, exit->pos.x, exit->pos.y);
+		if (psDroid->player == selectedPlayer)
+		{
+			// Local message only (no game state)
+			static uint32_t lastWalkMessageTime = 0;
+			if (gameTime != lastWalkMessageTime)
+			{
+				lastWalkMessageTime = gameTime;
+				addConsoleMessage(entry == nullptr || entry == exit
+					? _("No other tunnel entrance: units drive there. Build a second entrance to use the tunnels.")
+					: _("That entrance is close: units drive there directly"), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+			}
+		}
 		return;
 	}
 	psDroid->order.pos = entry->pos.xy();
 	psDroid->order.index = 1; // going underground
 	actionDroid(psDroid, DACTION_MOVE, entry->pos.x, entry->pos.y);
+	if (psDroid->player == selectedPlayer)
+	{
+		// Local message only (no game state), once per order however many units were sent
+		static uint32_t lastMessageTime = 0;
+		if (gameTime != lastMessageTime)
+		{
+			lastMessageTime = gameTime;
+			addConsoleMessage(_("Units heading for the nearest tunnel entrance"), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+		}
+	}
 }
 
 bool orderUpdate(DROID* psDroid)

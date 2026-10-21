@@ -2098,7 +2098,7 @@ void orderDroidLoc(DROID *psDroid, DROID_ORDER order, UDWORD x, UDWORD y, QUEUE_
 
 
 /** Warzone 2126: order the selected trucks to raise or lower the ground in a tile rectangle (world corners a and b). */
-void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, bool lower, bool add)
+void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, int mode, bool add)
 {
 	ASSERT_PLAYER_OR_RETURN(, player);
 	const Vector2i lo(std::min(a.x, b.x), std::min(a.y, b.y));
@@ -2107,7 +2107,7 @@ void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, bool lower,
 	{
 		if (psCurr->selected && psCurr->isConstructionDroid())
 		{
-			sendDroidInfo(psCurr, DroidOrder(DORDER_EARTHWORK, nullptr, lo, hi, lower ? 1 : 0), add, currentOrderSource());
+			sendDroidInfo(psCurr, DroidOrder(DORDER_EARTHWORK, nullptr, lo, hi, static_cast<uint16_t>(mode)), add, currentOrderSource());
 		}
 	}
 }

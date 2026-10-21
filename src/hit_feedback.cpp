@@ -42,7 +42,7 @@ namespace
 {
 
 constexpr float kMinDrop = 0.006f;        // health fraction a single change must remove to flash
-constexpr uint32_t kFlashMs = 160;        // flash length
+constexpr uint32_t kFlashMs = 120;        // flash length (tester: 160 ms was too strong)
 constexpr uint32_t kTrailHoldMs = 450;    // trail holds before draining
 constexpr float kTrailDrainPerSec = 0.55f;
 constexpr uint32_t kForgetMs = 8000;      // drop entries not seen for this long
@@ -128,7 +128,7 @@ void observe(const BASE_OBJECT* psObj, uint32_t body, uint32_t maxBody)
 	if (drop >= kMinDrop)
 	{
 		// A hit: flash harder for bigger hits, and hold the trail where the health was
-		const float strength = std::min(1.f, 0.4f + drop * 6.f);
+		const float strength = std::min(0.6f, 0.2f + drop * 4.f); // tester: full strength was too much
 		const bool stillFlashing = graphicsTime - s.flashStart < kFlashMs;
 		s.flashStrength = stillFlashing ? std::max(s.flashStrength, strength) : strength;
 		s.flashStart = graphicsTime;

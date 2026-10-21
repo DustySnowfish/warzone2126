@@ -566,7 +566,7 @@ private:
 class EarthworkButton: public W_BUTTON
 {
 public:
-	explicit EarthworkButton(bool lower): lower(lower) {}
+	explicit EarthworkButton(int mode): mode(mode) {}
 
 	void display(int xOffset, int yOffset) override
 	{
@@ -578,6 +578,18 @@ public:
 		pie_BoxFill(x0, y0, x0 + w, y0 + h, highlight ? pal_RGBA(70, 70, 110, 220) : pal_RGBA(30, 30, 60, 200));
 		iV_Box(x0, y0, x0 + w - 1, y0 + h - 1, highlight ? WZCOL_WHITE : pal_RGBA(120, 120, 170, 255));
 		const PIELIGHT ground = pal_RGBA(200, 150, 90, 255);
+		if (mode == 2)
+		{
+			// Level: a flat line with arrows pressing down and up onto it
+			const PIELIGHT green = pal_RGBA(120, 230, 120, 255);
+			const int lineY = y0 + h / 2 + 1;
+			iV_Lines({ glm::ivec4(x0 + 3, lineY, x0 + w - 4, lineY) }, ground);
+			const int ax = x0 + w / 2;
+			iV_Lines({ glm::ivec4(ax, y0 + 3, ax, lineY - 3), glm::ivec4(ax, lineY - 3, ax - 3, lineY - 6), glm::ivec4(ax, lineY - 3, ax + 3, lineY - 6),
+			           glm::ivec4(ax, y0 + h - 3, ax, lineY + 3), glm::ivec4(ax, lineY + 3, ax - 3, lineY + 6), glm::ivec4(ax, lineY + 3, ax + 3, lineY + 6) }, green);
+			return;
+		}
+		const bool lower = mode == 1;
 		const PIELIGHT arrow = lower ? pal_RGBA(110, 180, 255, 255) : pal_RGBA(255, 190, 70, 255);
 		const int baseY = y0 + h * 3 / 4;
 		const int left = x0 + 3;
@@ -595,7 +607,7 @@ public:
 	}
 
 private:
-	bool lower;
+	int mode; // terrain_deform::EarthworkMode
 };
 
 class BuildStatsForm: public ObjectStatsForm
@@ -638,16 +650,17 @@ private:
 	{
 		const int w = AtlasImage(IntImages, IMAGE_FDP_UP).width();
 		const int h = AtlasImage(IntImages, IMAGE_FDP_UP).height();
-		for (int i = 0; i < 2; ++i)
+		for (int i = 0; i < 3; ++i)
 		{
-			const bool lower = i == 1;
-			auto button = std::make_shared<EarthworkButton>(lower);
+			auto button = std::make_shared<EarthworkButton>(i);
 			attach(button);
-			// After the obsolete and favourite toggles (each one image wide), narrower so both fit the panel
-			button->setGeometry(4 * 3 + w * 3 + 6 + i * (w - 1), STAT_SLDY, w - 3, h);
-			button->setTip(lower ? _("Lower Ground: drag an area for the selected trucks to dig ( ] )") : _("Raise Ground: drag an area for the selected trucks to build up ( [ )"));
-			button->addOnClickHandler([lower](W_BUTTON &) {
-				startEarthworkPlacement(lower);
+			// After the obsolete and favourite toggles (each one image wide), narrower so all three fit the panel
+			button->setGeometry(4 * 3 + w * 3 + 6 + i * (w - 5), STAT_SLDY, w - 7, h);
+			button->setTip(i == 1 ? _("Lower Ground: click a tile or drag an area for the selected trucks to dig ( ] )")
+			               : i == 2 ? _("Level Ground: click a tile or drag an area for the selected trucks to flatten ( \\ )")
+			               : _("Raise Ground: click a tile or drag an area for the selected trucks to build up ( [ )"));
+			button->addOnClickHandler([i](W_BUTTON &) {
+				startEarthworkPlacement(i);
 			});
 		}
 	}

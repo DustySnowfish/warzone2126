@@ -59,8 +59,8 @@ constexpr int64_t kRimWidth1024 = 360;
 constexpr int kRimHeight1024 = 230;
 // Earthworks: raised or dug this far from the original ground, with a ramp ring at half height
 constexpr int kEarthworkHeight = 96;        // world units (3 m)
-constexpr int kEarthworkStep = 2;           // world units per truck per work step
-constexpr unsigned kEarthworkStepMs = 250;  // game time between work steps
+constexpr int kEarthworkStep = 1;           // world units per truck per work step (tester: 2 per 250 ms was too fast)
+constexpr unsigned kEarthworkStepMs = 300;  // game time between work steps
 // Hull-down: ground this far (world units) above a unit's base, between it and the shooter
 constexpr int kHullDownFull = 24;           // about 0.75 m: hull covered
 constexpr int kHullDownPartial = 12;        // about 0.4 m: partly covered
@@ -330,11 +330,13 @@ bool earthworkStep(GameWorld& world, DROID* psDroid)
 	{
 		return false;
 	}
-	return earthworkApply(world, order.pos, order.pos2, order.direction != 0);
+	return earthworkApply(world, order.pos, order.pos2, static_cast<int>(order.direction));
 }
 
-bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
+bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 {
+	const bool lower = mode == EARTHWORK_LOWER;
+	const bool level = mode == EARTHWORK_LEVEL;
 	WorldMapState& map = world.map;
 	ensureOriginal(map);
 	const int tx0 = map_coord(std::min(a.x, b.x));
@@ -344,6 +346,25 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 	bool finished = true;
 	bool changed = false;
 	int64_t heightSum = 0;
+	// Level: every corner of the area moves towards the area's current average height
+	int levelTarget = 0;
+	if (level)
+	{
+		int64_t sum = 0;
+		int64_t count = 0;
+		for (int ty = ty0; ty <= ty1; ++ty)
+		{
+			for (int tx = tx0; tx <= tx1; ++tx)
+			{
+				if (tx >= 0 && ty >= 0 && tx < map.width && ty < map.height)
+				{
+					sum += map_TileHeight(map, tx, ty);
+					++count;
+				}
+			}
+		}
+		levelTarget = count > 0 ? static_cast<int>(sum / count) : 0;
+	}
 	for (int ty = ty0 - 1; ty <= ty1 + 1; ++ty)
 	{
 		for (int tx = tx0 - 1; tx <= tx1 + 1; ++tx)
@@ -353,9 +374,13 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 				continue;
 			}
 			const bool inner = tx >= tx0 && tx <= tx1 && ty >= ty0 && ty <= ty1;
+			if (level && !inner)
+			{
+				continue; // levelling has no ramp ring
+			}
 			const int amount = inner ? kEarthworkHeight : kEarthworkHeight / 2;
 			const int original = s.originalHeights[static_cast<size_t>(tx + ty * map.width)];
-			const int target = lower ? std::max(0, original - amount) : original + amount;
+			const int target = level ? levelTarget : lower ? std::max(0, original - amount) : original + amount;
 			const int current = map_TileHeight(map, tx, ty);
 			if (current == target)
 			{
@@ -377,7 +402,7 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower)
 			}
 		}
 	}
-	syncDebug("Earthwork (%d,%d)-(%d,%d) %s sum%d done%d", tx0, ty0, tx1, ty1, lower ? "lower" : "raise", static_cast<int>(heightSum & 0x7fffffff), finished ? 1 : 0);
+	syncDebug("Earthwork (%d,%d)-(%d,%d) %s sum%d done%d", tx0, ty0, tx1, ty1, level ? "level" : lower ? "lower" : "raise", static_cast<int>(heightSum & 0x7fffffff), finished ? 1 : 0);
 	if (changed)
 	{
 		const int cx = world_coord(tx0 + tx1) / 2;

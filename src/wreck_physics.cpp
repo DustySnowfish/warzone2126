@@ -238,7 +238,7 @@ void structureDestroyed(const STRUCTURE* psStruct)
 		addPiece(getRandomDebrisImd(), team, base + glm::vec3(randRange(-half, half) * 0.5f, 30.f, randRange(-half, half) * 0.5f),
 		         glm::angleAxis(rand01() * 6.2832f, glm::normalize(glm::vec3(rand01() - 0.5f, rand01() + 0.1f, rand01() - 0.5f))),
 		         glm::vec3(std::cos(a) * out, randRange(260.f, 520.f), std::sin(a) * out),
-		         glm::vec3(randRange(-8.f, 8.f), randRange(-8.f, 8.f), randRange(-8.f, 8.f)), i == 0 && !wall, randRange(1.2f, 2.0f));
+		         glm::vec3(randRange(-8.f, 8.f), randRange(-8.f, 8.f), randRange(-8.f, 8.f)), i == 0 && !wall, randRange(0.7f, 1.2f)); // tester: larger chunks looked oversized
 	}
 
 	// Rubble left on the footprint, revealed as the building sinks
@@ -247,7 +247,7 @@ void structureDestroyed(const STRUCTURE* psStruct)
 	{
 		glm::vec3 pos = base + glm::vec3(randRange(-half, half) * 0.8f, 0.f, randRange(-half, half) * 0.8f);
 		const iIMDBaseShape* debris = getRandomDebrisImd();
-		const float scale = randRange(1.6f, 2.8f) * (wall ? 0.8f : 1.f);
+		const float scale = randRange(0.8f, 1.5f) * (wall ? 0.8f : 1.f); // tester: 1.6-2.8 looked oversized
 		if (Piece* p = addShape(debris ? debris->displayModel() : nullptr, team, pos,
 		                        glm::angleAxis(rand01() * 6.2832f, glm::vec3(0.f, 1.f, 0.f)) * glm::angleAxis(randRange(-0.5f, 0.5f), glm::vec3(1.f, 0.f, 0.f)),
 		                        glm::vec3(0.f), glm::vec3(0.f), false, scale))

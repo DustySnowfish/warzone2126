@@ -65,6 +65,7 @@
 #include "mission.h"
 #include "levels.h"
 #include "console.h"
+#include "tunnels.h"
 #include "cmddroid.h"
 #include "feature.h"
 #include "mapgrid.h"
@@ -5665,6 +5666,17 @@ void buildingComplete(STRUCTURE *psBuilding, GameWorld& world)
 	default:
 		//do nothing
 		break;
+	}
+
+	// Warzone 2126: explain tunnels the first time one of your entrances is finished (local message only)
+	if (tunnels::isEntrance(psBuilding) && psBuilding->player == selectedPlayer)
+	{
+		static bool explained = false;
+		if (!explained)
+		{
+			explained = true;
+			addConsoleMessage(_("Tunnel entrance ready. Build a second one, then select ground units and click the far entrance: they travel underground, unseen and safe from fire."), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+		}
 	}
 }
 

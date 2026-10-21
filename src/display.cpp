@@ -40,6 +40,7 @@
 
 #include "action.h"
 #include "display.h"
+#include "tunnels.h"
 #include "ordersource.h"
 #include "droid.h"
 #include "fpath.h"
@@ -858,7 +859,7 @@ static OrderSource pointerOrderSource()
 
 //don't want to do any of these whilst in the Intelligence Screen
 // Warzone 2126 earthwork placement: entered with the raise/lower keys (or build menu buttons).
-// Click for a 3x3 tile area or drag a rectangle (up to 8x8 tiles); release to order the
+// Click for one tile or drag a rectangle (up to 8x8 tiles); release to order the
 // selected trucks. Shift on release queues the order and stays in placement mode.
 // Right-click cancels.
 namespace
@@ -866,7 +867,7 @@ namespace
 struct EarthworkPlacement
 {
 	bool active = false;
-	bool lower = false;
+	int mode = 0; // terrain_deform::EarthworkMode
 	bool dragging = false;
 	Vector2i startTile { 0, 0 };
 };
@@ -880,8 +881,9 @@ void earthworkCurrentRect(Vector2i& lo, Vector2i& hi)
 	const Vector2i mouse(std::max(2, std::min(mouseTileX, maxX)), std::max(2, std::min(mouseTileY, maxY)));
 	if (!earthworkPlacement.dragging || earthworkPlacement.startTile == mouse)
 	{
-		lo = mouse - Vector2i(1, 1);
-		hi = mouse + Vector2i(1, 1);
+		// One tile (tester: 3x3 was too coarse); drag for a bigger area
+		lo = mouse;
+		hi = mouse;
 		return;
 	}
 	const Vector2i s = earthworkPlacement.startTile;
@@ -893,7 +895,7 @@ void earthworkCurrentRect(Vector2i& lo, Vector2i& hi)
 }
 }
 
-void startEarthworkPlacement(bool lower)
+void startEarthworkPlacement(int mode)
 {
 	if (selectedPlayer >= MAX_PLAYERS)
 	{
@@ -910,18 +912,18 @@ void startEarthworkPlacement(bool lower)
 	}
 	kill3DBuilding();
 	earthworkPlacement.active = true;
-	earthworkPlacement.lower = lower;
+	earthworkPlacement.mode = mode;
 	earthworkPlacement.dragging = false;
 }
 
-bool earthworkPlacementPreview(Vector2i& loTile, Vector2i& hiTile, bool& lower)
+bool earthworkPlacementPreview(Vector2i& loTile, Vector2i& hiTile, int& mode)
 {
 	if (!earthworkPlacement.active)
 	{
 		return false;
 	}
 	earthworkCurrentRect(loTile, hiTile);
-	lower = earthworkPlacement.lower;
+	mode = earthworkPlacement.mode;
 	return true;
 }
 
@@ -948,7 +950,7 @@ static bool processEarthworkPlacement()
 		earthworkCurrentRect(lo, hi);
 		const bool queue = keyDown(KEY_LSHIFT) || keyDown(KEY_RSHIFT);
 		OrderSourceScope orderScope(pointerOrderSource());
-		orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), earthworkPlacement.lower, queue);
+		orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), earthworkPlacement.mode, queue);
 		audio_PlayTrack(ID_SOUND_SELECT);
 		earthworkPlacement.dragging = false;
 		if (!queue)
@@ -1261,6 +1263,14 @@ void processMouseClickInput()
 			{
 				// Alt+move = scout
 				wzSetCursor(CURSOR_SCOUT);
+			}
+			else if (ObjUnderMouse && ObjUnderMouse->type == OBJ_STRUCTURE && ObjUnderMouse->player == selectedPlayer
+			         && tunnels::isEntrance((STRUCTURE *)ObjUnderMouse) && ((STRUCTURE *)ObjUnderMouse)->status == SS_BUILT
+			         && selection != SC_DROID_CONSTRUCT && selection != SC_DROID_TRANSPORTER && selection != SC_DROID_SUPERTRANSPORTER
+			         && selection != SC_DROID_BOMBER && selection != SC_INVALID)
+			{
+				// Warzone 2126: selected ground units over your own tunnel entrance - "go through the tunnels to here"
+				wzSetCursor(CURSOR_EMBARK);
 			}
 			else if (arnMPointers[item][selection] == CURSOR_NOTPOSSIBLE &&
 			         ObjUnderMouse && (ObjUnderMouse->player == selectedPlayer) &&

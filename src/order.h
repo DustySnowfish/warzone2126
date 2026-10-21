@@ -48,7 +48,7 @@ void orderCheckList(DROID *psDroid);
 /** \brief Updates a droids order state. */
 bool orderUpdateDroid(DROID *psDroid);
 /// Warzone 2126: order the selected trucks to raise or lower the ground in a tile rectangle (world corners a and b).
-void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, bool lower, bool add);
+void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, int mode, bool add);
 
 /** \brief Sends an order to a droid. */
 void orderDroid(DROID *psDroid, DROID_ORDER order, QUEUE_MODE mode);

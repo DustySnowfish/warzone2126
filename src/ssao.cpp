@@ -106,7 +106,7 @@ constexpr Tuning DEFAULT_TUNING = {
 	.minBias = 0.025f,
 	.rangeScale = 0.6f,
 	.blurDepthSigma = 0.0015f,
-	.intensity = 2.2f,
+	.intensity = 1.8f, // was 2.2: strong enough for contact shadows without amplifying noise
 };
 
 Tuning s_tuning = DEFAULT_TUNING;

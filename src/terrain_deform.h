@@ -63,7 +63,10 @@ unsigned coverDamage(const GameWorld& world, const WEAPON_STATS* weapon, const V
 bool earthworkStep(GameWorld& world, DROID* psDroid);
 
 /// One work step on the tile rectangle with world corners a and b (no cadence check).
-bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, bool lower);
+/// Earthwork modes (the order's direction field): raise, lower, or level to the area's average height.
+enum EarthworkMode : int { EARTHWORK_RAISE = 0, EARTHWORK_LOWER = 1, EARTHWORK_LEVEL = 2 };
+
+bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode);
 
 /// Total craters dug this game (for tests and benchmarks).
 unsigned craterCount();

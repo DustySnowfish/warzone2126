@@ -44,6 +44,7 @@
 #include "src/multiplay.h"
 #include "src/multivote.h"
 #include "src/multilimit.h"
+#include "src/warzoneconfig.h"
 #include "src/main.h"
 #include "src/frend.h"
 #include "src/loadsave.h"
@@ -51,6 +52,7 @@
 #include "src/loadsave.h"
 
 #include "lib/ivis_opengl/pieblitfunc.h"
+#include "lib/ivis_opengl/bitimage.h"
 
 #include "src/screens/joiningscreen.h"
 
@@ -369,6 +371,36 @@ void WzLobbyMultiOptionButton::display(int xOffset, int yOffset)
 	}
 }
 
+// MARK: - WzLobbyTextOptionButton (Warzone 2126)
+
+// A lobby option button that shows a short text (e.g. "300") instead of an icon, sized like the
+// icon buttons next to it.
+class WzLobbyTextOptionButton : public W_BUTTON
+{
+public:
+	void setLabelText(const WzString& text)
+	{
+		labelText.setText(text, font_regular_bold);
+	}
+	void setShowSelected(bool val) { showSelected = val; }
+	virtual void display(int xOffset, int yOffset) override
+	{
+		const int x0 = x() + xOffset, y0 = y() + yOffset, x1 = x0 + width(), y1 = y0 + height();
+		const bool isDown = ((state & (WBUT_DOWN | WBUT_LOCK | WBUT_CLICKLOCK)) != 0) || showSelected;
+		const bool isDisabled = (state & WBUT_DISABLE) != 0;
+		const bool isHighlight = (state & WBUT_HIGHLIGHT) != 0;
+		pie_UniTransBoxFill(x0, y0, x1, y1, isDown ? pal_RGBA(20, 70, 120, 230) : pal_RGBA(10, 20, 45, 200));
+		iV_Box(x0, y0, x1 - 1, y1 - 1, isDown ? pal_RGBA(120, 200, 255, 255) : isHighlight ? WZCOL_TEXT_BRIGHT : pal_RGBA(70, 90, 130, 255));
+		const int tx = x0 + (width() - labelText->width()) / 2;
+		const int ty = y0 + (height() - labelText->lineSize()) / 2 - labelText->aboveBase();
+		labelText->render(tx, ty, isDisabled ? WZCOL_TEXT_MEDIUM : (isDown || isHighlight) ? WZCOL_TEXT_BRIGHT : WZCOL_FORM_TEXT);
+	}
+private:
+	WzCachedText labelText;
+	bool showSelected = false;
+};
+
+
 class LobbyMultiOptionsChoiceWidget : public MultibuttonWidget
 {
 
@@ -410,8 +442,14 @@ void LobbyMultiOptionsChoiceWidget::stateChanged()
 		{
 			psMultiOptionButton->setShowSelected(isSelectedItem);
 		}
+		auto psTextOptionButton = std::dynamic_pointer_cast<WzLobbyTextOptionButton>(i->first);
+		if (psTextOptionButton)
+		{
+			psTextOptionButton->setShowSelected(isSelectedItem);
+		}
 	}
 }
+
 
 // MARK: - WzLobbyPasswordOptionPopover
 
@@ -725,6 +763,7 @@ private:
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> scavengerChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> allianceChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> powerChoice;
+	std::shared_ptr<LobbyMultiOptionsChoiceWidget> unitLimitChoice; // Warzone 2126
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> baseTypeChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> technologyChoice;
 	std::vector<std::shared_ptr<WzLobbyMultiOptionButton>> multiOptionButtons;
@@ -1098,6 +1137,44 @@ void WzMultiLobbyOptionsImpl::initialize(bool _isChallenge, const std::shared_pt
 	});
 	optionsList->addItem(wrapItemForList(baseTypeChoice));
 
+	// Unit limit (Warzone 2126): units each player may have
+	unitLimitChoice = std::make_shared<LobbyMultiOptionsChoiceWidget>(matchOptionsEditMode);
+	unitLimitChoice->setLabel(_("Units"));
+	{
+		const int bw = iV_GetImageWidth(FrontImages, IMAGE_POWLO);
+		const int bh = iV_GetImageHeight(FrontImages, IMAGE_POWLO);
+		const std::pair<int, const char*> limits[] = {
+			{150, N_("Unit limit 150 per player (classic)")},
+			{300, N_("Unit limit 300 per player")},
+			{500, N_("Unit limit 500 per player: big battles, more work for the computer")},
+		};
+		for (const auto& l : limits)
+		{
+			auto button = std::make_shared<WzLobbyTextOptionButton>();
+			button->setLabelText(WzString::number(l.first));
+			button->setTip(gettext(l.second));
+			button->setGeometry(0, 0, bw, bh);
+			unitLimitChoice->addButton(l.first, button);
+		}
+	}
+	unitLimitChoice->setGeometry(0, 0, unitLimitChoice->idealWidth(), unitLimitChoice->idealHeight());
+	unitLimitChoice->setCanChooseHandler([](MultibuttonWidget&, int) -> bool {
+		return ingame.side == InGameSide::HOST_OR_SINGLEPLAYER;
+	});
+	unitLimitChoice->addOnChooseHandler([](MultibuttonWidget&, int newValue){
+		if (ingame.side == InGameSide::HOST_OR_SINGLEPLAYER)
+		{
+			war_setMPUnitLimit(static_cast<uint16_t>(newValue));
+			game.unitLimit = war_getMPUnitLimit();
+			resetReadyStatus(false);
+			if (NetPlay.isHost)
+			{
+				sendOptions();
+			}
+		}
+	});
+	optionsList->addItem(wrapItemForList(unitLimitChoice));
+
 	if (!isChallenge)
 	{
 		// Tech Level
@@ -1224,6 +1301,10 @@ void WzMultiLobbyOptionsImpl::setGameOptionStates()
 	allianceChoice->choose(game.alliance);
 	powerChoice->choose(game.power);
 	baseTypeChoice->choose(game.base);
+	if (unitLimitChoice)
+	{
+		unitLimitChoice->choose(game.unitLimit);
+	}
 	if (technologyChoice)
 	{
 		technologyChoice->choose(game.techLevel);

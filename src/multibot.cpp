@@ -660,7 +660,7 @@ static bool validDroidInfoOrderData(QueuedDroidInfo const &info, DROID_ORDER_DAT
 	{
 		return false;
 	}
-	if (info.order == DORDER_EARTHWORK && (!worldOnMap(gameWorld.map, sOrder.pos) || !worldOnMap(gameWorld.map, sOrder.pos2) || sOrder.direction > 1
+	if (info.order == DORDER_EARTHWORK && (!worldOnMap(gameWorld.map, sOrder.pos) || !worldOnMap(gameWorld.map, sOrder.pos2) || sOrder.direction > 2
 	                                       || std::abs(sOrder.pos2.x - sOrder.pos.x) > terrain_deform::kEarthworkMaxSize || std::abs(sOrder.pos2.y - sOrder.pos.y) > terrain_deform::kEarthworkMaxSize))
 	{
 		return false;

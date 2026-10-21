@@ -1598,11 +1598,11 @@ bool wzapi::orderDroidLoc(WZAPI_PARAMS(DROID *psDroid, int order_, int x, int y)
 
 //-- ## orderDroidEarthwork(droid, x1, y1, x2, y2, lower)
 //--
-//-- Warzone 2126: order a truck to raise (```lower``` false) or lower (```lower``` true) the ground
-//-- in the tile rectangle from (x1, y1) to (x2, y2), inclusive. The rectangle may be at most 8 tiles
+//-- Warzone 2126: order a truck to raise (```lower``` false or 0) or lower (```lower``` true or 1) the ground,
+//-- or level it to the area's average height (```lower``` 2), in the tile rectangle from (x1, y1) to (x2, y2), inclusive. The rectangle may be at most 8 tiles
 //-- on each side. Earthworks cost no power, only the truck's time.
 //--
-bool wzapi::orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int x2, int y2, bool lower))
+bool wzapi::orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int x2, int y2, int mode))
 {
 	OrderSourceScope orderScope(scriptOrderSource(context));
 	SCRIPT_ASSERT(false, context, psDroid, "No valid droid provided");
@@ -1611,7 +1611,7 @@ bool wzapi::orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int
 	const Vector2i lo(std::min(x1, x2), std::min(y1, y2));
 	const Vector2i hi(std::max(x1, x2), std::max(y1, y2));
 	SCRIPT_ASSERT(false, context, world_coord(hi.x - lo.x + 1) <= terrain_deform::kEarthworkMaxSize && world_coord(hi.y - lo.y + 1) <= terrain_deform::kEarthworkMaxSize, "Earthwork area too large");
-	sendDroidInfo(psDroid, DroidOrder(DORDER_EARTHWORK, nullptr, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), lower ? 1 : 0), false, currentOrderSource());
+	sendDroidInfo(psDroid, DroidOrder(DORDER_EARTHWORK, nullptr, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), static_cast<uint16_t>(std::max(0, std::min(mode, 2)))), false, currentOrderSource());
 	return true;
 }
 

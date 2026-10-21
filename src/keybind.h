@@ -153,6 +153,7 @@ void kf_ToggleShakeStatus();
 // Warzone 2126 earthworks: selected trucks raise or lower a 3x3 tile area under the mouse
 void kf_EarthworkRaise();
 void kf_EarthworkLower();
+void kf_EarthworkLevel();
 void kf_EarthworkRaiseQueued();
 void kf_EarthworkLowerQueued();
 void kf_ToggleMouseInvert();

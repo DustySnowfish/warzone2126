@@ -45,28 +45,18 @@ void main()
 	}
 
 	vec2 aoUv = clamp(texCoords * valueUvScaleClamp.xy, vec2(0.0), valueUvScaleClamp.zw);
-	float result = texture(occlusionTexture, aoUv).r * wzBlurGaussianWeight(0);
-	float weightSum = wzBlurGaussianWeight(0);
+	float result = texture(occlusionTexture, aoUv).r * wzBlurNoiseBoxWeight(0);
+	float weightSum = wzBlurNoiseBoxWeight(0);
 
-	if (wzBlurPairEnabled(tapPairs, 1))
+	if (true) // Warzone 2126: always the full noise period
 	{
-		accumulateTap(result, weightSum, texCoords + blurDirection * 1.0, centerDepth, wzBlurGaussianWeight(1));
-		accumulateTap(result, weightSum, texCoords - blurDirection * 1.0, centerDepth, wzBlurGaussianWeight(1));
+		accumulateTap(result, weightSum, texCoords + blurDirection * 1.0, centerDepth, wzBlurNoiseBoxWeight(1));
+		accumulateTap(result, weightSum, texCoords - blurDirection * 1.0, centerDepth, wzBlurNoiseBoxWeight(1));
 	}
-	if (wzBlurPairEnabled(tapPairs, 2))
+	if (true)
 	{
-		accumulateTap(result, weightSum, texCoords + blurDirection * 2.0, centerDepth, wzBlurGaussianWeight(2));
-		accumulateTap(result, weightSum, texCoords - blurDirection * 2.0, centerDepth, wzBlurGaussianWeight(2));
-	}
-	if (wzBlurPairEnabled(tapPairs, 3))
-	{
-		accumulateTap(result, weightSum, texCoords + blurDirection * 3.0, centerDepth, wzBlurGaussianWeight(3));
-		accumulateTap(result, weightSum, texCoords - blurDirection * 3.0, centerDepth, wzBlurGaussianWeight(3));
-	}
-	if (wzBlurPairEnabled(tapPairs, 4))
-	{
-		accumulateTap(result, weightSum, texCoords + blurDirection * 4.0, centerDepth, wzBlurGaussianWeight(4));
-		accumulateTap(result, weightSum, texCoords - blurDirection * 4.0, centerDepth, wzBlurGaussianWeight(4));
+		accumulateTap(result, weightSum, texCoords + blurDirection * 2.0, centerDepth, wzBlurNoiseBoxWeight(2));
+		accumulateTap(result, weightSum, texCoords - blurDirection * 2.0, centerDepth, wzBlurNoiseBoxWeight(2));
 	}
 
 	result /= max(weightSum, 1e-6);

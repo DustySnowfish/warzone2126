@@ -134,7 +134,10 @@ void main()
 		occlusion += hit * rangeCheck * angleWeight;
 	}
 
-	occlusion = 1.0 - (occlusion / float(sc));
+	occlusion = occlusion / float(sc);
+	// Warzone 2126: fade out with distance, so far ground seen through haze does not get dark speckles
+	occlusion *= 1.0 - smoothstep(4500.0, 7500.0, abs(origin.z));
+	occlusion = 1.0 - occlusion;
 
 	#ifdef NEWGL
 	FragColor = vec4(vec3(occlusion), 1.0);

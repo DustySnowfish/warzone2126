@@ -4298,16 +4298,17 @@ static void emitConstructionSparks(const STRUCTURE *psStructure)
 	particles::spawn("build_sparks", at);
 }
 
-/// Warzone 2126: markers around the earthwork area being placed (amber raise, blue lower)
+/// Warzone 2126: markers around the earthwork area being placed (amber raise, blue lower, green level)
 static void queueEarthworkPreview()
 {
 	Vector2i lo, hi;
-	bool lower = false;
-	if (!earthworkPlacementPreview(lo, hi, lower))
+	int mode = 0;
+	if (!earthworkPlacementPreview(lo, hi, mode))
 	{
 		return;
 	}
-	const glm::vec3 rgb = lower ? glm::vec3(0.35f, 0.7f, 1.6f) : glm::vec3(1.6f, 0.95f, 0.25f);
+	// Amber raise, blue lower, green level
+	const glm::vec3 rgb = mode == 1 ? glm::vec3(0.35f, 0.7f, 1.6f) : mode == 2 ? glm::vec3(0.4f, 1.5f, 0.45f) : glm::vec3(1.6f, 0.95f, 0.25f);
 	const float pulse = 0.6f + 0.3f * std::sin(static_cast<float>(realTime) * 0.006f);
 	// Corner markers on every tile corner of the area, a bigger one on the outer corners
 	for (int ty = lo.y; ty <= hi.y + 1; ++ty)

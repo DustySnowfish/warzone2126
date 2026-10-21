@@ -13,6 +13,16 @@ float wzBlurGaussianWeight(int tap)
 	return 0.016216;
 }
 
+// Warzone 2126: box weights that exactly cancel a noise pattern repeating every 4 pixels
+// (taps -2..+2 with half weight at the ends average two full periods). Used by the SSAO blur,
+// whose 4x4 rotation noise otherwise survives the Gaussian as a regular dot grid.
+float wzBlurNoiseBoxWeight(int tap)
+{
+	if (tap <= 1) return 1.0;
+	if (tap == 2) return 0.5;
+	return 0.0;
+}
+
 float wzBlurDepthWeight(float centerDepth, float sampleDepth, float sigma)
 {
 	float d = centerDepth - sampleDepth;
