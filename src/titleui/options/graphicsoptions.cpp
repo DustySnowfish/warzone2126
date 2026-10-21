@@ -111,11 +111,221 @@ OptionInfo::AvailabilityResult UpscalingSharpnessAvailable(const OptionInfo&)
 	return result;
 }
 
+// MARK: - Warzone 2126 quality presets
+
+namespace
+{
+
+enum class QualityPreset : int { Low = 0, Medium, High, Ultra, Custom };
+
+struct QualityPresetValues
+{
+	bool shadows;
+	uint32_t shadowResolution;
+	uint32_t shadowFilter;
+	SSAO_MODE ssao;
+	bool hdr;
+	bool taa;
+	SMAA_MODE smaa;
+	bool muzzleLights;
+	bool projectileLights;
+	int effectsDetail;
+};
+
+const QualityPresetValues& presetValues(QualityPreset preset)
+{
+	static const QualityPresetValues kPresets[4] = {
+		// shadows, res, filter, ssao, hdr, taa, smaa, muzzle, projectile, effects
+		{ false, 2048, 3, SSAO_MODE::OFF,    false, false, SMAA_MODE::LOW,  false, false, 0 }, // Low
+		{ true,  2048, 3, SSAO_MODE::LOW,    true,  true,  SMAA_MODE::OFF,  true,  false, 1 }, // Medium
+		{ true,  2048, 5, SSAO_MODE::HIGH,   true,  true,  SMAA_MODE::OFF,  true,  true,  2 }, // High
+		{ true,  4096, 7, SSAO_MODE::ULTRA,  true,  true,  SMAA_MODE::HIGH, true,  true,  2 }, // Ultra
+	};
+	return kPresets[static_cast<int>(preset)];
+}
+
+bool shadowMapsSupported()
+{
+	return pie_supportsShadowMapping().value_or(false);
+}
+
+QualityPreset currentQualityPreset()
+{
+	for (int i = 0; i < 4; ++i)
+	{
+		const QualityPresetValues& v = presetValues(static_cast<QualityPreset>(i));
+		if (getDrawShadows() != v.shadows || war_getSsaoMode() != v.ssao || war_getHdr() != v.hdr || war_getTaa() != v.taa
+			|| war_getSmaaMode() != v.smaa || war_getMuzzleFlashLighting() != v.muzzleLights || war_getProjectileLighting() != v.projectileLights
+			|| war_getEffectsDetail() != v.effectsDetail)
+		{
+			continue;
+		}
+		if (v.shadows && shadowMapsSupported()
+			&& (pie_getShadowMapResolution() != v.shadowResolution || gfx_api::context::get().getShadowConstants().shadowFilterSize != v.shadowFilter))
+		{
+			continue;
+		}
+		return static_cast<QualityPreset>(i);
+	}
+	return QualityPreset::Custom;
+}
+
+bool applyQualityPreset(QualityPreset preset)
+{
+	if (preset == QualityPreset::Custom)
+	{
+		return true;
+	}
+	const QualityPresetValues& v = presetValues(preset);
+	setDrawShadows(v.shadows);
+	if (v.shadows && shadowMapsSupported())
+	{
+		if (pie_getShadowMapResolution() != v.shadowResolution && pie_setShadowMapResolution(v.shadowResolution))
+		{
+			war_setShadowMapResolution(v.shadowResolution);
+		}
+		auto shadowConstants = gfx_api::context::get().getShadowConstants();
+		if (shadowConstants.shadowFilterSize != v.shadowFilter)
+		{
+			shadowConstants.shadowFilterSize = v.shadowFilter;
+			if (gfx_api::context::get().setShadowConstants(shadowConstants))
+			{
+				war_setShadowFilterSize(v.shadowFilter);
+			}
+		}
+	}
+	if (war_getHdr() != v.hdr && gfx_api::context::get().setHdrEnabled(v.hdr))
+	{
+		war_setHdr(v.hdr);
+	}
+	if (war_getTaa() != v.taa && gfx_api::context::get().setTaaEnabled(v.taa))
+	{
+		war_setTaa(v.taa);
+	}
+	if (war_getSmaaMode() != v.smaa && display3d_setSmaaMode(v.smaa))
+	{
+		war_setSmaaMode(v.smaa);
+	}
+	war_setSsaoMode(v.ssao);
+	war_setMuzzleFlashLighting(v.muzzleLights);
+	war_setProjectileLighting(v.projectileLights);
+	war_setEffectsDetail(v.effectsDetail);
+	applySceneEffectSurfaces();
+	return true;
+}
+
+} // anonymous namespace
+
 // MARK: -
 
 std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 {
 	auto result = OptionsForm::make();
+
+	// Warzone 2126: one-click quality presets, and the new effects
+	result->addSection(OptionsSection(N_("Quality"), ""), true);
+	{
+		auto optionInfo = OptionInfo("gfx.qualityPreset", N_("Quality Preset"), N_("Sets shadows, ambient occlusion, HDR lighting, anti-aliasing, lights and effects detail together. Change any of them afterwards to make a custom mix."));
+		auto valueChanger = OptionsDropdown<QualityPreset>::make(
+			[]() {
+				OptionChoices<QualityPreset> result;
+				result.choices = {
+					{ _("Low"), _("For older or integrated graphics: no shadows or ambient occlusion, fewer effects."), QualityPreset::Low },
+					{ _("Medium"), _("Shadows, light ambient occlusion and HDR lighting, medium effects."), QualityPreset::Medium },
+					{ _("High"), _("The intended look: soft shadows, ambient occlusion, all lights and effects."), QualityPreset::High },
+					{ _("Ultra"), _("Sharper, softer shadows, the best ambient occlusion and SMAA on top. For powerful graphics cards."), QualityPreset::Ultra },
+				};
+				const QualityPreset current = currentQualityPreset();
+				if (current == QualityPreset::Custom)
+				{
+					result.choices.push_back({ _("Custom"), _("Settings changed individually."), QualityPreset::Custom });
+				}
+				result.setCurrentIdxForValue(current);
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				return applyQualityPreset(newValue);
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.effectsDetail", N_("Effects Detail"), N_("How many particles explosions, smoke, dust and fire use, and how many scorch marks, track marks and wreck pieces stay on the ground at once."));
+		auto valueChanger = OptionsDropdown<int>::make(
+			[]() {
+				OptionChoices<int> result;
+				result.choices = {
+					{ _("Low"), "", 0 },
+					{ _("Medium"), "", 1 },
+					{ _("High"), "", 2 },
+				};
+				result.setCurrentIdxForValue(war_getEffectsDetail());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setEffectsDetail(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.physicalWrecks", N_("Physical Wrecks"), N_("Destroyed vehicles lose their turrets and tumble into smoking wrecks; buildings collapse and leave rubble. Off uses the classic flying debris."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getPhysicalWrecks());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setPhysicalWrecks(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.hullSuspension", N_("Vehicle Suspension"), N_("Vehicle hulls pitch and roll as they speed up, brake and fire."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getHullSuspension());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setHullSuspension(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.hitFlash", N_("Hit Flash"), N_("Units and buildings flash briefly when a hit takes a noticeable amount of health."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getHitFlash());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setHitFlash(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
 
 	// Terrain:
 	result->addSection(OptionsSection(N_("Terrain"), ""), true);
@@ -220,7 +430,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 			[](const auto& newValue) -> bool {
 				setDrawShadows(newValue);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -277,7 +487,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				}
 				war_setShadowMapResolution(newResolution);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -316,7 +526,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				}
 				war_setShadowFilterSize(newFilterSize);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -449,7 +659,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				war_setSsaoMode(newValue);
 				applySceneEffectSurfaces();
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -753,7 +963,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				}
 				war_setSmaaMode(newValue);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -777,7 +987,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				}
 				war_setHdr(newValue);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}
@@ -823,7 +1033,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 				}
 				war_setTaa(newValue);
 				return true;
-			}, false
+			}, true
 		);
 		result->addOption(optionInfo, valueChanger, true);
 	}

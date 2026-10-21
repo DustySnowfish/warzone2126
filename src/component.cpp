@@ -1039,7 +1039,7 @@ float recoilKick(const WEAPON_STATS* weapon)
 glm::mat4 hullSuspension(const DROID* psDroid)
 {
 	const PROPULSION_TYPE propulsion = psDroid->getPropulsionStats()->propulsionType;
-	if (psDroid->isFlying() || propulsion == PROPULSION_TYPE_LEGGED || psDroid->isTransporter())
+	if (!war_getHullSuspension() || psDroid->isFlying() || propulsion == PROPULSION_TYPE_LEGGED || psDroid->isTransporter())
 	{
 		return glm::mat4(1.f);
 	}
@@ -1187,7 +1187,7 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 void destroyFXDroid(DROID *psDroid, unsigned impactTime, Vector3f &velocity)
 {
 	// Warzone 2126: vehicles break into physical pieces instead of the classic flying bits
-	if (!psDroid->isCyborg() && !psDroid->isTransporter() && psDroid->droidType != DROID_PERSON)
+	if (wreck_physics::enabled() && !psDroid->isCyborg() && !psDroid->isTransporter() && psDroid->droidType != DROID_PERSON)
 	{
 		wreck_physics::droidDestroyed(psDroid);
 		return;

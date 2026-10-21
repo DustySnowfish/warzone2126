@@ -42,6 +42,7 @@
 #include "objectdef.h"
 #include "particles.h"
 #include "stats.h"
+#include "warzoneconfig.h"
 
 #ifndef GLM_ENABLE_EXPERIMENTAL
 	#define GLM_ENABLE_EXPERIMENTAL
@@ -119,7 +120,8 @@ float groundAt(const glm::vec3& renderPos)
 
 Piece* addShape(const iIMDShape* shape, int team, const glm::vec3& pos, const glm::quat& rot, const glm::vec3& vel, const glm::vec3& angVel, bool smokes, float scale = 1.f)
 {
-	if (shape == nullptr || pieces.size() >= kMaxPieces)
+	static const size_t kPiecesByDetail[3] = { 200, 400, kMaxPieces };
+	if (shape == nullptr || pieces.size() >= kPiecesByDetail[war_getEffectsDetail()])
 	{
 		return nullptr;
 	}
@@ -375,3 +377,8 @@ void clear()
 }
 
 } // namespace wreck_physics
+
+bool wreck_physics::enabled()
+{
+	return war_getPhysicalWrecks();
+}

@@ -268,6 +268,15 @@ bool war_getHdr();
 void war_setHdr(bool enabled);
 int war_getBloomIntensity(); // percent, 0 disables bloom
 void war_setBloomIntensity(int percent);
+// Warzone 2126 effects
+int war_getEffectsDetail(); // 0 low, 1 medium, 2 high: particle counts and how many marks and wreck pieces stay
+void war_setEffectsDetail(int level);
+bool war_getPhysicalWrecks(); // destroyed vehicles and buildings break into physical pieces
+void war_setPhysicalWrecks(bool enabled);
+bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration and recoil
+void war_setHullSuspension(bool enabled);
+bool war_getHitFlash(); // units and buildings flash when hit
+void war_setHitFlash(bool enabled);
 bool war_getTaa(); // temporal anti-aliasing (needs HDR)
 void war_setTaa(bool enabled);
 int war_getColourGrading(); // percent strength of the per-map colour grade (needs HDR)

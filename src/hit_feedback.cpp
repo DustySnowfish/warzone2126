@@ -30,6 +30,7 @@
 
 #include "baseobject.h"
 #include "objectdef.h"
+#include "warzoneconfig.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -186,7 +187,7 @@ void clear()
 ScopedFlash::ScopedFlash(const BASE_OBJECT* psObj, uint32_t body, uint32_t maxBody)
 {
 	observe(psObj, body, maxBody);
-	const float f = flash(psObj);
+	const float f = war_getHitFlash() ? flash(psObj) : 0.f;
 	if (f > 0.f)
 	{
 		pie_SetHitFlash(f);

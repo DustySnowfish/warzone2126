@@ -807,6 +807,10 @@ bool loadConfig()
 	war_setBloomIntensity(iniGetInteger("bloomIntensity", war_getBloomIntensity()).value());
 	war_setColourGrading(iniGetInteger("colourGrading", war_getColourGrading()).value());
 	war_setTaa(iniGetBool("taa", war_getTaa()).value());
+	war_setEffectsDetail(iniGetInteger("effectsDetail2126", war_getEffectsDetail()).value());
+	war_setPhysicalWrecks(iniGetBool("physicalWrecks2126", war_getPhysicalWrecks()).value());
+	war_setHullSuspension(iniGetBool("hullSuspension2126", war_getHullSuspension()).value());
+	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
 	{
 		std::string smaaValue = iniGetString("smaa", "off").value();
 		if (smaaValue == "low")
@@ -1141,6 +1145,10 @@ bool saveConfig()
 	iniSetInteger("bloomIntensity", war_getBloomIntensity());
 	iniSetInteger("colourGrading", war_getColourGrading());
 	iniSetBool("taa", war_getTaa());
+	iniSetInteger("effectsDetail2126", war_getEffectsDetail());
+	iniSetBool("physicalWrecks2126", war_getPhysicalWrecks());
+	iniSetBool("hullSuspension2126", war_getHullSuspension());
+	iniSetBool("hitFlash2126", war_getHitFlash());
 	switch (war_getSmaaMode())
 	{
 		case SMAA_MODE::OFF: iniSetString("smaa", "off"); break;

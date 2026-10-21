@@ -130,6 +130,11 @@ struct WARZONE_GLOBALS
 	bool taa = true; // temporal anti-aliasing (needs HDR)
 	SSAO_MODE ssaoMode = SSAO_MODE::HIGH; // screen-space ambient occlusion (Warzone 2126: default high)
 	SSR_MODE ssrMode = SSR_MODE::OFF; // screen-space reflections (default off)
+	// Warzone 2126 effects
+	int effectsDetail = 2; // 0 low, 1 medium, 2 high
+	bool physicalWrecks = true;
+	bool hullSuspension = true;
+	bool hitFlash = true;
 	// UI config
 	bool groupsMenuEnabled = true;
 	uint8_t optionsButtonVisibility = 100;
@@ -984,6 +989,46 @@ int war_getBloomIntensity()
 void war_setBloomIntensity(int percent)
 {
 	warGlobs.bloomIntensity = std::max(0, std::min(percent, 300));
+}
+
+int war_getEffectsDetail()
+{
+	return warGlobs.effectsDetail;
+}
+
+void war_setEffectsDetail(int level)
+{
+	warGlobs.effectsDetail = std::max(0, std::min(level, 2));
+}
+
+bool war_getPhysicalWrecks()
+{
+	return warGlobs.physicalWrecks;
+}
+
+void war_setPhysicalWrecks(bool enabled)
+{
+	warGlobs.physicalWrecks = enabled;
+}
+
+bool war_getHullSuspension()
+{
+	return warGlobs.hullSuspension;
+}
+
+void war_setHullSuspension(bool enabled)
+{
+	warGlobs.hullSuspension = enabled;
+}
+
+bool war_getHitFlash()
+{
+	return warGlobs.hitFlash;
+}
+
+void war_setHitFlash(bool enabled)
+{
+	warGlobs.hitFlash = enabled;
 }
 
 bool war_getTaa()

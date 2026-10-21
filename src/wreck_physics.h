@@ -39,6 +39,9 @@ struct STRUCTURE;
 namespace wreck_physics
 {
 
+/// Whether physical wrecks are switched on (Physical Wrecks setting).
+bool enabled();
+
 /// A vehicle was destroyed: break it into pieces.
 void droidDestroyed(const DROID* psDroid);
 

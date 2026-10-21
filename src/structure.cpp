@@ -4958,7 +4958,22 @@ bool destroyStruct(STRUCTURE *psDel, unsigned impactTime, GameWorld& world)
 		}
 		// Warzone 2126: the building collapses into the ground, throws chunks and leaves rubble
 		// (replaces the classic flying debris sprites for walls and other structures)
-		wreck_physics::structureDestroyed(psDel);
+		if (wreck_physics::enabled())
+		{
+			wreck_physics::structureDestroyed(psDel);
+		}
+		else if (bPowerGen)
+		{
+			// (has its own sequence above)
+		}
+		else if (bMinor)
+		{
+			addEffect(&pos, EFFECT_DESTRUCTION, DESTRUCTION_TYPE_WALL_SECTION, false, nullptr, 0, impactTime);
+		}
+		else
+		{
+			addEffect(&pos, EFFECT_DESTRUCTION, DESTRUCTION_TYPE_STRUCTURE, false, nullptr, 0, impactTime);
+		}
 
 		// shake the screen if we're near enough and it is explosive in nature
 		if (clipXY(pos.x, pos.z))
