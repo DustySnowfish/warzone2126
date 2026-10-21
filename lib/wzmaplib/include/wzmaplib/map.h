@@ -39,9 +39,9 @@ using nonstd::nullopt;
 
 // MARK: - Various defines needed by both maplib and the game's map-handling code
 
-#define MAP_MAXWIDTH	256
-#define MAP_MAXHEIGHT	256
-#define MAP_MAXAREA		(256*256)
+#define MAP_MAXWIDTH	512 // Warzone 2126: was 256
+#define MAP_MAXHEIGHT	512 // Warzone 2126: was 256
+#define MAP_MAXAREA		(512*512) // Warzone 2126: was 256*256
 
 // Multiplier for the tile height - used for older map formats (which stored tile height as a byte)
 #define ELEVATION_SCALE	2

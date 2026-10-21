@@ -46,7 +46,8 @@ enum OBJECT_TYPE
 
 struct TILEPOS
 {
-	UBYTE x, y, type;
+	uint16_t x, y; // Warzone 2126: 16-bit, so maps can be wider than 256 tiles
+	UBYTE type;
 };
 
 /*

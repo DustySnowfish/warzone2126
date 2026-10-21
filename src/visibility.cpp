@@ -145,7 +145,7 @@ static void spotterWatchAndRegister(SPOTTER *psSpot, WorldMapState& mapState, in
 		uint16_t *visionType = (!radar) ? psTile->watchers : psTile->sensors;
 		if (visionType[player] < UINT16_MAX)
 		{
-			TILEPOS tilePos = {uint8_t(mapX), uint8_t(mapY), uint8_t(radar)};
+			TILEPOS tilePos = {uint16_t(mapX), uint16_t(mapY), uint8_t(radar)};
 			visionType[player]++;          // we observe this tile
 			updateTileVis(psTile, player);
 			psSpot->watchedTiles[psSpot->numWatchedTiles++] = tilePos;    // record having seen it
@@ -255,7 +255,7 @@ static inline void visMarkTile(const BASE_OBJECT *psObj, int mapX, int mapY, MAP
 
 	if (visionType[rayPlayer] < UINT16_MAX)
 	{
-		TILEPOS tilePos = {uint8_t(mapX), uint8_t(mapY), uint8_t(inRange)};
+		TILEPOS tilePos = {uint16_t(mapX), uint16_t(mapY), uint8_t(inRange)};
 
 		visionType[rayPlayer]++;                        // we observe this tile
 		if (psObj->flags.test(OBJECT_FLAG_JAMMED_TILES))   // we are a jammer object

@@ -1,0 +1,28 @@
+{
+	"challenge": {
+		"map": "W2126-Big512",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 1,
+		"name": "Visual bench - 512 tile map",
+		"version": 2
+	},
+	"scripts": {
+		"rules": "visualbench_bigmap.js"
+	},
+	"player_0": { "team": 0, "position": 0 },
+	"player_1": { "team": 1, "position": 1, "ai": "none" },
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 20,
+		"warmupSpeed": 4,
+		"settleSeconds": 1,
+		"shots": [
+			{ "name": "big_overview", "anchor": "tile", "offset": [256, 256], "distance": 5000, "pitch": -50, "yaw": 30, "orbit": 10, "hold": 10 },
+			{ "name": "big_ridge", "anchor": "tile", "offset": [160, 120], "distance": 2200, "pitch": -35, "yaw": 200, "orbit": 6, "hold": 10 },
+			{ "name": "big_west_group", "anchor": "tile", "offset": [70, 80], "distance": 1600, "pitch": -45, "yaw": 0, "hold": 6 }
+		]
+	}
+}

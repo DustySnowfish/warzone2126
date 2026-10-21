@@ -69,8 +69,8 @@ static WZ_SEMAPHORE *dangerSemaphore = nullptr;
 static WZ_SEMAPHORE *dangerDoneSemaphore = nullptr;
 struct floodtile
 {
-	uint8_t x;
-	uint8_t y;
+	uint16_t x; // Warzone 2126: 16-bit, so maps can be wider than 256 tiles
+	uint16_t y;
 };
 static struct floodtile *floodbucket = nullptr;
 static int bucketcounter;

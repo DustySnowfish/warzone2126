@@ -455,3 +455,9 @@ players 2
 type    15
 dataset MULTI_CAM_1
 game    "multiplay/maps/PathBench.gam"
+
+level   W2126-Big512
+players 2
+type    15
+dataset MULTI_CAM_1
+game    "multiplay/maps/W2126-Big512.gam"
