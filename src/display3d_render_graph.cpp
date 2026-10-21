@@ -31,11 +31,14 @@
 
 #include "display3d_render_graph.h"
 
+#include <chrono>
+
 #include "display.h"
 #include "display3d_render_internal.h"
 #include "lighting.h"
 #include "loop.h"
 #include "profiling.h"
+#include "visualbench.h"
 #include "scene_prepass.h"
 #include "ssao.h"
 #include "ssr.h"
@@ -151,7 +154,7 @@ static void recordScenePass(const gfx_api::RenderPassContext& passCtx)
 
 	if (fusedTransparents)
 	{
-		particles::draw(fc.viewMatrix, fc.perspectiveMatrix);
+		{ const auto pdStart = std::chrono::steady_clock::now(); particles::draw(fc.viewMatrix, fc.perspectiveMatrix); visualBenchAddCpuMs("particlesDraw", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pdStart).count()); }
 	}
 
 	if (fusedTransparents && !gamePaused())
@@ -182,7 +185,7 @@ static void recordSceneTransparent(const gfx_api::RenderPassContext& passCtx)
 			fc.shadowCascadesInfo, shadowMap, fc.pointLights, MeshDepthPassMode::None,
 			MeshDrawParts::Translucent | MeshDrawParts::Additive, MeshFogMode::ForwardDistance);
 	}
-	particles::draw(fc.viewMatrix, fc.perspectiveMatrix);
+	{ const auto pdStart = std::chrono::steady_clock::now(); particles::draw(fc.viewMatrix, fc.perspectiveMatrix); visualBenchAddCpuMs("particlesDraw", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - pdStart).count()); }
 
 	if (!gamePaused())
 	{

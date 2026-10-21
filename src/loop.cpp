@@ -43,6 +43,8 @@
 #include "lib/netplay/netplay.h"
 
 #include "loop.h"
+
+#include <chrono>
 #include "gamestate_serialize.h"
 #include "movebench.h"
 #include "pathbench.h"
@@ -746,7 +748,9 @@ GAMECODE gameLoop()
 
 		unsigned before = wzGetTicks();
 		syncDebug("Begin game state update, gameTime = %d", gameTime);
+		const auto tickStart = std::chrono::steady_clock::now();
 		gameStateUpdate();
+		visualBenchAddCpuMs("gameLogic", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - tickStart).count());
 		gameStatePerfEndOfTick();
 		syncDebug("End game state update, gameTime = %d", gameTime);
 		unsigned after = wzGetTicks();

@@ -23,6 +23,8 @@
  */
 
 #include "visualbench.h"
+
+#include <map>
 #include "colour_grade.h"
 #include "environment_light.h"
 
@@ -77,6 +79,8 @@ struct ShotResult
 	std::string name;
 	std::vector<double> frameMs;
 	std::string screenshot;
+	std::map<std::string, double> cpuTotalMs; // per system, summed over the measured frames
+	size_t units = 0;                         // droids alive at the end of the shot
 };
 
 enum class Phase
@@ -297,6 +301,13 @@ void writeResults()
 		nlohmann::json s = statsFor(r.frameMs);
 		s["name"] = r.name;
 		s["screenshot"] = r.screenshot;
+		s["units"] = r.units;
+		nlohmann::json cpu = nlohmann::json::object();
+		for (const auto& c : r.cpuTotalMs)
+		{
+			cpu[c.first] = r.frameMs.empty() ? 0.0 : c.second / static_cast<double>(r.frameMs.size()); // average ms per frame
+		}
+		s["cpuMsPerFrame"] = cpu;
 		shotList.push_back(s);
 		all.insert(all.end(), r.frameMs.begin(), r.frameMs.end());
 	}
@@ -343,6 +354,14 @@ void startShot(size_t index)
 
 } // anonymous namespace
 
+void visualBenchAddCpuMs(const char* system, double ms)
+{
+	if (active && phase == Phase::Measure && !results.empty())
+	{
+		results.back().cpuTotalMs[system] += ms;
+	}
+}
+
 void visualBenchSelect(const std::string &name)
 {
 	active = true;
@@ -376,7 +395,8 @@ void visualBenchLevelLoaded()
 		return;
 	}
 
-	if (selectedPlayer < MAX_PLAYERS && !NetPlay.players[selectedPlayer].isSpectator)
+	// "localAI": "none" leaves the local player's units to the test's rules script (scripted battles)
+	if (localAI != "none" && selectedPlayer < MAX_PLAYERS && !NetPlay.players[selectedPlayer].isSpectator)
 	{
 		jsAutogameSpecific(WzString::fromUtf8("multiplay/skirmish/" + localAI), selectedPlayer, AIDifficulty::DEFAULT);
 	}
@@ -452,6 +472,12 @@ void visualBenchFrame()
 			results.back().frameMs.push_back(frameMs);
 			if (t >= shot.hold)
 			{
+				size_t units = 0;
+				for (unsigned player = 0; player < MAX_PLAYERS; ++player)
+				{
+					units += gameWorld.objects.droids[player].size();
+				}
+				results.back().units = units;
 				char name[64];
 				snprintf(name, sizeof(name), "%02zu_%s.png", shotIndex + 1, shot.name.c_str());
 				results.back().screenshot = name;

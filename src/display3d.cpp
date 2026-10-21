@@ -98,6 +98,8 @@
 #include "particles.h"
 #include "wreck_physics.h"
 #include "hit_feedback.h"
+#include <chrono>
+#include "visualbench.h"
 #include "range_rings.h"
 #include "scene_effect_surfaces.h"
 #include "multistat.h"
@@ -1396,8 +1398,14 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 	/* This is done here as effects can light the terrain - pause mode problems though */
 	wzPerfBegin(PERF_EFFECTS, "3D scene - effects");
 	processEffects(perspectiveViewMatrix, lightData);
-	particles::update(lightData);
-	wreck_physics::update();
+	{
+		const auto fxStart = std::chrono::steady_clock::now();
+		particles::update(lightData);
+		const auto fxMid = std::chrono::steady_clock::now();
+		wreck_physics::update();
+		visualBenchAddCpuMs("particlesUpdate", std::chrono::duration<double, std::milli>(fxMid - fxStart).count());
+		visualBenchAddCpuMs("wrecksUpdate", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fxMid).count());
+	}
 	queueSelectionRings();
 	queueEarthworkPreview();
 	atmosUpdateSystem(gameWorld.map);
@@ -2489,7 +2497,11 @@ static void displayDynamicObjects(const glm::mat4 &viewMatrix, const glm::mat4 &
 	}
 
 	// Warzone 2126: tumbling and settled vehicle wrecks
-	wreck_physics::draw(viewMatrix);
+	{
+		const auto wreckStart = std::chrono::steady_clock::now();
+		wreck_physics::draw(viewMatrix);
+		visualBenchAddCpuMs("wrecksDraw", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - wreckStart).count());
+	}
 
 	// Walk through destroyed objects.
 	for (const auto& obj : psDestroyedObj)

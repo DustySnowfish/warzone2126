@@ -1,0 +1,35 @@
+{
+	"challenge": {
+		"map": "MoveBench-Corridor",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 1,
+		"name": "Visual bench - big battle",
+		"version": 2
+	},
+	"scripts": {
+		"rules": "movebench_perf_battle.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 8,
+		"warmupSpeed": 1,
+		"settleSeconds": 1,
+		"shots": [
+			{ "name": "battle_wide", "anchor": "tile", "offset": [32, 17], "distance": 2600, "pitch": -50, "yaw": 0, "orbit": 30, "hold": 15 },
+			{ "name": "battle_close", "anchor": "tile", "offset": [32, 17], "distance": 1300, "pitch": -35, "yaw": 45, "orbit": 40, "hold": 15 },
+			{ "name": "battle_aftermath", "anchor": "tile", "offset": [32, 17], "distance": 1800, "pitch": -45, "yaw": 180, "orbit": 20, "hold": 10 }
+		]
+	}
+}

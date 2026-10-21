@@ -29,6 +29,7 @@
  */
 
 #include "particles.h"
+#include "warzoneconfig.h"
 
 #include "objectdef.h"
 #include "map.h"
@@ -229,6 +230,8 @@ struct State
 	std::unordered_map<uint32_t, TrailState> trails;
 	std::unordered_map<uint32_t, TrailState> vehicleTrails;
 	std::vector<gfx_api::ParticleInstance> frameRings; // drawn this frame only (selection rings)
+	std::vector<gfx_api::ParticleInstance> groundInstances; // flat ground marks: drawn first, in spawn order, unsorted
+	std::vector<gfx_api::ParticleInstance> combinedInstances; // reused upload buffer
 	size_t groundMarks = 0;                            // live particles of ground layers
 	std::unordered_map<std::string, PropulsionVfx> byPropulsion;
 	uint32_t frameCounter = 0;
@@ -730,10 +733,14 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 	const glm::vec3 axis = dirLen > 1e-4f ? dir / dirLen : glm::vec3(0.f, 1.f, 0.f);
 	for (const Layer& layer : effect.layers)
 	{
-		const int count = static_cast<int>(std::lround(pick(layer.count)));
+		// Effects Detail setting: fewer particles on lower settings (but at least one, so nothing vanishes)
+		static const float kDetailScale[3] = { 0.45f, 0.7f, 1.f };
+		const float picked = pick(layer.count);
+		const int count = std::max(picked > 0.f ? 1 : 0, static_cast<int>(std::lround(picked * kDetailScale[war_getEffectsDetail()])));
 		for (int i = 0; i < count && s.alive.size() < kMaxParticles; ++i)
 		{
-			if (layer.ground && s.groundMarks >= kMaxGroundMarks)
+			static const size_t kGroundMarksByDetail[3] = { 2500, 4500, kMaxGroundMarks };
+			if (layer.ground && s.groundMarks >= kGroundMarksByDetail[war_getEffectsDetail()])
 			{
 				break;
 			}
@@ -1109,13 +1116,28 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 
 	s.alphaInstances.clear();
 	s.additiveInstances.clear();
+	s.groundInstances.clear();
 	s.sortKeys.clear();
+	// Cull particles outside the view (conservatively, by their size plus a margin for stretched sparks)
+	const glm::mat4 viewProjection = projectionMatrix * viewMatrix;
+	const float projX = std::abs(projectionMatrix[0][0]);
+	const float projY = std::abs(projectionMatrix[1][1]);
 	for (size_t i = 0; i < s.alive.size(); ++i)
 	{
 		const Particle& p = s.alive[i];
 		const float t = p.age / p.life;
+		const float size = p.sizeStart + (p.sizeEnd - p.sizeStart) * t;
+		{
+			const glm::vec4 clip = viewProjection * glm::vec4(p.position, 1.f);
+			const float r = size * 1.5f + 96.f;
+			if (std::abs(clip.w) > 1e-3f && clip.w > 0.f
+				&& (std::abs(clip.x) - r * projX > clip.w || std::abs(clip.y) - r * projY > clip.w))
+			{
+				continue;
+			}
+		}
 		gfx_api::ParticleInstance inst;
-		inst.positionSize = glm::vec4(p.position, p.sizeStart + (p.sizeEnd - p.sizeStart) * t);
+		inst.positionSize = glm::vec4(p.position, size);
 		inst.colour = colourAt(*p.layer, t);
 		const float speed = glm::length(p.velocity);
 		inst.params = glm::vec4(p.rotation, p.frame, p.layer->stretch / std::max(p.scale, 0.01f), (p.layer->lit ? 1.f : 0.f) + (p.layer->ground ? 2.f : 0.f));
@@ -1123,6 +1145,10 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 		if (p.layer->additive)
 		{
 			s.additiveInstances.push_back(inst);
+		}
+		else if (p.layer->ground)
+		{
+			s.groundInstances.push_back(inst);
 		}
 		else
 		{
@@ -1133,14 +1159,20 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 	s.additiveInstances.insert(s.additiveInstances.end(), s.frameRings.begin(), s.frameRings.end());
 	// Alpha-blended particles back to front
 	std::sort(s.sortKeys.begin(), s.sortKeys.end(), [](const std::pair<float, size_t>& a, const std::pair<float, size_t>& b) { return a.first > b.first; });
-	std::vector<gfx_api::ParticleInstance> combined;
-	combined.reserve(s.alphaInstances.size() + s.additiveInstances.size());
+	std::vector<gfx_api::ParticleInstance>& combined = s.combinedInstances;
+	combined.clear();
+	combined.reserve(s.groundInstances.size() + s.alphaInstances.size() + s.additiveInstances.size());
+	combined.insert(combined.end(), s.groundInstances.begin(), s.groundInstances.end());
 	for (const auto& k : s.sortKeys)
 	{
 		combined.push_back(s.alphaInstances[k.second]);
 	}
 	const size_t alphaCount = combined.size();
 	combined.insert(combined.end(), s.additiveInstances.begin(), s.additiveInstances.end());
+	if (combined.empty())
+	{
+		return; // everything is off screen
+	}
 
 	s.bufferIndex = (s.bufferIndex + 1) % s.instanceBuffers.size();
 	gfx_api::buffer* instances = s.instanceBuffers[s.bufferIndex];

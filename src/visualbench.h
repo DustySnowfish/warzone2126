@@ -56,6 +56,9 @@
 #include <cstdint>
 #include <string>
 
+/// Adds CPU time spent in one system this frame (reported per shot as average ms per frame).
+void visualBenchAddCpuMs(const char* system, double ms);
+
 /// Selects the benchmark to run. Called from command-line parsing.
 void visualBenchSelect(const std::string &name);
 
