@@ -73,6 +73,8 @@
 #include <algorithm>
 #include <array>
 #include <chrono>
+#include <future>
+#include <memory>
 #include <cmath>
 #include <vector>
 
@@ -172,6 +174,8 @@ struct EnvParams
 	float cloudSoftness = 0.12f;
 	float cloudWindX = 40.f;      // world units per second
 	float cloudWindY = 15.f;
+	// Weather (Warzone 2126): off unless the file has a "weather" block
+	WeatherConfig weather;
 };
 
 struct State
@@ -188,9 +192,17 @@ struct State
 	EnvParams sky;
 	Dir sunDir;
 	Rgb sunColour;
+	// Warzone 2126: a rebuild for a moved sun runs on a worker thread; the old texture stays until it is done
+	std::future<std::shared_ptr<iV_Image>> pending;
 };
 
 State state;
+// Warzone 2126 time of day: per-frame multipliers on the sky colours, and the sun colour for the environment
+Rgb skyTintZenith { 1.f, 1.f, 1.f };
+Rgb skyTintHorizon { 1.f, 1.f, 1.f };
+Rgb timeOfDaySunColour { 1.f, 0.95f, 0.85f };
+float weatherCloudBoost = 0.f; // Warzone 2126 weather: 0..1, more and darker cloud
+float weatherHazeBoost = 0.f;  // Warzone 2126 weather: 0..1, haze closes in
 
 const char* tilesetName(MAP_TILESET tileset)
 {
@@ -350,6 +362,26 @@ bool parseEnv(const std::string& path, EnvParams& out)
 			out.cloudWindY = std::max(-2000.f, std::min(2000.f, (*windIt)[1].get<float>()));
 		}
 	}
+	auto weatherIt = doc.find("weather");
+	if (weatherIt != doc.end() && weatherIt->is_object())
+	{
+		const nlohmann::json& w = *weatherIt;
+		const auto typeIt = w.find("type");
+		const std::string type = (typeIt != w.end() && typeIt->is_string()) ? typeIt->get<std::string>() : "";
+		out.weather.type = type == "rain" ? WeatherConfig::Type::Rain : type == "snow" ? WeatherConfig::Type::Snow : type == "dust" ? WeatherConfig::Type::Dust : WeatherConfig::Type::None;
+		auto range = [&](const char* key, float& lo, float& hi, float minV, float maxV) {
+			auto it = w.find(key);
+			if (it != w.end() && it->is_array() && it->size() == 2 && (*it)[0].is_number() && (*it)[1].is_number())
+			{
+				lo = std::max(minV, std::min(maxV, (*it)[0].get<float>()));
+				hi = std::max(lo, std::min(maxV, (*it)[1].get<float>()));
+			}
+		};
+		range("clear", out.weather.clearMin, out.weather.clearMax, 10.f, 7200.f);
+		range("storm", out.weather.stormMin, out.weather.stormMax, 10.f, 7200.f);
+		out.weather.strength = jsonFloat(w, "strength", out.weather.strength, 0.f, 1.f);
+		out.weather.startChance = jsonFloat(w, "startChance", out.weather.startChance, 0.f, 1.f);
+	}
 	auto hazeIt = doc.find("haze");
 	if (hazeIt != doc.end() && hazeIt->is_object())
 	{
@@ -507,7 +539,7 @@ void buildTexture(const Radiance& src, iV_Image& image)
 	}
 }
 
-void rebuild(const std::string& key, const std::string& envFile, const Dir& sunDir, const Rgb& sunColour)
+void rebuild(const std::string& key, const std::string& envFile, const Dir& sunDir, const Rgb& sunColour, bool async)
 {
 	EnvParams params;
 	const bool haveParams = !envFile.empty() && parseEnv(envFile, params);
@@ -542,6 +574,18 @@ void rebuild(const std::string& key, const std::string& envFile, const Dir& sunD
 		return;
 	}
 
+	if (async)
+	{
+		// Only the sun moved: build off the main thread so a moving sun never stalls a frame
+		auto pano = std::make_shared<iV_Image>(std::move(panorama));
+		state.pending = std::async(std::launch::async, [params, sunDir, sunColour, pano, havePanorama]() {
+			const Radiance src = buildSource(params, sunDir, sunColour, havePanorama ? pano.get() : nullptr);
+			auto image = std::make_shared<iV_Image>();
+			buildTexture(src, *image);
+			return image;
+		});
+		return;
+	}
 	const auto start = std::chrono::steady_clock::now();
 	const Radiance src = buildSource(params, sunDir, sunColour, havePanorama ? &panorama : nullptr);
 	iV_Image image;
@@ -568,7 +612,8 @@ void update()
 	const Dir sunDir = normalise(Dir { -sun.x, -sun.y, -sun.z });
 	const char* level = getLevelName();
 	char sunKey[64];
-	snprintf(sunKey, sizeof(sunKey), "%.2f,%.2f,%.2f", static_cast<double>(sunDir.x), static_cast<double>(sunDir.y), static_cast<double>(sunDir.z));
+	snprintf(sunKey, sizeof(sunKey), "%.2f,%.2f,%.2f|%.1f,%.1f", static_cast<double>(sunDir.x), static_cast<double>(sunDir.y), static_cast<double>(sunDir.z),
+	         static_cast<double>(timeOfDaySunColour.g), static_cast<double>(timeOfDaySunColour.b));
 	const std::string key = std::string(level ? level : "") + "|" + tilesetName(currentMapTileset) + "|" + sunKey;
 
 	const auto now = std::chrono::steady_clock::now();
@@ -581,10 +626,29 @@ void update()
 			|| fileTime(envFile) != state.envFileTime
 			|| fileTime(state.imageFile) != state.imageFileTime;
 	}
-	if (changed)
+	// A finished background rebuild: upload it
+	if (state.pending.valid() && state.pending.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
 	{
-		const Rgb sunColour { 1.f, 0.95f, 0.85f };
-		rebuild(key, findEnvFile(), sunDir, sunColour);
+		std::shared_ptr<iV_Image> image = state.pending.get();
+		if (image && state.haveSky)
+		{
+			if (state.texture == nullptr)
+			{
+				state.texture = gfx_api::context::get().create_texture(1, kOutWidth, kOutHeight * kLevels, gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8, "environmentLight");
+			}
+			if (state.texture != nullptr && state.texture->upload(0, *image))
+			{
+				pie_SetEnvironmentMap(state.texture);
+			}
+		}
+	}
+	if (changed && !state.pending.valid())
+	{
+		// The sun moving alone (time of day) is rebuilt in the background; a new map or file at once
+		const std::string oldPrefix = state.key.substr(0, state.key.rfind('|'));
+		const std::string newPrefix = key.substr(0, key.rfind('|'));
+		const bool sunOnly = !state.key.empty() && oldPrefix == newPrefix && state.texture != nullptr;
+		rebuild(key, findEnvFile(), sunDir, timeOfDaySunColour, sunOnly);
 		state.nextFileCheck = now + std::chrono::seconds(1);
 	}
 }
@@ -599,9 +663,9 @@ bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix)
 	const glm::mat4 rotationOnly = glm::mat4(glm::mat3(viewMatrix));
 	gfx_api::constant_buffer_type<SHADER_SKY_DOME> constants {};
 	constants.invViewProj = glm::inverse(projectionMatrix * rotationOnly);
-	constants.zenith = glm::vec4(p.skyZenith.r, p.skyZenith.g, p.skyZenith.b, 0.f);
-	constants.horizon = glm::vec4(p.skyHorizon.r, p.skyHorizon.g, p.skyHorizon.b, 0.f);
-	constants.ground = glm::vec4(p.ground.r, p.ground.g, p.ground.b, 0.f);
+	constants.zenith = glm::vec4(p.skyZenith.r * skyTintZenith.r, p.skyZenith.g * skyTintZenith.g, p.skyZenith.b * skyTintZenith.b, 0.f);
+	constants.horizon = glm::vec4(p.skyHorizon.r * skyTintHorizon.r, p.skyHorizon.g * skyTintHorizon.g, p.skyHorizon.b * skyTintHorizon.b, 0.f);
+	constants.ground = glm::vec4(p.ground.r * skyTintHorizon.r, p.ground.g * skyTintHorizon.g, p.ground.b * skyTintHorizon.b, 0.f);
 	constants.sunDir = glm::vec4(state.sunDir.x, state.sunDir.y, state.sunDir.z, 0.f);
 	constants.sunColour = glm::vec4(state.sunColour.r, state.sunColour.g, state.sunColour.b, 0.f);
 	constants.params = glm::vec4(p.skyHorizonSharpness, p.skySunGlow, p.skySunDisc, p.skyBrightness);
@@ -614,7 +678,7 @@ bool drawSky(const glm::mat4& projectionMatrix, const glm::mat4& viewMatrix)
 
 bool hazeActive()
 {
-	return state.haveSky && (state.sky.hazeStrength > 0.f || state.sky.cloudStrength > 0.f) && gfx_api::context::get().hdrActive();
+	return state.haveSky && (state.sky.hazeStrength > 0.f || state.sky.cloudStrength > 0.f || weatherCloudBoost > 0.f || weatherHazeBoost > 0.f) && gfx_api::context::get().hdrActive();
 }
 
 void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
@@ -628,9 +692,9 @@ void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 	const InGame3DFrameContext& fc = pie_GetInGame3DFrameContext();
 	const EnvParams& p = state.sky;
 	constants.invViewProj = glm::inverse(fc.perspectiveMatrix * glm::mat4(glm::mat3(fc.viewMatrix)));
-	constants.hazeZenith = glm::vec4(p.skyZenith.r, p.skyZenith.g, p.skyZenith.b, 0.f);
-	constants.hazeHorizon = glm::vec4(p.skyHorizon.r, p.skyHorizon.g, p.skyHorizon.b, 0.f);
-	constants.hazeGround = glm::vec4(p.ground.r, p.ground.g, p.ground.b, 0.f);
+	constants.hazeZenith = glm::vec4(p.skyZenith.r * skyTintZenith.r, p.skyZenith.g * skyTintZenith.g, p.skyZenith.b * skyTintZenith.b, 0.f);
+	constants.hazeHorizon = glm::vec4(p.skyHorizon.r * skyTintHorizon.r, p.skyHorizon.g * skyTintHorizon.g, p.skyHorizon.b * skyTintHorizon.b, 0.f);
+	constants.hazeGround = glm::vec4(p.ground.r * skyTintHorizon.r, p.ground.g * skyTintHorizon.g, p.ground.b * skyTintHorizon.b, 0.f);
 	constants.hazeSunDir = glm::vec4(state.sunDir.x, state.sunDir.y, state.sunDir.z, 0.f);
 	constants.hazeSunColour = glm::vec4(state.sunColour.r, state.sunColour.g, state.sunColour.b, p.skySunGlow);
 	// The camera pivot in render space is (x, -z) of the game position
@@ -638,17 +702,43 @@ void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 	constants.hazeShape = glm::vec4(p.skyHorizonSharpness, p.skyBrightness, pivot.x - fc.cameraPos.x, pivot.y - fc.cameraPos.z);
 	// The classic renderer draws a square of terrain around the pivot; haze completes before its edge
 	const float halfDrawn = static_cast<float>(world_coord(std::min(visibleTiles.x, visibleTiles.y) / 2 - 2));
-	constants.haze = glm::vec4(halfDrawn * p.hazeStart, halfDrawn * p.hazeEnd, p.hazeStrength, 0.f);
-	if (p.cloudStrength > 0.f && state.sunDir.y > 0.f)
+	// Weather pulls the haze in closer and makes it stronger
+	const float hazeNear = p.hazeStart * (1.f - 0.75f * weatherHazeBoost);
+	const float hazeFar = std::max(hazeNear + 0.01f, p.hazeEnd * (1.f - 0.45f * weatherHazeBoost));
+	constants.haze = glm::vec4(halfDrawn * hazeNear, halfDrawn * hazeFar, std::max(p.hazeStrength, weatherHazeBoost), 0.f);
+	const float cloudStrength = std::min(0.85f, p.cloudStrength + 0.4f * weatherCloudBoost);
+	const float cloudCoverage = std::min(0.95f, p.cloudCoverage + 0.45f * weatherCloudBoost);
+	if (cloudStrength > 0.f && state.sunDir.y > 0.f)
 	{
 		// Drift with display time; wrap far beyond any map so float precision holds
 		const double seconds = static_cast<double>(graphicsTime) / 1000.0;
 		const double wrap = static_cast<double>(p.cloudSize) * 512.0;
 		const float driftX = static_cast<float>(std::fmod(seconds * p.cloudWindX, wrap));
 		const float driftY = static_cast<float>(std::fmod(seconds * p.cloudWindY, wrap));
-		constants.cloud = glm::vec4(p.cloudCoverage, p.cloudStrength, 1.f / p.cloudSize, p.cloudHeight);
+		constants.cloud = glm::vec4(cloudCoverage, cloudStrength, 1.f / p.cloudSize, p.cloudHeight);
 		constants.cloudOffset = glm::vec4(fc.cameraPos.x - driftX, fc.cameraPos.z - driftY, p.cloudSoftness, 0.f);
 	}
+}
+
+void setTimeOfDay(const glm::vec3& zenithTint, const glm::vec3& horizonTint, const glm::vec3& sunColour)
+{
+	skyTintZenith = Rgb { zenithTint.r, zenithTint.g, zenithTint.b };
+	skyTintHorizon = Rgb { horizonTint.r, horizonTint.g, horizonTint.b };
+	// Rounded so tiny colour changes do not trigger environment rebuilds
+	auto q = [](float v) { return std::round(v * 20.f) / 20.f; };
+	timeOfDaySunColour = Rgb { q(sunColour.r), q(sunColour.g), q(sunColour.b) };
+}
+
+const WeatherConfig& weatherConfig()
+{
+	static const WeatherConfig none;
+	return state.haveSky ? state.sky.weather : none;
+}
+
+void setWeatherShading(float cloudBoost, float hazeBoost)
+{
+	weatherCloudBoost = std::max(0.f, std::min(1.f, cloudBoost));
+	weatherHazeBoost = std::max(0.f, std::min(1.f, hazeBoost));
 }
 
 float skyBandFade()
@@ -663,6 +753,10 @@ const std::string& currentName()
 
 void shutdown()
 {
+	if (state.pending.valid())
+	{
+		state.pending.wait();
+	}
 	pie_SetEnvironmentMap(nullptr);
 	delete state.texture;
 	state = State();

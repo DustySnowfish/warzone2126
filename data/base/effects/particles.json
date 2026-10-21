@@ -112,6 +112,26 @@
 			{"texture": "smoke", "blend": "alpha", "count": 1, "life": [5000, 7000], "size": [60, 420], "speed": [10, 25], "direction": "up", "spread": 10, "rise": 110, "drag": 0.3, "offset": 8, "spin": [5, 20], "lit": true, "colour": [{"rgb": [0.08, 0.075, 0.07], "alpha": 0}, {"t": 0.08, "rgb": [0.1, 0.095, 0.09], "alpha": 0.8}, {"t": 0.6, "rgb": [0.22, 0.21, 0.2], "alpha": 0.45}, {"rgb": [0.35, 0.34, 0.33], "alpha": 0}]}
 		]
 	},
+	"weather_rain": {
+		"layers": [
+			{"texture": "spark", "blend": "alpha", "count": 1, "life": [520, 600], "size": [8, 8], "sizeJitter": 0.25, "speed": [1500, 1750], "direction": "emitter", "spread": 2, "stretch": 0.8, "lit": false, "colour": [{"rgb": [0.8, 0.84, 0.9], "alpha": 0.5}, {"rgb": [0.8, 0.84, 0.9], "alpha": 0.5}]}
+		]
+	},
+	"weather_rain_splash": {
+		"layers": [
+			{"texture": "ring", "blend": "alpha", "orient": "ground", "count": 1, "life": [220, 320], "size": [4, 20], "speed": 0, "lit": true, "colour": [{"rgb": [0.82, 0.86, 0.92], "alpha": 0.45}, {"rgb": [0.82, 0.86, 0.92], "alpha": 0}]}
+		]
+	},
+	"weather_snow": {
+		"layers": [
+			{"texture": "glow", "blend": "alpha", "count": 1, "life": [6500, 8000], "size": [7, 6], "sizeJitter": 0.35, "speed": [110, 160], "direction": "emitter", "spread": 18, "spin": [20, 60], "lit": true, "colour": [{"rgb": [0.97, 0.98, 1.0], "alpha": 0}, {"t": 0.08, "rgb": [0.97, 0.98, 1.0], "alpha": 0.9}, {"t": 0.9, "rgb": [0.97, 0.98, 1.0], "alpha": 0.9}, {"rgb": [0.97, 0.98, 1.0], "alpha": 0}]}
+		]
+	},
+	"weather_dust": {
+		"layers": [
+			{"texture": "dust", "blend": "alpha", "count": 1, "life": [4500, 6500], "size": [260, 620], "sizeJitter": 0.3, "speed": [220, 340], "direction": "emitter", "spread": 12, "spin": [5, 15], "lit": true, "colour": [{"rgb": [0.78, 0.62, 0.46], "alpha": 0}, {"t": 0.2, "rgb": [0.78, 0.62, 0.46], "alpha": 0.28}, {"t": 0.75, "rgb": [0.8, 0.66, 0.5], "alpha": 0.22}, {"rgb": [0.8, 0.66, 0.5], "alpha": 0}]}
+		]
+	},
 	"damage_smoke": {
 		"layers": [
 			{"texture": "smoke", "blend": "alpha", "count": 1, "life": [1600, 2400], "size": [30, 150], "speed": [10, 30], "direction": "up", "spread": 25, "rise": 70, "drag": 0.6, "offset": 10, "spin": [10, 40], "colour": [{"rgb": [0.18, 0.17, 0.16], "alpha": 0}, {"t": 0.12, "rgb": [0.2, 0.19, 0.18], "alpha": 0.75}, {"rgb": [0.4, 0.39, 0.38], "alpha": 0}]}

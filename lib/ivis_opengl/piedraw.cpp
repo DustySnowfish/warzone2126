@@ -102,10 +102,24 @@ void pie_InitLighting()
 	memcpy(lightingDefault, defaultLight, sizeof(lightingDefault));
 }
 
-glm::vec4 pie_GetLighting0(LIGHTING_TYPE entry)
+// Warzone 2126: display-only multiplier on the light colours (weather, time of day); never saved
+static glm::vec3 lightingTint[LIGHT_MAX] = { glm::vec3(1.f), glm::vec3(1.f), glm::vec3(1.f), glm::vec3(1.f) };
+
+void pie_SetLightingTint(LIGHTING_TYPE entry, const glm::vec3& tint)
+{
+	lightingTint[entry] = tint;
+}
+
+glm::vec4 pie_GetLighting0Untinted(LIGHTING_TYPE entry)
 {
 	auto c = lighting0[entry];
 	return glm::vec4(c[0], c[1], c[2], c[3]);
+}
+
+glm::vec4 pie_GetLighting0(LIGHTING_TYPE entry)
+{
+	auto c = lighting0[entry];
+	return glm::vec4(c[0] * lightingTint[entry].r, c[1] * lightingTint[entry].g, c[2] * lightingTint[entry].b, c[3]);
 }
 
 void pie_Lighting0(LIGHTING_TYPE entry, const float value[4])
@@ -1682,9 +1696,9 @@ bool InstancedMeshRenderer::DrawAll(uint64_t currentGameFrame, const glm::mat4& 
 	perFrameUniformsShaderOnce.reset();
 
 	// Generate global (per-frame) uniforms
-	glm::vec4 sceneColor(lighting0[LIGHT_EMISSIVE][0], lighting0[LIGHT_EMISSIVE][1], lighting0[LIGHT_EMISSIVE][2], lighting0[LIGHT_EMISSIVE][3]);
-	glm::vec4 ambient(lighting0[LIGHT_AMBIENT][0], lighting0[LIGHT_AMBIENT][1], lighting0[LIGHT_AMBIENT][2], lighting0[LIGHT_AMBIENT][3]);
-	glm::vec4 diffuse(lighting0[LIGHT_DIFFUSE][0], lighting0[LIGHT_DIFFUSE][1], lighting0[LIGHT_DIFFUSE][2], lighting0[LIGHT_DIFFUSE][3]);
+	glm::vec4 sceneColor = pie_GetLighting0(LIGHT_EMISSIVE);
+	glm::vec4 ambient = pie_GetLighting0(LIGHT_AMBIENT);
+	glm::vec4 diffuse = pie_GetLighting0(LIGHT_DIFFUSE);
 	glm::vec4 specular(lighting0[LIGHT_SPECULAR][0], lighting0[LIGHT_SPECULAR][1], lighting0[LIGHT_SPECULAR][2], lighting0[LIGHT_SPECULAR][3]);
 	const auto& renderState = getCurrentRenderState();
 	const bool forwardFogEnabled = fogMode == MeshFogMode::ForwardDistance && pie_GetFogEnabled();

@@ -28,6 +28,7 @@
 #include "lib/ivis_opengl/piepalette.h"
 
 #include "atmos.h"
+#include "particles.h"
 #include "display3d.h"
 #include "effects.h"
 #include "loop.h"
@@ -259,7 +260,7 @@ void atmosUpdateSystem(WorldMapState& mapState)
 	UDWORD	numberToAdd;
 	Vector3f pos;
 
-	if (!asAtmosParts || !weatherEnabled)
+	if (!asAtmosParts || !weatherEnabled || particles::hasEffect("weather_rain")) // Warzone 2126: weather.cpp draws it
 	{
 		return;
 	}
@@ -340,7 +341,7 @@ void atmosDrawParticles(const glm::mat4 &viewMatrix, const glm::mat4 &perspectiv
 	WZ_PROFILE_SCOPE(atmosDrawParticles);
 	UDWORD	i;
 
-	if (weather == WT_NONE || !asAtmosParts || !weatherEnabled)
+	if (weather == WT_NONE || !asAtmosParts || !weatherEnabled || particles::hasEffect("weather_rain")) // Warzone 2126: weather.cpp draws it
 	{
 		return;
 	}

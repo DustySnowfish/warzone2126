@@ -204,6 +204,22 @@ vec4 main_bumpMapping() {
 			bump.N = mix(bump.N, normalize(bump.N + vec3(n - 0.5, n2 - 0.5, 0.0) * 0.9), k);
 		}
 	}
+	// Warzone 2126 weather: wet ground darkens and shines (most in hollows); snow settles on flat ground
+	if (weatherGround > 0.0)
+	{
+		float hollow = clamp(texture(terrainDeform, uvLightmap, 0.f).r * 3.0, 0.0, 1.0);
+		float wet = weatherGround * (0.75 + 0.25 * hollow);
+		bump.color.rgb *= 1.0 - 0.25 * wet;
+		bump.gloss = mix(bump.gloss, 1.0, wet * (0.55 + 0.45 * hollow));
+	}
+	else if (weatherGround < 0.0)
+	{
+		vec3 worldN = normalize(transpose(ModelTangentMatrix) * normalize(bump.N));
+		float drift = wzCraterNoise(posModelSpace.xz * 0.012);
+		float cover = clamp(-weatherGround * smoothstep(0.55, 0.9, worldN.y) * (0.6 + 0.6 * drift), 0.0, 1.0);
+		bump.color.rgb = mix(bump.color.rgb, vec3(0.84, 0.87, 0.92), cover);
+		bump.gloss = mix(bump.gloss, 0.3, cover);
+	}
 	bump.N = normalize(bump.N);
 	return doBumpMapping(bump, groundLightDir, groundHalfVec);
 }

@@ -707,7 +707,7 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
-		auto optionInfo = OptionInfo("gfx.weather", N_("Weather"), N_("Show weather effects, like rain and snow, on maps that use them."));
+		auto optionInfo = OptionInfo("gfx.weather", N_("Weather"), N_("Rain, snow and dust storms that come and go, with wet or snowy ground. Visual only: it does not affect the game."));
 		auto valueChanger = OptionsDropdown<bool>::make(
 			[]() {
 				OptionChoices<bool> result;
@@ -720,6 +720,29 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 			},
 			[](const auto& newValue) -> bool {
 				atmosSetWeatherEnabled(newValue);
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.timeOfDay", N_("Time of Day"), N_("The map's own light, a fixed time of day, or a full day and night every 24 minutes. Visual only: it does not affect the game."));
+		auto valueChanger = OptionsDropdown<int>::make(
+			[]() {
+				OptionChoices<int> result;
+				result.choices = {
+					{ _("Map Default"), "", 0 },
+					{ _("Dawn"), "", 1 },
+					{ _("Day"), "", 2 },
+					{ _("Dusk"), "", 3 },
+					{ _("Night"), "", 4 },
+					{ _("Day and Night Cycle"), "", 5 },
+				};
+				result.setCurrentIdxForValue(war_getTimeOfDay());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setTimeOfDay(newValue);
 				return true;
 			}, false
 		);

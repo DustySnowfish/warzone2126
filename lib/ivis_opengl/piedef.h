@@ -68,6 +68,10 @@ void pie_setShadows(bool drawShadows);
 void pie_InitLighting();
 void pie_Lighting0(LIGHTING_TYPE entry, const float value[4]);
 glm::vec4 pie_GetLighting0(LIGHTING_TYPE entry);
+/// The light colour as set by the map or a script, without the display tint (for saving)
+glm::vec4 pie_GetLighting0Untinted(LIGHTING_TYPE entry);
+/// Warzone 2126: display-only colour multiplier for one light (weather, time of day)
+void pie_SetLightingTint(LIGHTING_TYPE entry, const glm::vec3& tint);
 
 void pie_InitializeInstancedRenderer();
 /// Frees the mesh batch storage the renderer keeps across frames. For ending a match, so a finished

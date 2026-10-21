@@ -277,6 +277,8 @@ bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration 
 void war_setHullSuspension(bool enabled);
 bool war_getHitFlash(); // units and buildings flash when hit
 void war_setHitFlash(bool enabled);
+int war_getTimeOfDay(); // time_of_day::Mode: 0 map default, 1 dawn, 2 day, 3 dusk, 4 night, 5 cycle
+void war_setTimeOfDay(int mode);
 bool war_getTaa(); // temporal anti-aliasing (needs HDR)
 void war_setTaa(bool enabled);
 int war_getColourGrading(); // percent strength of the per-map colour grade (needs HDR)

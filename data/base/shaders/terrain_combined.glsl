@@ -23,7 +23,7 @@ layout(std140) uniform cbuffer {
 	float tessMaxLevel;
 	float WZ_MIP_LOAD_BIAS;
 	int bucketDimensionUsed;
-	float pad1;
+	float weatherGround; // Warzone 2126: > 0 wet ground (rain), < 0 snow cover
 	// Last because its length follows the grid dimension
 	ivec4 bucketOffsetAndSize[WZ_BUCKET_DIMENSION * WZ_BUCKET_DIMENSION];
 };

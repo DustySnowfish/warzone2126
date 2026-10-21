@@ -34,10 +34,32 @@
 
 #include "lib/framework/vector.h"
 #include "lib/ivis_opengl/gfx_api.h"
-#include <glm/fwd.hpp>
+#include <glm/glm.hpp>
 
 namespace environment_light
 {
+
+/// Weather for a tileset or map (the environment file's "weather" block). Display only.
+struct WeatherConfig
+{
+	enum class Type { None, Rain, Snow, Dust };
+	Type type = Type::None;
+	float clearMin = 240.f;   // seconds of clear weather between storms
+	float clearMax = 600.f;
+	float stormMin = 90.f;    // seconds a storm lasts
+	float stormMax = 220.f;
+	float strength = 1.f;     // how heavy the storms get, 0..1
+	float startChance = 0.3f; // chance a map starts in a storm
+};
+
+/// The weather settings of the current environment (type None without one).
+const WeatherConfig& weatherConfig();
+
+/// Time of day: multipliers on the sky colours (zenith; horizon and ground) and the sun's colour.
+void setTimeOfDay(const glm::vec3& zenithTint, const glm::vec3& horizonTint, const glm::vec3& sunColour);
+
+/// Weather effect on the sky: more and darker cloud shadows, haze closing in (each 0..1).
+void setWeatherShading(float cloudBoost, float hazeBoost);
 
 /// Rebuild the environment if the map, the sun or the file changed, and hand it to the
 /// renderer. Call once per frame before 3D models are drawn.

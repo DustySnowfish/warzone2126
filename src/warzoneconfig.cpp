@@ -135,6 +135,7 @@ struct WARZONE_GLOBALS
 	bool physicalWrecks = true;
 	bool hullSuspension = true;
 	bool hitFlash = true;
+	int timeOfDay = 0; // time_of_day::Mode: 0 map default
 	// UI config
 	bool groupsMenuEnabled = true;
 	uint8_t optionsButtonVisibility = 100;
@@ -1029,6 +1030,16 @@ bool war_getHitFlash()
 void war_setHitFlash(bool enabled)
 {
 	warGlobs.hitFlash = enabled;
+}
+
+int war_getTimeOfDay()
+{
+	return warGlobs.timeOfDay;
+}
+
+void war_setTimeOfDay(int mode)
+{
+	warGlobs.timeOfDay = std::max(0, std::min(mode, 5));
 }
 
 bool war_getTaa()

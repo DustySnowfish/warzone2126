@@ -14,5 +14,6 @@
 		"sunDisc": 1.0,
 		"brightness": 1.0,
 		"bandFade": 0.35
-	}
+	},
+	"weather": { "type": "snow", "clear": [240, 600], "storm": [150, 300], "strength": 1.0, "startChance": 0.35 }
 }

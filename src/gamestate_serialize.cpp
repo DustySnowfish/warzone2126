@@ -76,6 +76,7 @@
 #include "scores.h"    // missionData
 #include "wrappers.h"  // testPlayerHasWon/Lost
 #include "lighting.h"  // getTheSun/setTheSun (presentation section)
+#include "time_of_day.h"
 #include "atmos.h"     // atmosGet/SetWeatherType (presentation section)
 #include "display3d.h" // setSkyBox / getCurrentSkybox* / radarPermitted (presentation section)
 #include "advvis.h"    // get/setRevealStatus (presentation section)
@@ -4345,12 +4346,12 @@ static nlohmann::ordered_json writePresentation()
 	nlohmann::ordered_json j = nlohmann::ordered_json::object();
 	j["version"] = PRESENTATION_SECTION_VERSION;
 
-	const Vector3f sun = getTheSun();
+	const Vector3f sun = time_of_day::sunForSaving(); // Warzone 2126: not the time-of-day sun
 	j["sun"] = nlohmann::ordered_json::array({ sun.x, sun.y, sun.z });
 
-	j["ambient"] = writeLightVec4(pie_GetLighting0(LIGHT_AMBIENT));
-	j["diffuse"] = writeLightVec4(pie_GetLighting0(LIGHT_DIFFUSE));
-	j["specular"] = writeLightVec4(pie_GetLighting0(LIGHT_SPECULAR));
+	j["ambient"] = writeLightVec4(pie_GetLighting0Untinted(LIGHT_AMBIENT));
+	j["diffuse"] = writeLightVec4(pie_GetLighting0Untinted(LIGHT_DIFFUSE));
+	j["specular"] = writeLightVec4(pie_GetLighting0Untinted(LIGHT_SPECULAR));
 
 	j["fogColour"] = pie_GetFogColour().rgba();
 	j["weather"] = static_cast<int>(atmosGetWeatherType());

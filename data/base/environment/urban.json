@@ -14,5 +14,6 @@
 		"sunDisc": 1.0,
 		"brightness": 1.0,
 		"bandFade": 0.35
-	}
+	},
+	"weather": { "type": "rain", "clear": [240, 600], "storm": [120, 260], "strength": 1.0, "startChance": 0.3 }
 }

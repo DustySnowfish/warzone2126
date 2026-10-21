@@ -98,6 +98,8 @@
 #include "particles.h"
 #include "wreck_physics.h"
 #include "hit_feedback.h"
+#include "weather.h"
+#include "time_of_day.h"
 #include <chrono>
 #include "visualbench.h"
 #include "range_rings.h"
@@ -1403,6 +1405,8 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 		particles::update(lightData);
 		const auto fxMid = std::chrono::steady_clock::now();
 		wreck_physics::update();
+		weather::update();
+		time_of_day::update();
 		visualBenchAddCpuMs("particlesUpdate", std::chrono::duration<double, std::milli>(fxMid - fxStart).count());
 		visualBenchAddCpuMs("wrecksUpdate", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fxMid).count());
 	}
@@ -1600,6 +1604,8 @@ bool init3DView()
 	particles::initialise();
 	wreck_physics::clear();
 	hit_feedback::clear();
+	weather::reset();
+	time_of_day::reset();
 
 	return true;
 }
@@ -1641,6 +1647,8 @@ void shutdown3DView_FullReset()
 	particles::shutdown();
 	wreck_physics::clear();
 	hit_feedback::clear();
+	weather::reset();
+	time_of_day::reset();
 	range_rings::shutdown();
 
 	setLightingManager(nullptr);

@@ -36,3 +36,27 @@ An optional `clouds` block casts soft shadows of drifting clouds over the map (n
 | height | 1800 | Height of the cloud layer above the camera, game units; shadows follow the sun direction |
 | softness | 0.12 | Width of the soft shadow edge |
 | wind | [40, 15] | Drift in game units per second (x east, y towards the bottom of the map) |
+
+## Weather
+
+An optional `weather` block makes storms come and go on maps with this environment. Display only: each player sees their own weather, and it never affects the game.
+
+```json
+"weather": { "type": "rain", "clear": [240, 600], "storm": [120, 260], "strength": 1.0, "startChance": 0.3 }
+```
+
+| Key | Default | Meaning |
+|---|---|---|
+| type | none | `rain`, `snow` or `dust` |
+| clear | [240, 600] | Seconds of clear weather between storms (random within the range) |
+| storm | [90, 220] | Seconds a storm lasts |
+| strength | 1 | How heavy storms get, 0..1 |
+| startChance | 0.3 | Chance that a game starts in a storm |
+
+A storm builds up and clears over about 20 seconds. While it lasts:
+- rain falls with splashes, the ground turns dark and glossy (wettest in craters) and dries over about a minute and a half afterwards;
+- snow drifts down and settles white on flat ground over two minutes, melting slowly afterwards;
+- dust blows across the map in large clouds and tints the light;
+- cloud shadows thicken, the distance haze closes in and the sun dims.
+
+A campaign script's `setWeather()` overrides the block. The Weather option in the graphics settings turns all of it off. The tileset defaults are dust for Arizona, snow for Rockies and rain for Urban.

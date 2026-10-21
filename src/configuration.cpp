@@ -811,6 +811,7 @@ bool loadConfig()
 	war_setPhysicalWrecks(iniGetBool("physicalWrecks2126", war_getPhysicalWrecks()).value());
 	war_setHullSuspension(iniGetBool("hullSuspension2126", war_getHullSuspension()).value());
 	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
+	war_setTimeOfDay(iniGetInteger("timeOfDay2126", war_getTimeOfDay()).value());
 	{
 		std::string smaaValue = iniGetString("smaa", "off").value();
 		if (smaaValue == "low")
@@ -1149,6 +1150,7 @@ bool saveConfig()
 	iniSetBool("physicalWrecks2126", war_getPhysicalWrecks());
 	iniSetBool("hullSuspension2126", war_getHullSuspension());
 	iniSetBool("hitFlash2126", war_getHitFlash());
+	iniSetInteger("timeOfDay2126", war_getTimeOfDay());
 	switch (war_getSmaaMode())
 	{
 		case SMAA_MODE::OFF: iniSetString("smaa", "off"); break;

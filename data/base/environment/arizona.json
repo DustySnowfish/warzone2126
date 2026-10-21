@@ -22,5 +22,6 @@
 		"height": 1800,
 		"softness": 0.14,
 		"wind": [45, 18]
-	}
+	},
+	"weather": { "type": "dust", "clear": [300, 720], "storm": [80, 160], "strength": 0.8, "startChance": 0.2 }
 }

@@ -38,6 +38,9 @@
 
 #include "map.h"
 #include "lighting.h"
+#include "visualbench.h"
+
+#include <chrono>
 #include "display3d.h"
 #include "terrain.h"
 #include "warzoneconfig.h"
@@ -64,7 +67,9 @@ void setTheSun(Vector3f newSun)
 	if(oldSun != theSun)
 	{
 		// The sun has changed - must relcalulate lighting
+		const auto relightStart = std::chrono::steady_clock::now();
 		initLighting(gameWorld.map, 0, 0, gameWorld.map.width, gameWorld.map.height);
+		visualBenchAddCpuMs("tileRelight", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - relightStart).count());
 	}
 }
 
