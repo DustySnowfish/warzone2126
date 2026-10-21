@@ -32,6 +32,7 @@
 #include "stats.h"
 #include "move.h"						// for ordering droids
 #include "terrain_deform.h"
+#include "tunnels.h"
 #include "objmem.h"
 #include "power.h"						// for powercalculated
 #include "order.h"
@@ -676,6 +677,8 @@ static bool validDroidInfoOrderData(QueuedDroidInfo const &info, DROID_ORDER_DAT
 			return castDroid(sOrder.psObj)->droidType == DROID_COMMAND;
 		case DORDER_BUILDMODULE:
 			return getModuleStat(static_cast<const STRUCTURE *>(sOrder.psObj)) != nullptr;
+		case DORDER_TUNNEL:
+			return sOrder.psObj->type == OBJ_STRUCTURE && tunnels::isEntrance(static_cast<const STRUCTURE *>(sOrder.psObj));
 		default:
 			break;
 		}
@@ -696,6 +699,7 @@ static bool droidInfoOrderTargetApplies(QueuedDroidInfo const &info, DROID_ORDER
 		return aiCheckAlliances(sOrder.psObj->player, info.player);
 	case DORDER_EMBARK:
 	case DORDER_COMMANDERSUPPORT:
+	case DORDER_TUNNEL:
 		return sOrder.psObj->player == info.player;
 	case DORDER_ATTACK:
 	case DORDER_ATTACKTARGET:

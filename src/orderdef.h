@@ -55,7 +55,7 @@ enum DroidOrderType
 	DORDER_REPAIR,          /**< 8 - repair a structure. */
 	DORDER_OBSERVE,         /**< keep a target in sensor view. */
 	DORDER_FIRESUPPORT,     /**< 10 - attack whatever the linked sensor droid attacks. */
-	DORDER_UNUSED_4,
+	DORDER_TUNNEL,          /**< Warzone 2126: go through the tunnel network to the entrance psObj (former DORDER_UNUSED_4 slot). */
 	DORDER_UNUSED_2,
 	DORDER_RTB,             /**< return to base. */
 	DORDER_RTR,             /**< 14 - return to repair at any repair facility*/

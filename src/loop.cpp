@@ -70,6 +70,7 @@
 #include "multiplay.h" //ajl
 #include "levels.h"
 #include "visualbench.h"
+#include "tunnels.h"
 #include "visibility.h"
 #include "multimenu.h"
 #include "intelmap.h"
@@ -615,6 +616,7 @@ static void gameStateUpdate()
 		});
 	}
 
+	tunnels::update(gameWorld); // Warzone 2126: units going into and coming out of tunnels
 	missionTimerUpdate();
 
 	executeFnAndProcessScriptQueuedRemovals([]() { proj_UpdateAll(); });

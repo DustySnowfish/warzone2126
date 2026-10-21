@@ -5,4 +5,5 @@ function setupStructure(player)	// inside hackNetOff()
 	enableStructure("A0ResourceExtractor", player);
 	enableStructure("A0PowerGenerator", player);
 	enableStructure("A0ResearchFacility", player);
+	enableStructure("A0TunnelEntrance", player); // Warzone 2126 tunnel network (prototype)
 }

@@ -25,6 +25,7 @@
  */
 #include <string.h>
 
+#include "tunnels.h"
 #include "lib/framework/frame.h"
 #include "objects.h"
 #include "lib/gamelib/gtime.h"
@@ -654,6 +655,8 @@ static void freeAllEntitiesImpl(PerPlayerObjectLists<Entity, PlayerCount>& entit
 /* Remove all droids */
 void freeAllDroids(GameWorld& world)
 {
+	// Warzone 2126: units underground in tunnels are off the lists; put them back so they are freed too
+	tunnels::reset(world);
 	// objects killed but not yet vis-removed would be stranded by the world teardown - flush first
 	flushPendingVisRemoval(world);
 	freeAllEntitiesImpl<DROID, MAX_PLAYERS>(world.objects.droids, &world.map);

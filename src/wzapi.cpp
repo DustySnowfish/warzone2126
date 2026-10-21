@@ -4879,6 +4879,7 @@ nlohmann::json wzapi::getUsefulConstants()
 	constants["DORDER_HELPBUILD"] = DORDER_HELPBUILD;
 	constants["DORDER_LINEBUILD"] = DORDER_LINEBUILD;
 	constants["DORDER_EARTHWORK"] = DORDER_EARTHWORK; // Warzone 2126
+	constants["DORDER_TUNNEL"] = DORDER_TUNNEL; // Warzone 2126
 	constants["DORDER_DEMOLISH"] = DORDER_DEMOLISH;
 	constants["DORDER_REPAIR"] = DORDER_REPAIR;
 	constants["DORDER_OBSERVE"] = DORDER_OBSERVE;

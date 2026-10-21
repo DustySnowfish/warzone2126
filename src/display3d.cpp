@@ -100,6 +100,7 @@
 #include "hit_feedback.h"
 #include "weather.h"
 #include "time_of_day.h"
+#include "tunnels.h"
 #include <chrono>
 #include "visualbench.h"
 #include "range_rings.h"
@@ -136,6 +137,7 @@ static void	emitProjectileLights(LightingData &lightData);
 static void	drawDroidAndStructureSelections();
 static void	drawDroidSelections();
 static void	queueSelectionRings();
+static void	queueTunnelBlips();
 static void	queueEarthworkPreview();
 static void	emitConstructionSparks(const STRUCTURE *psStructure);
 static void	drawStructureSelections();
@@ -1411,6 +1413,7 @@ static void drawTiles(iView *player, LightingData& lightData, LightMap& lightmap
 		visualBenchAddCpuMs("wrecksUpdate", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - fxMid).count());
 	}
 	queueSelectionRings();
+	queueTunnelBlips();
 	queueEarthworkPreview();
 	atmosUpdateSystem(gameWorld.map);
 	avUpdateTiles(gameWorld.map);
@@ -4323,6 +4326,31 @@ static void queueEarthworkPreview()
 }
 
 /// Warzone 2126: glowing rings on the ground under the player's selected units, coloured by health
+/// Warzone 2126: your units moving through the tunnel network show as blips along a faint
+/// line between the two entrances (drawn on the ground; the units themselves are underground).
+static void queueTunnelBlips()
+{
+	for (const tunnels::TransitView& t : tunnels::transitsForDisplay())
+	{
+		if (t.player != selectedPlayer)
+		{
+			continue;
+		}
+		const glm::vec2 from(static_cast<float>(t.from.x), static_cast<float>(t.from.y));
+		const glm::vec2 to(static_cast<float>(t.to.x), static_cast<float>(t.to.y));
+		const float length = glm::length(to - from);
+		const int dots = std::max(2, static_cast<int>(length / (TILE_UNITS * 1.5f)));
+		for (int i = 0; i <= dots; ++i)
+		{
+			const glm::vec2 p = glm::mix(from, to, static_cast<float>(i) / static_cast<float>(dots));
+			particles::frameRing(Vector3f(p.x, p.y, 0.f), 44.f, glm::vec3(0.45f, 0.95f, 1.4f), 0.45f);
+		}
+		const glm::vec2 at = glm::mix(from, to, t.progress);
+		const float pulse = 0.75f + 0.25f * std::sin(static_cast<float>(graphicsTime) * 0.012f);
+		particles::frameRing(Vector3f(at.x, at.y, 0.f), 120.f * pulse, glm::vec3(0.8f, 1.8f, 2.8f), 1.f);
+	}
+}
+
 static void queueSelectionRings()
 {
 	if (selectedPlayer >= MAX_PLAYERS)

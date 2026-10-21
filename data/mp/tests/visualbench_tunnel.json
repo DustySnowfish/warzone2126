@@ -1,0 +1,35 @@
+{
+	"challenge": {
+		"map": "MoveBench-Corridor",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 1,
+		"name": "Visual bench - tunnel network",
+		"version": 2
+	},
+	"scripts": {
+		"rules": "visualbench_tunnel.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 4,
+		"warmupSpeed": 1,
+		"settleSeconds": 0,
+		"shots": [
+			{ "name": "tunnel_going_in", "anchor": "tile", "offset": [32, 17], "distance": 4200, "pitch": -70, "yaw": 0, "hold": 3 },
+			{ "name": "tunnel_underground", "anchor": "tile", "offset": [32, 17], "distance": 4200, "pitch": -70, "yaw": 0, "hold": 6 },
+			{ "name": "tunnel_out", "anchor": "tile", "offset": [32, 17], "distance": 4200, "pitch": -70, "yaw": 0, "hold": 20 }
+		]
+	}
+}

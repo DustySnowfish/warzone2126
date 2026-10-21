@@ -35,6 +35,7 @@
 #include "objects.h"
 #include "order.h"
 #include "terrain_deform.h"
+#include "tunnels.h"
 #include "ordersource.h"
 #include "action.h"
 #include "map.h"
@@ -573,6 +574,14 @@ bool orderUpdateDroid(DROID *psDroid)
 		if (psDroid->action == DACTION_NONE || psDroid->action == DACTION_ATTACK)
 		{
 			psDroid->order = DroidOrder(DORDER_NONE);
+		}
+		break;
+	case DORDER_TUNNEL:
+		// Warzone 2126: walk to the nearest entrance; tunnels::update() takes the unit down
+		if (tunnels::orderUpdate(psDroid))
+		{
+			psDroid->order = DroidOrder(DORDER_NONE);
+			actionDroid(psDroid, DACTION_NONE);
 		}
 		break;
 	case DORDER_EARTHWORK:
@@ -1629,6 +1638,9 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 		actionDroid(psDroid, DACTION_BUILD, psOrder->pos.x, psOrder->pos.y);
 		objTrace(psDroid->id, "Starting new construction effort of %s", psOrder->psStats ? getStatsName(psOrder->psStats) : "NULL");
 		break;
+	case DORDER_TUNNEL:
+		tunnels::orderStart(psDroid, psOrder);
+		break;
 	case DORDER_EARTHWORK:
 		// Warzone 2126: go to the area, then raise or lower the ground there (see orderUpdateDroid)
 		if (!psDroid->isConstructionDroid() || !worldOnMap(gameWorld.map, psOrder->pos) || !worldOnMap(gameWorld.map, psOrder->pos2))
@@ -2138,6 +2150,7 @@ bool validTargetForOrder(DROID_ORDER order, BASE_OBJECT const *psObj)
 	case DORDER_RESTORE:
 	case DORDER_REARM:
 	case DORDER_RTR_SPECIFIED:
+	case DORDER_TUNNEL:
 		return psObj != nullptr && psObj->type == OBJ_STRUCTURE;
 	case DORDER_DROIDREPAIR:
 	case DORDER_COMMANDERSUPPORT:
@@ -2194,7 +2207,7 @@ bool validOrderForObj(DROID_ORDER order)
 	       order == DORDER_FIRESUPPORT || order == DORDER_RTR || order == DORDER_EMBARK ||
 	       order == DORDER_ATTACKTARGET || order == DORDER_COMMANDERSUPPORT || order == DORDER_BUILDMODULE ||
 	       order == DORDER_GUARD || order == DORDER_DROIDREPAIR || order == DORDER_RESTORE ||
-	       order == DORDER_REARM || order == DORDER_RECOVER || order == DORDER_RTR_SPECIFIED;
+	       order == DORDER_REARM || order == DORDER_RECOVER || order == DORDER_RTR_SPECIFIED || order == DORDER_TUNNEL;
 }
 
 
@@ -2509,6 +2522,7 @@ bool orderDroidList(DROID *psDroid)
 		case DORDER_HELPBUILD:
 		case DORDER_BUILDMODULE:
 		case DORDER_RECOVER:
+		case DORDER_TUNNEL:
 			ASSERT(sOrder.psStats == nullptr, "Extra %s parameters.", getDroidOrderName(sOrder.type));
 			sOrder.psStats = nullptr;
 			break;
@@ -2970,7 +2984,11 @@ DroidOrder chooseOrderObj(DROID *psDroid, BASE_OBJECT *psObj, bool altOrder)
 		if (order.type == DORDER_NONE)
 		{
 			/* check repair facility and in need of repair */
-			if (psStruct->pStructureType->type == REF_REPAIR_FACILITY &&
+			if (tunnels::isEntrance(psStruct) && psStruct->status == SS_BUILT && psStruct->player == psDroid->player && tunnels::canUse(psDroid))
+			{
+				order = DroidOrder(DORDER_TUNNEL, psObj); // Warzone 2126: through the tunnel network to here
+			}
+			else if (psStruct->pStructureType->type == REF_REPAIR_FACILITY &&
 			    psStruct->status == SS_BUILT)
 			{
 				order = DroidOrder(DORDER_RTR_SPECIFIED, psObj);
@@ -4386,7 +4404,7 @@ const char *getDroidOrderName(DROID_ORDER order)
 	case DORDER_REPAIR:                   return "DORDER_REPAIR";
 	case DORDER_OBSERVE:                  return "DORDER_OBSERVE";
 	case DORDER_FIRESUPPORT:              return "DORDER_FIRESUPPORT";
-	case DORDER_UNUSED_4:                 return "DORDER_UNUSED_4";
+	case DORDER_TUNNEL:                   return "DORDER_TUNNEL";
 	case DORDER_UNUSED_2:                 return "DORDER_UNUSED_2";
 	case DORDER_RTB:                      return "DORDER_RTB";
 	case DORDER_RTR:                      return "DORDER_RTR";
@@ -4435,7 +4453,7 @@ const char *getDroidOrderKey(DROID_ORDER order)
 	case DORDER_REPAIR:                   return "R";
 	case DORDER_OBSERVE:                  return "O";
 	case DORDER_FIRESUPPORT:              return "F";
-	case DORDER_UNUSED_4:                 return "Err";
+	case DORDER_TUNNEL:                   return "TUN";
 	case DORDER_UNUSED_2:                 return "Err";
 	case DORDER_RTB:                      return "RTB";
 	case DORDER_RTR:                      return "RTR";
