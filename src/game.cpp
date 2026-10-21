@@ -4814,6 +4814,7 @@ static bool loadMainFile(const std::string &fileName)
 	{
 		game.gameTimeLimitMinutes = save.value("gameTimeLimitMinutes").toUInt();
 	}
+	game.unitLimit = clampUnitLimit2126(static_cast<uint16_t>(save.value("unitLimit", 150).toUInt()));
 	if (save.contains("playerLeaveMode"))
 	{
 		game.playerLeaveMode = static_cast<PLAYER_LEAVE_MODE>(save.value("playerLeaveMode").toInt());
@@ -5088,6 +5089,7 @@ static bool writeMainFile(const std::string &fileName, SDWORD saveType)
 	save.setValue("useTerrainOverrides", useTerrainOverrides);
 	save.setValue("inactivityMinutes", game.inactivityMinutes);
 	save.setValue("gameTimeLimitMinutes", game.gameTimeLimitMinutes);
+	save.setValue("unitLimit", game.unitLimit);
 	save.setValue("playerLeaveMode", game.playerLeaveMode);
 	save.setValue("playerReconnectWaitSeconds", game.playerReconnectWaitSeconds);
 	save.setValue("blindMode", game.blindMode);

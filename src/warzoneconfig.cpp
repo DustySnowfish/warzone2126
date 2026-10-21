@@ -25,6 +25,7 @@
 
 #include "lib/framework/frame.h"
 #include "warzoneconfig.h"
+#include "multiplay.h"
 #include "lib/ivis_opengl/piestate.h"
 #include "lib/ivis_opengl/piepalette.h"
 #include "lib/sound/sounddefs.h"
@@ -96,6 +97,7 @@ struct WARZONE_GLOBALS
 	int oldLogsLimit = MAX_OLD_LOGS;
 	uint32_t MPinactivityMinutes = 5;
 	uint32_t MPgameTimeLimitMinutes = 0; // default to unlimited
+	uint16_t MPunitLimit = 150; // Warzone 2126: units per player
 	uint8_t MPopenSpectatorSlots = 0;
 	PLAYER_LEAVE_MODE MPplayerLeaveMode = PLAYER_LEAVE_MODE_DEFAULT;
 	uint16_t MPplayerReconnectWaitSeconds = PLAYER_RECONNECT_WAIT_SECONDS_DEFAULT;
@@ -742,6 +744,16 @@ void war_setMPInactivityMinutes(uint32_t minutes)
 		minutes = MIN_MPINACTIVITY_MINUTES;
 	}
 	warGlobs.MPinactivityMinutes = minutes;
+}
+
+uint16_t war_getMPUnitLimit()
+{
+	return warGlobs.MPunitLimit;
+}
+
+void war_setMPUnitLimit(uint16_t limit)
+{
+	warGlobs.MPunitLimit = clampUnitLimit2126(limit);
 }
 
 uint32_t war_getMPGameTimeLimitMinutes()

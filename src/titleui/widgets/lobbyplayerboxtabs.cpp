@@ -336,6 +336,29 @@ std::shared_ptr<OptionsForm> LobbyHostOptionsForm::makeHostOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("defaults.hosting.unitLimit2126", N_("Unit Limit"), N_("Units each player may have. Trucks and commanders scale with it. More units means bigger battles and more work for the computer."));
+		optionInfo.addAvailabilityCondition(IsNotInGame);
+		auto valueChanger = OptionsDropdown<uint16_t>::make(
+			[]() {
+				OptionChoices<uint16_t> result;
+				result.choices = {
+					{ _("150 (classic)"), "", 150 },
+					{ _("300"), "", 300 },
+					{ _("500"), "", 500 },
+				};
+				result.setCurrentIdxForValue(war_getMPUnitLimit());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setMPUnitLimit(newValue);
+				game.unitLimit = war_getMPUnitLimit();
+				sendOptions();
+				return true;
+			}, false
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("defaults.hosting.gameTimeLimit", N_("Game Time Limit"), "");
 		optionInfo.addAvailabilityCondition(IsNotInGame);
 		auto valueChanger = OptionsDropdown<uint32_t>::make(

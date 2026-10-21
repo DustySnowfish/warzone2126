@@ -642,6 +642,8 @@ wzapi::scripting_instance* scripting_engine::loadPlayerScript(const WzString& pa
 	globalVars["scavengers"] = game.scavengers;
 	//== * ```mapWidth``` Width of map in tiles.
 	globalVars["mapWidth"] = gameWorld.map.width;
+	//== * ```unitLimit``` Warzone 2126: the game's unit limit per player (150, 300 or 500).
+	globalVars["unitLimit"] = game.unitLimit;
 	//== * ```mapHeight``` Height of map in tiles.
 	globalVars["mapHeight"] = gameWorld.map.height;
 	//== * ```scavengerPlayer``` Index of scavenger player. (3.2+ only)

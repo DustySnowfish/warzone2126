@@ -203,6 +203,8 @@ int war_getOldLogsLimit();
 void war_setOldLogsLimit(int oldLogsLimit);
 uint32_t war_getMPInactivityMinutes();
 void war_setMPInactivityMinutes(uint32_t minutes);
+uint16_t war_getMPUnitLimit(); // Warzone 2126: units per player in multiplayer and skirmish
+void war_setMPUnitLimit(uint16_t limit);
 uint32_t war_getMPGameTimeLimitMinutes();
 void war_setMPGameTimeLimitMinutes(uint32_t minutes);
 uint16_t war_getMPopenSpectatorSlots();

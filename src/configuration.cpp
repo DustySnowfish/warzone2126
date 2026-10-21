@@ -547,6 +547,8 @@ bool loadConfig()
 	game.inactivityMinutes = war_getMPInactivityMinutes();
 	war_setMPGameTimeLimitMinutes(iniGetInteger("gameTimeLimitMinutesMP", war_getMPGameTimeLimitMinutes()).value());
 	game.gameTimeLimitMinutes = war_getMPGameTimeLimitMinutes();
+	war_setMPUnitLimit(static_cast<uint16_t>(iniGetInteger("unitLimit2126", war_getMPUnitLimit()).value()));
+	game.unitLimit = war_getMPUnitLimit();
 	war_setMPPlayerLeaveMode(iniGetPlayerLeaveMode("playerLeaveModeMP", war_getMPPlayerLeaveMode()).value());
 	game.playerLeaveMode = war_getMPPlayerLeaveMode();
 	war_setMPPlayerReconnectWaitSeconds(iniGetInteger("playerReconnectWaitSecondsMP", war_getMPPlayerReconnectWaitSeconds()).value());
@@ -1083,6 +1085,7 @@ bool saveConfig()
 				iniSetFromCString("gameName", game.name, 128);			//  last hosted game
 				war_setMPInactivityMinutes(game.inactivityMinutes);
 				war_setMPGameTimeLimitMinutes(game.gameTimeLimitMinutes);
+				war_setMPUnitLimit(game.unitLimit);
 				war_setMPPlayerLeaveMode(game.playerLeaveMode);
 				war_setMPPlayerReconnectWaitSeconds(game.playerReconnectWaitSeconds);
 
@@ -1103,6 +1106,7 @@ bool saveConfig()
 	iniSetInteger("colourMP", war_getMPcolour());
 	iniSetInteger("inactivityMinutesMP", war_getMPInactivityMinutes());
 	iniSetInteger("gameTimeLimitMinutesMP", war_getMPGameTimeLimitMinutes());
+	iniSetInteger("unitLimit2126", war_getMPUnitLimit());
 	iniSetInteger("playerLeaveModeMP", (int)war_getMPPlayerLeaveMode());
 	iniSetInteger("playerReconnectWaitSecondsMP", (int)war_getMPPlayerReconnectWaitSeconds());
 	iniSetInteger("openSpectatorSlotsMP", war_getMPopenSpectatorSlots());
@@ -1308,6 +1312,7 @@ bool reloadMPConfig()
 	game.alliance = iniSectionGetInteger(iniGeneral, "alliance", NO_ALLIANCES).value();
 	game.inactivityMinutes = war_getMPInactivityMinutes();
 	game.gameTimeLimitMinutes = war_getMPGameTimeLimitMinutes();
+	game.unitLimit = war_getMPUnitLimit();
 	game.playerLeaveMode = war_getMPPlayerLeaveMode();
 	game.playerReconnectWaitSeconds = war_getMPPlayerReconnectWaitSeconds();
 	game.blindMode = BLIND_MODE::NONE;

@@ -84,10 +84,17 @@ struct MULTIPLAYERGAME
 	uint16_t	playerReconnectWaitSeconds = PLAYER_RECONNECT_WAIT_SECONDS_DEFAULT;	// Max seconds the host holds a dropped player's slot for a mid-match reconnect before declaring them left (0 = do not wait)
 	BLIND_MODE	blindMode = BLIND_MODE::NONE;
 	uint16_t	pathfindingBackend = 65535;	// congestion feature bitmask (PathfindingFeature), every feature on by default, synced, locked before the match starts
+	uint16_t	unitLimit = 150;			// Warzone 2126: units per player (150, 300 or 500); the rules script scales trucks and commanders with it
 
 	// NOTE: If adding to this struct, a lot of things probably require changing
 	// (send/recvOptions? loadMainFile/writeMainFile? to/from_json in multiint.h.cpp?)
 };
+
+/// Warzone 2126: the unit limit options; anything else becomes the nearest allowed value
+inline uint16_t clampUnitLimit2126(uint16_t limit)
+{
+	return limit >= 500 ? 500 : limit >= 300 ? 300 : 150;
+}
 
 struct MULTISTRUCTLIMITS
 {

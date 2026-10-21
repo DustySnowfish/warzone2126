@@ -1621,6 +1621,7 @@ bool ParseCommandLine(int argc, const char * const *argv)
 			}
 			war_setMPGameTimeLimitMinutes(static_cast<uint32_t>(token_intval));
 			game.gameTimeLimitMinutes = war_getMPGameTimeLimitMinutes();
+			game.unitLimit = war_getMPUnitLimit();
 			break;
 		}
 

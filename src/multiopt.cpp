@@ -120,6 +120,8 @@ void sendOptions()
 	game.playerReconnectWaitSeconds = clampPlayerReconnectWaitSeconds(game.playerReconnectWaitSeconds);
 	NETuint16_t(w, game.playerReconnectWaitSeconds);
 	NETuint16_t(w, game.pathfindingBackend);
+	game.unitLimit = clampUnitLimit2126(game.unitLimit);
+	NETuint16_t(w, game.unitLimit);
 
 	for (unsigned i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -251,6 +253,13 @@ bool recvOptions(NETQUEUE queue)
 	}
 	game.playerReconnectWaitSeconds = tempPlayerReconnectWaitSeconds;
 	NETuint16_t(r, game.pathfindingBackend);
+	NETuint16_t(r, game.unitLimit);
+	if (clampUnitLimit2126(game.unitLimit) != game.unitLimit)
+	{
+		debug(LOG_ERROR, "Invalid unitLimit value specified: %" PRIu16, game.unitLimit);
+		NETend(r);
+		return false;
+	}
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{

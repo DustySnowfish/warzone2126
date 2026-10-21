@@ -7808,6 +7808,7 @@ inline void to_json(nlohmann::json& j, const MULTIPLAYERGAME& p) {
 	j["playerReconnectWaitSeconds"] = p.playerReconnectWaitSeconds;
 	j["blindMode"] = p.blindMode;
 	j["pathfindingBackend"] = p.pathfindingBackend;
+	j["unitLimit"] = p.unitLimit;
 }
 
 inline void from_json(const nlohmann::json& j, MULTIPLAYERGAME& p) {
@@ -7836,6 +7837,7 @@ inline void from_json(const nlohmann::json& j, MULTIPLAYERGAME& p) {
 		// default to the old (4.2.0 beta-era) value of 4 minutes
 		p.inactivityMinutes = 4;
 	}
+	p.unitLimit = clampUnitLimit2126(j.value("unitLimit", static_cast<uint16_t>(150)));
 	if (j.contains("gameTimeLimitMinutes"))
 	{
 		p.gameTimeLimitMinutes = j.at("gameTimeLimitMinutes").get<uint32_t>();
