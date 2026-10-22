@@ -269,4 +269,12 @@ private:
 	std::unordered_map<MapFile, LoadedFileVersion, MapFileHash> m_fileVersions;
 };
 
+// Warzone 2126: named integer options handed to map scripts as the global object `mapOptions`
+// (for example the random map generator's landscape style and sliders). They stay in effect for
+// every script-generated map until changed; an empty list gives scripts an empty object.
+// Thread-safe: each script run takes a copy when it starts.
+using MapScriptOptions = std::vector<std::pair<std::string, int32_t>>;
+void setMapScriptOptions(const MapScriptOptions& options);
+MapScriptOptions getMapScriptOptions();
+
 } // namespace WzMap

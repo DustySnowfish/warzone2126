@@ -253,6 +253,7 @@ nlohmann::ordered_json writeSetupHeader(SaveType saveType)
 	jopt["playerReconnectWaitSeconds"] = game.playerReconnectWaitSeconds;
 	jopt["pathfindingBackend"] = game.pathfindingBackend;
 	jopt["unitLimit"] = game.unitLimit;
+	jopt["randomMap2126"] = game.randomMap.toStorageString();
 	j["options"] = std::move(jopt);
 
 	j["players"] = writePlayers();
@@ -378,6 +379,7 @@ SetupHeaderInfo readSetupHeader(const nlohmann::ordered_json &j)
 	// default to the legacy A* planner for snapshots written before this setting existed
 	game.pathfindingBackend = jopt.value("pathfindingBackend", static_cast<uint16_t>(0));
 	game.unitLimit = clampUnitLimit2126(jopt.value("unitLimit", static_cast<uint16_t>(150)));
+	game.randomMap = RandomMapSettings2126::fromStorageString(jopt.value("randomMap2126", std::string()));
 
 	readPlayers(j.at("players"));
 	readStructureLimits(j.at("structureLimits"));

@@ -35,6 +35,8 @@
 #include "infobutton.h"
 #include "advcheckbox.h"
 #include "optionsform.h"
+#include "randommapsettings2126.h"
+#include "src/randommap2126.h"
 
 #include "lib/netplay/netplay.h"
 
@@ -764,6 +766,11 @@ private:
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> allianceChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> powerChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> unitLimitChoice; // Warzone 2126
+	std::shared_ptr<LobbyMultiOptionsChoiceWidget> randomMapChoice; // Warzone 2126: Random map settings
+	std::shared_ptr<WzLobbyTextOptionButton> randomMapButton;
+public:
+	void displayRandomMapSettings2126(const std::shared_ptr<WIDGET>& psParent);
+private:
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> baseTypeChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> technologyChoice;
 	std::vector<std::shared_ptr<WzLobbyMultiOptionButton>> multiOptionButtons;
@@ -1175,6 +1182,27 @@ void WzMultiLobbyOptionsImpl::initialize(bool _isChallenge, const std::shared_pt
 	});
 	optionsList->addItem(wrapItemForList(unitLimitChoice));
 
+	// Random map settings (Warzone 2126): landscape, sliders and the shareable map code
+	randomMapChoice = std::make_shared<LobbyMultiOptionsChoiceWidget>(matchOptionsEditMode);
+	randomMapChoice->setLabel(_("Random map"));
+	{
+		const int bw = iV_GetImageWidth(FrontImages, IMAGE_POWLO);
+		const int bh = iV_GetImageHeight(FrontImages, IMAGE_POWLO);
+		randomMapButton = std::make_shared<WzLobbyTextOptionButton>();
+		randomMapButton->setLabelText(_("Settings"));
+		randomMapButton->setTip(_("Landscape, water, height, cliffs, oil, trees and feature size, and the map code to share this map"));
+		randomMapButton->setGeometry(0, 0, bw * 3 + 8, bh);
+		randomMapChoice->addButton(0, randomMapButton);
+		randomMapButton->addOnClickHandler([psWeakMultiLobbyOptions](W_BUTTON& button) {
+			auto strongOptions = psWeakMultiLobbyOptions.lock();
+			ASSERT_OR_RETURN(, strongOptions != nullptr, "No options form?");
+			strongOptions->displayRandomMapSettings2126(button.shared_from_this());
+		});
+	}
+	randomMapChoice->setGeometry(0, 0, randomMapChoice->idealWidth(), randomMapChoice->idealHeight());
+	randomMapChoice->setCanChooseHandler([](MultibuttonWidget&, int) -> bool { return false; }); // the button opens the panel
+	optionsList->addItem(wrapItemForList(randomMapChoice));
+
 	if (!isChallenge)
 	{
 		// Tech Level
@@ -1304,6 +1332,11 @@ void WzMultiLobbyOptionsImpl::setGameOptionStates()
 	if (unitLimitChoice)
 	{
 		unitLimitChoice->choose(game.unitLimit);
+	}
+	if (randomMapButton)
+	{
+		const bool isGeneratedRandom = randomMapIdentity2126(game.map, game.maxPlayers).has_value();
+		randomMapButton->setLabelText(isGeneratedRandom ? WzString::fromUtf8(randomMapSettingsSummary2126()) : WzString(_("Settings")));
 	}
 	if (technologyChoice)
 	{
@@ -1436,6 +1469,18 @@ void WzMultiLobbyOptionsImpl::displayPasswordOverlayForm(const std::shared_ptr<W
 		ASSERT_OR_RETURN(, strongPasswordPopover != nullptr, "No widget");
 		strongPasswordPopover->givePasswordFieldFocus();
 	});
+}
+
+void WzMultiLobbyOptionsImpl::displayRandomMapSettings2126(const std::shared_ptr<WIDGET>& psParent)
+{
+	std::weak_ptr<WzMultiLobbyOptionsImpl> weakMultiLobbyOptions = std::dynamic_pointer_cast<WzMultiLobbyOptionsImpl>(shared_from_this());
+	auto panel = makeRandomMapSettingsPanel2126([weakMultiLobbyOptions]() {
+		if (auto strongOptions = weakMultiLobbyOptions.lock())
+		{
+			strongOptions->refreshData();
+		}
+	});
+	displayOptionsOverlay(psParent, panel, []() { });
 }
 
 static std::shared_ptr<WzClickableOptionsChoiceWidget> addClickableMenuItem(const std::shared_ptr<PopoverMenuWidget>& menu, const WzString& text, const std::function<void (WIDGET_KEY)>& onClick, bool disabled = false)

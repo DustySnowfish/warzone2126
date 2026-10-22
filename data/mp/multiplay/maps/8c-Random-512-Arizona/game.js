@@ -80,9 +80,45 @@ function chooseStyle() {
 	}
 	return names[0];
 }
-const styleName = chooseStyle();
-const style = STYLES[styleName];
-log("W2126 random map: " + N + "x" + N + ", " + PLAYERS + " players, " + TS.name + ", " + style.label);
+// Settings from the lobby (Random map settings): mapOptions.style 0 random or 1-5, and sliders
+// 0-100 where 50 is the style's usual look. Missing options (older games, tests) mean 50 / random.
+const OPT = (typeof mapOptions === "object" && mapOptions !== null) ? mapOptions : {};
+function optv(name) { const v = OPT[name]; return (typeof v === "number") ? clamp(v, 0, 100) : 50; }
+const STYLE_KEYS = ["", "rolling", "plateaus", "lakes", "canyons", "highlands"];
+// The random pick is always drawn, so locking the style a random map came out with keeps the
+// rest of that map the same
+const randomStyleName = chooseStyle();
+const styleName = (OPT.style >= 1 && OPT.style <= 5) ? STYLE_KEYS[OPT.style] : randomStyleName;
+const baseStyle = STYLES[styleName];
+const style = {};
+for (const k of Object.keys(baseStyle)) { style[k] = baseStyle[k]; }
+const S_WATER = optv("water"), S_HEIGHT = optv("height"), S_CLIFFS = optv("cliffs");
+const S_OIL = optv("oil"), S_TREES = optv("trees"), S_SCALE = optv("scale");
+// Water: 0 dry, 50 the style's share, 100 about four times it (and some lakes even in dry styles)
+style.water = clamp(baseStyle.water * (S_WATER / 50) * (S_WATER / 50) + Math.max(0, S_WATER - 50) / 50 * 0.08, 0, 0.45);
+// Height: 0 nearly flat; above 50 taller (up to the engine's limit) with more contrast
+style.relief = baseStyle.relief * (S_HEIGHT <= 50 ? 0.2 + 0.8 * S_HEIGHT / 50 : 1 + (S_HEIGHT - 50) / 100);
+const heightContrast = S_HEIGHT > 50 ? 1 + (S_HEIGHT - 50) / 50 * 0.45 : 1;
+// Cliffs: terraces and how few ramps break them; 0-10 removes terraces altogether
+if (S_CLIFFS <= 10) {
+	style.terraces = 0;
+	style.cliff = Math.max(baseStyle.cliff, 150) + (10 - S_CLIFFS) * 10;
+} else if (baseStyle.terraces > 0) {
+	style.terraces = Math.max(2, baseStyle.terraces + Math.round((S_CLIFFS - 50) / 25));
+} else if (S_CLIFFS >= 70) {
+	style.terraces = 2 + Math.round((S_CLIFFS - 70) / 15);
+	style.cliff = 80;
+}
+const rampThreshold = 0.62 + (S_CLIFFS - 50) / 50 * 0.12;
+// Oil sites per player: half to one and a half times the usual
+const oilFactor = 0.5 + S_OIL / 100;
+// Trees, rocks and wrecks: none to twice the usual
+const decorFactor = S_TREES / 50;
+// Feature size: half to twice the size of the big landscape shapes
+const scaleFactor = Math.pow(2, (S_SCALE - 50) / 50);
+function scaled(base) { return Math.max(8, Math.round(base * scaleFactor / 8) * 8); }
+log("W2126 random map: " + N + "x" + N + ", " + PLAYERS + " players, " + TS.name + ", " + style.label +
+	", water " + S_WATER + " height " + S_HEIGHT + " cliffs " + S_CLIFFS + " oil " + S_OIL + " trees " + S_TREES + " scale " + S_SCALE);
 
 // ---------------------------------------------------------------------------------------------
 // Tileset look: ground types from low to high ground, plus special grounds.
@@ -123,10 +159,10 @@ function noise(range, crisp, scale) {
 	// Row-major, values 0..999
 	return generateFractalValueNoise(N, N, range, crisp, scale, 1000, [], true);
 }
-const bigScale = N >= 384 ? 128 : 64;
+const bigScale = scaled(N >= 384 ? 128 : 64);
 const nBase = noise(1 << 20, 6, bigScale);
 const nDetail = noise(1 << 20, 5, 16);
-const nMoist = noise(1 << 20, 6, 32);
+const nMoist = noise(1 << 20, 6, scaled(32));
 
 const elev = new Array(AREA);
 for (let i = 0; i < AREA; ++i) {
@@ -139,12 +175,13 @@ for (let i = 0; i < AREA; ++i) {
 		const r = Math.abs(e - 0.5) * 2;
 		e = clamp(Math.sqrt(r) * 1.05 - 0.05, 0, 1);
 	}
+	if (heightContrast !== 1) { e = clamp(0.5 + (e - 0.5) * heightContrast, 0, 1); }
 	elev[i] = e;
 }
 
 // Terraces: gently sloping shelves with a sharp step (a cliff) at each contour. Where the
 // ramp pattern is high the step stays smooth instead, which leaves natural ways up.
-const nRamp = noise(1 << 20, 5, N >= 256 ? 64 : 32);
+const nRamp = noise(1 << 20, 5, scaled(N >= 256 ? 64 : 32));
 function terrace(e, levels) {
 	if (levels <= 0) { return e; }
 	const t = e * levels;
@@ -154,7 +191,7 @@ function terrace(e, levels) {
 }
 if (style.terraces > 0) {
 	for (let i = 0; i < AREA; ++i) {
-		const m = clamp((nRamp[i] / 1000 - 0.62) * 5, 0, 1);
+		const m = clamp((nRamp[i] / 1000 - rampThreshold) * 5, 0, 1);
 		elev[i] = terrace(elev[i], style.terraces) * (1 - m) + elev[i] * m;
 	}
 }
@@ -214,7 +251,7 @@ for (const s of starts) { pads.push({ x: s[0], y: s[1], r: baseR, kind: "base" }
 
 // Oil sites: one pattern per player, rotated with them
 const wedge = PI / PLAYERS;
-const sitesPerPlayer = clamp(Math.round(AREA / PLAYERS / 2600), 3, 16);
+const sitesPerPlayer = clamp(Math.round(AREA / PLAYERS / 2600 * oilFactor), 2, 24);
 const sitePattern = []; // {da, rad, oils}
 {
 	let tries = 0;
@@ -307,7 +344,7 @@ if (waterLevel >= 0) {
 	for (let i = 0; i < AREA; ++i) { water[i] = elev[i] < waterLevel; }
 }
 const minH = 24;
-const reliefH = Math.round(470 * style.relief);
+const reliefH = Math.min(486, Math.round(470 * style.relief));
 const hgt = new Array(AREA);
 for (let i = 0; i < AREA; ++i) {
 	const e = water[i] ? waterLevel : elev[i];
@@ -447,7 +484,7 @@ function applyCuts() {
 	}
 }
 
-for (let round = 0; round < 3; ++round) {
+for (let round = 0; round < 8; ++round) {
 	if (connectAll() === 0) { break; }
 	applyCuts();
 }
@@ -745,23 +782,31 @@ if (!preview) {
 	for (let y = BORDER + 1; y < N - BORDER - 1; ++y) {
 		for (let x = BORDER + 1; x < N - BORDER - 1; ++x) {
 			const i = idx(x, y);
-			if (cat[i] !== LAND || occ[i] || keepClear[i]) { continue; }
+			if (cat[i] !== LAND || occ[i] || keepClear[i] || carved[i]) { continue; }
+			// Nothing within 2 tiles of a cliff or water, so narrow passes stay open
+			let nearEdge = false;
+			for (let dy = -2; dy <= 2 && !nearEdge; ++dy) {
+				for (let dx = -2; dx <= 2; ++dx) {
+					if (cat[idx(x + dx, y + dy)] !== LAND) { nearEdge = true; break; }
+				}
+			}
+			if (nearEdge) { continue; }
 			const m = nMoist[i] / 1000;
-			const treeChance = look.treeDensity * clamp((m - 0.45) * 5, 0, 3);
+			const treeChance = look.treeDensity * decorFactor * clamp((m - 0.45) * 5, 0, 3);
 			const r = randf();
 			if (r < treeChance) {
 				const list = look.snowTrees && hgt[i] > snowLine ? look.snowTrees : look.trees;
 				addFeature(pick(list), x, y);
-			} else if (r < treeChance + look.rockDensity) {
+			} else if (r < treeChance + look.rockDensity * decorFactor) {
 				addFeature(pick(look.rocks), x, y);
-			} else if (r < treeChance + look.rockDensity + look.wreckDensity) {
+			} else if (r < treeChance + (look.rockDensity + look.wreckDensity) * decorFactor) {
 				addFeature(pick(look.wrecks), x, y);
 			}
 		}
 	}
 	// Ruined city blocks: small grids of buildings with streets between
 	if (look.blocks.length) {
-		const districts = Math.round(AREA / 9000);
+		const districts = Math.round(AREA / 9000 * decorFactor);
 		for (let d = 0; d < districts; ++d) {
 			const cx = BORDER + 8 + rand(N - 2 * BORDER - 16), cy = BORDER + 8 + rand(N - 2 * BORDER - 16);
 			if (keepClear[idx(cx, cy)]) { continue; }

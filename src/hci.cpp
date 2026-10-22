@@ -57,6 +57,7 @@
 #include "game.h"
 #include "hci.h"
 #include "hci/unitbar2126.h"
+#include "randommap2126.h"
 #include "hci/hud2126_style.h"
 #include "ordersource.h"
 #include "ingameop.h"
@@ -1430,6 +1431,7 @@ INT_RETVAL intRunWidgets()
 	bool			quitting = false;
 
 	unitBar2126Update(); // Warzone 2126 interface: the selected-units bar follows the selection
+	announceRandomMapCode2126();
 
 	if (quitToMainMenuRequested)
 	{

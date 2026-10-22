@@ -25,6 +25,7 @@
 #define __INCLUDED_SRC_MULTIPLAY_H__
 
 #include "lib/framework/frame.h"
+#include "randommap2126.h"
 #include "ordersource.h"
 #include "lib/framework/types.h"
 #include "lib/framework/vector.h"
@@ -85,6 +86,7 @@ struct MULTIPLAYERGAME
 	BLIND_MODE	blindMode = BLIND_MODE::NONE;
 	uint16_t	pathfindingBackend = 65535;	// congestion feature bitmask (PathfindingFeature), every feature on by default, synced, locked before the match starts
 	uint16_t	unitLimit = 150;			// Warzone 2126: units per player (150, 300 or 500); the rules script scales trucks and commanders with it
+	RandomMapSettings2126 randomMap;		// Warzone 2126: random map generator settings and seed (see randommap2126.h)
 
 	// NOTE: If adding to this struct, a lot of things probably require changing
 	// (send/recvOptions? loadMainFile/writeMainFile? to/from_json in multiint.h.cpp?)

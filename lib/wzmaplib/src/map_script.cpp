@@ -56,6 +56,7 @@ __pragma(warning( pop ))
 #include "3rdparty/gsl_finally.h"
 #include <random>
 #include <chrono>
+#include <mutex>
 
 // QUICKJS HELPERS
 
@@ -815,6 +816,21 @@ static void QJSRuntimeFree_LeakHandler_Warning(const char* msg)
   #define QUICKJS_HAS_FEATURE(x) 0
 #endif
 
+static std::mutex mapScriptOptionsMutex;
+static MapScriptOptions mapScriptOptions;
+
+void setMapScriptOptions(const MapScriptOptions& options)
+{
+	std::lock_guard<std::mutex> guard(mapScriptOptionsMutex);
+	mapScriptOptions = options;
+}
+
+MapScriptOptions getMapScriptOptions()
+{
+	std::lock_guard<std::mutex> guard(mapScriptOptionsMutex);
+	return mapScriptOptions;
+}
+
 std::shared_ptr<Map> runMapScript(const std::vector<char>& fileBuffer, const std::string &path, uint32_t seed, bool preview, LoggingProtocol* pCustomLogger /*= nullptr*/)
 {
 	ScriptMapData data;
@@ -878,6 +894,14 @@ std::shared_ptr<Map> runMapScript(const std::vector<char>& fileBuffer, const std
 	}
 
 	JS_DefinePropertyValueStr(ctx, global_obj, "preview", JS_NewBool(ctx, preview), 0);
+	{
+		JSValue optionsObj = JS_NewObject(ctx);
+		for (const auto& option : getMapScriptOptions())
+		{
+			JS_SetPropertyStr(ctx, optionsObj, option.first.c_str(), JS_NewInt32(ctx, option.second));
+		}
+		JS_DefinePropertyValueStr(ctx, global_obj, "mapOptions", optionsObj, 0);
+	}
 	JS_DefinePropertyValueStr(ctx, global_obj, "XFLIP", JS_NewInt32(ctx, TILE_XFLIP), 0);
 	JS_DefinePropertyValueStr(ctx, global_obj, "YFLIP", JS_NewInt32(ctx, TILE_YFLIP), 0);
 	JS_DefinePropertyValueStr(ctx, global_obj, "ROTMASK", JS_NewInt32(ctx, TILE_ROTMASK), 0);

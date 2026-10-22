@@ -809,7 +809,10 @@ static void loadMapPreview(bool hideInterface, std::string mapName, const Sha256
 	auto gameLoadDetails = (psLevel->realFileName) ? GameLoadDetails::makeMapPackageLoad(psLevel->realFileName) : GameLoadDetails::makeLevelFileLoad(aFileName);
 
 	// load the map data
-	auto data = gameLoadDetails.getMap(rand());
+	// Warzone 2126: preview the random map the game will actually generate (same seed and settings)
+	const bool useLobbySeed = randomMapUsesLobbySeed2126();
+	applyRandomMapScriptOptions2126(useLobbySeed ? game.randomMap : RandomMapSettings2126());
+	auto data = gameLoadDetails.getMap(useLobbySeed ? game.randomMap.seed : static_cast<uint32_t>(rand()));
 	if (!data)
 	{
 		debug(LOG_ERROR, "Failed to load map from path: %s", aFileName.c_str());
@@ -5069,6 +5072,8 @@ static void updateMapSettings(LEVEL_DATASET *mapData)
 	game.maxPlayers = mapData->players;
 	game.isMapMod = CheckForMod(mapData->realFileName);
 	game.isRandom = CheckForRandom(mapData->realFileName, mapData->apDataFiles[0].c_str());
+	// Warzone 2126: a new map choice gets a new landscape (the host's settings stay)
+	game.randomMap.seed = newRandomMapSeed2126();
 }
 
 bool blindModeFromStr(const WzString& str, BLIND_MODE& mode_output)
@@ -5143,6 +5148,7 @@ static bool loadMapChallengeSettings(WzConfig& ini)
 			sstrcpy(game.map, mapName);
 			game.hash = mapHash;
 			game.maxPlayers = mapData->players;
+			game.isRandom = CheckForRandom(mapData->realFileName, mapData->apDataFiles[0].c_str()); // Warzone 2126: so the lobby seed and settings apply
 
 			uint8_t configuredMaxPlayers = ini.value("maxPlayers", game.maxPlayers).toUInt();
 			if (getHostLaunch() == HostLaunch::Autohost)
@@ -5164,6 +5170,19 @@ static bool loadMapChallengeSettings(WzConfig& ini)
 			sstrcpy(game.name, ini.value("name").toWzString().toUtf8().c_str());
 			game.techLevel = ini.value("techLevel", game.techLevel).toInt();
 			game.pathfindingBackend = static_cast<uint16_t>(ini.value("pathfindingBackend", game.pathfindingBackend).toInt());
+			// Warzone 2126: "randomMapCode" reproduces a random map (the code's map must match "map")
+			if (ini.contains("randomMapCode"))
+			{
+				auto decoded = decodeRandomMapCode2126(ini.value("randomMapCode").toWzString().toUtf8());
+				if (decoded.has_value())
+				{
+					game.randomMap = decoded->second;
+				}
+				else
+				{
+					debug(LOG_ERROR, "Invalid randomMapCode: the code was not recognised");
+				}
+			}
 
 			// Allow making the host a spectator (for MP games)
 			spectatorHost = ini.value("spectatorHost", false).toBool();
@@ -7127,6 +7146,12 @@ void WzMultiplayerOptionsTitleUI::start()
 		{
 			spectatorHost = false;
 			game.blindMode = BLIND_MODE::NONE;
+			// Warzone 2126: back from a game (or the first visit), a fresh random map seed; moving
+			// between lobby screens keeps the seed so the preview and code stay valid
+			if (randomMapSeedDue2126())
+			{
+				game.randomMap.seed = newRandomMapSeed2126();
+			}
 		}
 		defaultOpenSpectatorSlots = war_getMPopenSpectatorSlots();
 		if (!loadMapChallengeAndPlayerSettings(true))
@@ -7866,6 +7891,7 @@ inline void to_json(nlohmann::json& j, const MULTIPLAYERGAME& p) {
 	j["blindMode"] = p.blindMode;
 	j["pathfindingBackend"] = p.pathfindingBackend;
 	j["unitLimit"] = p.unitLimit;
+	j["randomMap2126"] = p.randomMap.toStorageString();
 }
 
 inline void from_json(const nlohmann::json& j, MULTIPLAYERGAME& p) {
@@ -7895,6 +7921,7 @@ inline void from_json(const nlohmann::json& j, MULTIPLAYERGAME& p) {
 		p.inactivityMinutes = 4;
 	}
 	p.unitLimit = clampUnitLimit2126(j.value("unitLimit", static_cast<uint16_t>(150)));
+	p.randomMap = RandomMapSettings2126::fromStorageString(j.value("randomMap2126", std::string()));
 	if (j.contains("gameTimeLimitMinutes"))
 	{
 		p.gameTimeLimitMinutes = j.at("gameTimeLimitMinutes").get<uint32_t>();

@@ -122,6 +122,13 @@ void sendOptions()
 	NETuint16_t(w, game.pathfindingBackend);
 	game.unitLimit = clampUnitLimit2126(game.unitLimit);
 	NETuint16_t(w, game.unitLimit);
+	game.randomMap.sanitise();
+	NETuint32_t(w, game.randomMap.seed);
+	NETuint8_t(w, game.randomMap.style);
+	for (auto &v : game.randomMap.sliders)
+	{
+		NETuint8_t(w, v);
+	}
 
 	for (unsigned i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -259,6 +266,24 @@ bool recvOptions(NETQUEUE queue)
 		debug(LOG_ERROR, "Invalid unitLimit value specified: %" PRIu16, game.unitLimit);
 		NETend(r);
 		return false;
+	}
+	{
+		RandomMapSettings2126 received;
+		NETuint32_t(r, received.seed);
+		NETuint8_t(r, received.style);
+		for (auto &v : received.sliders)
+		{
+			NETuint8_t(r, v);
+		}
+		RandomMapSettings2126 checked = received;
+		checked.sanitise();
+		if (checked != received)
+		{
+			debug(LOG_ERROR, "Invalid random map settings: %s", received.toStorageString().c_str());
+			NETend(r);
+			return false;
+		}
+		game.randomMap = received;
 	}
 
 	for (i = 0; i < MAX_PLAYERS; i++)

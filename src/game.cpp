@@ -49,6 +49,8 @@
 #include "modding.h"
 #include "main.h"
 #include "game.h"
+#include "movebench.h"
+#include "visualbench.h"
 #include "qtscript.h"
 #include "fpath.h"
 #include "pathfinding_backend.h"
@@ -2999,7 +3001,18 @@ LoadingTask<> loadGame(ResourceLoadingController& controller, const GameLoadDeta
 	co_await controller.yieldFrame();
 
 	// construct the WzMap object for loading map data
-	data = gameToLoad.getMap(gameRandU32());
+	{
+		// Warzone 2126: a random map uses the lobby's seed and settings (shared by every player and
+		// reproducible from its map code); benchmarks keep the synchronised seed so they repeat
+		const uint32_t syncedSeed = gameRandU32();
+		const bool useLobbySeed = randomMapUsesLobbySeed2126();
+		applyRandomMapScriptOptions2126(useLobbySeed ? game.randomMap : RandomMapSettings2126());
+		data = gameToLoad.getMap(useLobbySeed ? game.randomMap.seed : syncedSeed);
+		if (useLobbySeed)
+		{
+			markRandomMapSeedUsed2126();
+		}
+	}
 
 	if (data && data->wasScriptGenerated())
 	{
@@ -4840,6 +4853,7 @@ static bool loadMainFile(const std::string &fileName)
 		game.gameTimeLimitMinutes = save.value("gameTimeLimitMinutes").toUInt();
 	}
 	game.unitLimit = clampUnitLimit2126(static_cast<uint16_t>(save.value("unitLimit", 150).toUInt()));
+	game.randomMap = RandomMapSettings2126::fromStorageString(save.value("randomMap2126", "").toWzString().toUtf8());
 	if (save.contains("playerLeaveMode"))
 	{
 		game.playerLeaveMode = static_cast<PLAYER_LEAVE_MODE>(save.value("playerLeaveMode").toInt());
@@ -5115,6 +5129,7 @@ static bool writeMainFile(const std::string &fileName, SDWORD saveType)
 	save.setValue("inactivityMinutes", game.inactivityMinutes);
 	save.setValue("gameTimeLimitMinutes", game.gameTimeLimitMinutes);
 	save.setValue("unitLimit", game.unitLimit);
+	save.setValue("randomMap2126", WzString::fromUtf8(game.randomMap.toStorageString()));
 	save.setValue("playerLeaveMode", game.playerLeaveMode);
 	save.setValue("playerReconnectWaitSeconds", game.playerReconnectWaitSeconds);
 	save.setValue("blindMode", game.blindMode);
