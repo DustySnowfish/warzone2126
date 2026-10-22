@@ -418,6 +418,59 @@ static float applyShoreFillet(const WorldMapState& mapState, int i, int j, float
 	return h + (remapped - h) * weight;
 }
 
+
+// MARK: - Warzone 2126 surface detail
+
+// Small-scale relief added on top of the smooth surface so slopes and hill tops do not read as
+// large smooth facets (tester: "still quite low poly"). Render only, like the rest of this file.
+// A few octaves of value noise; stronger on steep ground and cliffs, almost none on flat
+// ground, faded out along shorelines so the waterline is unchanged.
+static inline float detailHash(int x, int y)
+{
+	uint32_t h = static_cast<uint32_t>(x) * 374761393u + static_cast<uint32_t>(y) * 668265263u;
+	h = (h ^ (h >> 13)) * 1274126177u;
+	h ^= h >> 16;
+	return static_cast<float>(h & 0xffffu) / 65535.f; // 0..1
+}
+
+static float detailValueNoise(float x, float y)
+{
+	const float fx = std::floor(x), fy = std::floor(y);
+	const int ix = static_cast<int>(fx), iy = static_cast<int>(fy);
+	float tx = x - fx, ty = y - fy;
+	tx = tx * tx * (3.f - 2.f * tx);
+	ty = ty * ty * (3.f - 2.f * ty);
+	const float a = detailHash(ix, iy), b = detailHash(ix + 1, iy);
+	const float c = detailHash(ix, iy + 1), d = detailHash(ix + 1, iy + 1);
+	return (a + (b - a) * tx) + ((c + (d - c) * tx) - (a + (b - a) * tx)) * ty; // 0..1
+}
+
+static float surfaceDetail(float worldX, float worldY)
+{
+	// Wavelengths 420, 190 and 90 world units (3.3, 1.5 and 0.7 tiles), centred on zero
+	const float n1 = detailValueNoise(worldX / 420.f, worldY / 420.f) - 0.5f;
+	const float n2 = detailValueNoise(worldX / 190.f + 17.3f, worldY / 190.f + 5.1f) - 0.5f;
+	// Ridged top octave: sharp creases read as rock and erosion rather than bumps
+	const float n3 = 0.5f - std::abs(detailValueNoise(worldX / 90.f + 41.7f, worldY / 90.f + 29.9f) - 0.5f) * 2.f;
+	return n1 * 1.0f + n2 * 0.6f + n3 * 0.35f; // roughly -0.9..0.9
+}
+
+static float surfaceDetailAmplitude(const float (&p)[4][4], float sharp, float shore)
+{
+	float lo = p[1][1], hi = p[1][1];
+	for (int a = 1; a <= 2; a++)
+	{
+		for (int b = 1; b <= 2; b++)
+		{
+			lo = std::min(lo, p[a][b]);
+			hi = std::max(hi, p[a][b]);
+		}
+	}
+	const float slope = std::min(hi - lo, 256.f); // height change across the tile
+	const float amp = 7.f + slope * 0.14f + sharp * 26.f; // about 7 units on flats, up to ~70 on cliffs
+	return amp * std::max(0.f, 1.f - shore);
+}
+
 float heightAt(const WorldMapState& mapState, float worldX, float worldY, HeightMode mode)
 {
 	const float fx = worldX / static_cast<float>(TILE_UNITS);
@@ -478,7 +531,10 @@ float heightAt(const WorldMapState& mapState, float worldX, float worldY, Height
 	// Ground and Surface get the same shore remap from the same water
 	// reference, so the drawn ground and the unit-settle surface stay
 	// consistent across the shore band.
-	return applyShoreFillet(mapState, i, j, tx, ty, result);
+	result = applyShoreFillet(mapState, i, j, tx, ty, result);
+	const float shore = std::max(std::max(cornerShoreWeight(mapState, i, j), cornerShoreWeight(mapState, i + 1, j)),
+	                             std::max(cornerShoreWeight(mapState, i, j + 1), cornerShoreWeight(mapState, i + 1, j + 1)));
+	return result + surfaceDetail(worldX, worldY) * surfaceDetailAmplitude(p, sharp, shore);
 }
 
 // Sampling radius (in tiles) for the central-difference vertex normals.
@@ -489,7 +545,7 @@ float heightAt(const WorldMapState& mapState, float worldX, float worldY, Height
 // A fixed radius keeps terrain lighting consistent across detail levels -
 // the value is a middle ground between the subdivided mesh spacing (1/3 tile
 // at High) and the legacy normals' averaging neighborhood (~1 tile).
-static constexpr float NORMAL_SMOOTHING_RADIUS_TILES = 0.5f;
+static constexpr float NORMAL_SMOOTHING_RADIUS_TILES = 0.25f; // Warzone 2126: was 0.5; small enough for the surface detail to shade
 
 Vector3f worldNormalAt(const WorldMapState& mapState, float worldX, float worldY, HeightMode mode)
 {
@@ -600,10 +656,6 @@ Vector2f cornerOutlineOffset(const WorldMapState& mapState, int x, int y)
 
 Vector2f outlineOffsetAt(const WorldMapState& mapState, float worldX, float worldY)
 {
-	if (cliffOutlineRoundingWorld() <= 0.f && shoreOutlineRoundingWorld() <= 0.f)
-	{
-		return Vector2f(0.f, 0.f);
-	}
 	const float fx = worldX / static_cast<float>(TILE_UNITS);
 	const float fy = worldY / static_cast<float>(TILE_UNITS);
 	const int i = static_cast<int>(std::floor(fx));
@@ -611,13 +663,31 @@ Vector2f outlineOffsetAt(const WorldMapState& mapState, float worldX, float worl
 	const float tx = fx - static_cast<float>(i);
 	const float ty = fy - static_cast<float>(j);
 
+	// Warzone 2126: wobble cliff outlines sideways with smooth noise, so cliffs built on the
+	// tile grid do not run in straight lines and right angles. Only where the surface is sharp
+	// (cliffs); long wavelength and small amplitude keep the mesh fold-free.
+	const float sharp = terrainSurfaceMath::bilinear(cornerSharpness(mapState, i, j), cornerSharpness(mapState, i + 1, j),
+	                                                 cornerSharpness(mapState, i, j + 1), cornerSharpness(mapState, i + 1, j + 1), tx, ty);
+	Vector2f wobble(0.f, 0.f);
+	if (sharp > 0.f)
+	{
+		constexpr float kWobble = 22.f;      // world units
+		constexpr float kWavelength = 300.f; // world units
+		wobble.x = (detailValueNoise(worldX / kWavelength + 3.7f, worldY / kWavelength + 11.2f) - 0.5f) * 2.f * kWobble * sharp;
+		wobble.y = (detailValueNoise(worldX / kWavelength + 23.1f, worldY / kWavelength + 7.9f) - 0.5f) * 2.f * kWobble * sharp;
+	}
+	if (cliffOutlineRoundingWorld() <= 0.f && shoreOutlineRoundingWorld() <= 0.f)
+	{
+		return wobble;
+	}
+
 	const Vector2f o00 = cornerOutlineOffset(mapState, i, j);
 	const Vector2f o10 = cornerOutlineOffset(mapState, i + 1, j);
 	const Vector2f o01 = cornerOutlineOffset(mapState, i, j + 1);
 	const Vector2f o11 = cornerOutlineOffset(mapState, i + 1, j + 1);
 	const Vector2f b = o00 + (o10 - o00) * tx;
 	const Vector2f t = o01 + (o11 - o01) * tx;
-	return b + (t - b) * ty;
+	return b + (t - b) * ty + wobble;
 }
 
 float drawnHeightAt(const WorldMapState& mapState, float worldX, float worldY, HeightMode mode)

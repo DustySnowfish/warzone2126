@@ -130,16 +130,17 @@ struct QualityPresetValues
 	bool muzzleLights;
 	bool projectileLights;
 	int effectsDetail;
+	int terrainDetail; // Warzone 2126: terrain mesh subdivision (1 = classic low-poly)
 };
 
 const QualityPresetValues& presetValues(QualityPreset preset)
 {
 	static const QualityPresetValues kPresets[4] = {
-		// shadows, res, filter, ssao, hdr, taa, smaa, muzzle, projectile, effects
-		{ false, 2048, 3, SSAO_MODE::OFF,    false, false, SMAA_MODE::LOW,  false, false, 0 }, // Low
-		{ true,  2048, 3, SSAO_MODE::LOW,    true,  true,  SMAA_MODE::OFF,  true,  false, 1 }, // Medium
-		{ true,  2048, 5, SSAO_MODE::HIGH,   true,  true,  SMAA_MODE::OFF,  true,  true,  2 }, // High
-		{ true,  4096, 7, SSAO_MODE::ULTRA,  true,  true,  SMAA_MODE::HIGH, true,  true,  2 }, // Ultra
+		// shadows, res, filter, ssao, hdr, taa, smaa, muzzle, projectile, effects, terrain detail
+		{ false, 2048, 3, SSAO_MODE::OFF,    false, false, SMAA_MODE::LOW,  false, false, 0, 1 }, // Low
+		{ true,  2048, 3, SSAO_MODE::LOW,    true,  true,  SMAA_MODE::OFF,  true,  false, 1, 2 }, // Medium
+		{ true,  2048, 5, SSAO_MODE::HIGH,   true,  true,  SMAA_MODE::OFF,  true,  true,  2, 3 }, // High
+		{ true,  4096, 7, SSAO_MODE::ULTRA,  true,  true,  SMAA_MODE::HIGH, true,  true,  2, 4 }, // Ultra
 	};
 	return kPresets[static_cast<int>(preset)];
 }
@@ -156,7 +157,7 @@ QualityPreset currentQualityPreset()
 		const QualityPresetValues& v = presetValues(static_cast<QualityPreset>(i));
 		if (getDrawShadows() != v.shadows || war_getSsaoMode() != v.ssao || war_getHdr() != v.hdr || war_getTaa() != v.taa
 			|| war_getSmaaMode() != v.smaa || war_getMuzzleFlashLighting() != v.muzzleLights || war_getProjectileLighting() != v.projectileLights
-			|| war_getEffectsDetail() != v.effectsDetail)
+			|| war_getEffectsDetail() != v.effectsDetail || getTerrainMeshSubdivision() != v.terrainDetail)
 		{
 			continue;
 		}
@@ -210,6 +211,10 @@ bool applyQualityPreset(QualityPreset preset)
 	war_setMuzzleFlashLighting(v.muzzleLights);
 	war_setProjectileLighting(v.projectileLights);
 	war_setEffectsDetail(v.effectsDetail);
+	if (getTerrainMeshSubdivision() != v.terrainDetail)
+	{
+		setTerrainMeshSubdivision(v.terrainDetail); // smooth, detailed terrain mesh (the classic mesh is low-poly)
+	}
 	applySceneEffectSurfaces();
 	return true;
 }
