@@ -137,6 +137,7 @@ struct WARZONE_GLOBALS
 	bool physicalWrecks = true;
 	bool hullSuspension = true;
 	bool hitFlash = true;
+	bool interface2126 = true;
 	int timeOfDay = 0; // time_of_day::Mode: 0 map default
 	// UI config
 	bool groupsMenuEnabled = true;
@@ -1042,6 +1043,16 @@ bool war_getHitFlash()
 void war_setHitFlash(bool enabled)
 {
 	warGlobs.hitFlash = enabled;
+}
+
+bool war_getInterface2126()
+{
+	return warGlobs.interface2126;
+}
+
+void war_setInterface2126(bool enabled)
+{
+	warGlobs.interface2126 = enabled;
 }
 
 int war_getTimeOfDay()

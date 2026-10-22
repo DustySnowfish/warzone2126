@@ -136,6 +136,7 @@ static inline void CONPRINTF(char const *format, P &&... params) WZ_DECL_FORMAT_
 #include <functional>
 
 typedef std::function<void ()> CONSOLE_CALC_LAYOUT_FUNC;
+void updateConsoleLayoutForInterface2126();
 void setConsoleCalcLayout(const CONSOLE_CALC_LAYOUT_FUNC& layoutFunc);
 
 void consoleScreenDidChangeSize(unsigned int oldWidth, unsigned int oldHeight, unsigned int newWidth, unsigned int newHeight);

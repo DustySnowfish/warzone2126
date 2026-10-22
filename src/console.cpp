@@ -145,6 +145,15 @@ void setConsoleCalcLayout(const CONSOLE_CALC_LAYOUT_FUNC& layoutFunc)
 	}
 }
 
+/// Warzone 2126: re-run the console layout (messages move below the status strip when it is shown)
+void updateConsoleLayoutForInterface2126()
+{
+	if (calcLayoutFunc != nullptr)
+	{
+		calcLayoutFunc();
+	}
+}
+
 /** Sets the system up */
 void	initConsoleMessages()
 {
@@ -157,7 +166,8 @@ void	initConsoleMessages()
 
 	//	Set up the main console size and position x,y,width
 	setConsoleCalcLayout([]() {
-		setConsoleSizePos(16, (!challengeActive && (game.type == LEVEL_TYPE::SKIRMISH)) ? 32 : (32 + TIMER_Y), pie_GetVideoBufferWidth() - 32);
+		const int top2126 = intInterface2126Active() ? kHud2126StatusHeight : 0;
+		setConsoleSizePos(16, ((!challengeActive && (game.type == LEVEL_TYPE::SKIRMISH)) ? 32 : (32 + TIMER_Y)) + top2126, pie_GetVideoBufferWidth() - 32);
 
 		historyConsole.topX = HISTORYBOX_X;
 		historyConsole.topY = HISTORYBOX_Y;
@@ -506,9 +516,10 @@ void	displayConsoleMessages()
 	{
 		auto i = InfoMessages.end() - 1;		// we can only show the last one...
 		int tmp = pie_GetVideoBufferWidth();
-		drawBlueBox(0, 0,tmp, 18);
+		const int top2126 = intInterface2126Active() ? kHud2126StatusHeight + 2 : 0;
+		drawBlueBox(0, top2126, tmp, 18);
 		tmp -= i->display.width();
-		console_drawtext(i->display, getConsoleTextColor(i->player), tmp - 6, linePitch - 2, i->JustifyType, i->display.width());
+		console_drawtext(i->display, getConsoleTextColor(i->player), tmp - 6, top2126 + linePitch - 2, i->JustifyType, i->display.width());
 	}
 
 	if (!ActiveMessages.empty())

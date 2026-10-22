@@ -2407,6 +2407,7 @@ bool intAddReticule()
 		}
 	}
 	ReticuleUp = true;
+	intApplyInterfaceStyle2126();
 	return true;
 }
 
@@ -2415,7 +2416,379 @@ void intRemoveReticule()
 	if (ReticuleUp == true)
 	{
 		widgDelete(psWScreen, IDRET_FORM);		// remove reticule
+		widgDelete(psWScreen, IDHUD2126_TABBAR);
+		widgDelete(psWScreen, IDHUD2126_STATUS);
 		ReticuleUp = false;
+	}
+}
+
+
+// MARK: - Warzone 2126 interface (A2 direction, phase 1)
+//
+// With the 2126 interface on, the hexagon reticule is hidden (it stays alive, so scripts and
+// tutorials that enable, disable or flash its buttons keep working) and two widgets replace it:
+//  - a tab bar along the bottom-left: Build, Units, Research, Design, Command, Map, each opening
+//    the same panel as its reticule button and showing its key; the open tab is lit, a flashing
+//    reticule button makes its tab pulse, and clicking the open tab closes the panel;
+//  - a status strip across the top centre: power and income per minute, units against the
+//    limit, the research finishing soonest with its time left, and the game clock.
+// Display only: everything is read from the game state, nothing is changed except by the same
+// key mappings the classic reticule uses.
+
+static const PIELIGHT kHudBg = pal_RGBA(18, 24, 30, 225);
+static const PIELIGHT kHudTab = pal_RGBA(27, 34, 40, 235);
+static const PIELIGHT kHudTabActive = pal_RGBA(42, 58, 70, 245);
+static const PIELIGHT kHudAccent = pal_RGBA(79, 179, 232, 255);
+static const PIELIGHT kHudBorder = pal_RGBA(255, 255, 255, 34);
+static const PIELIGHT kHudLabel = pal_RGBA(140, 156, 168, 255);
+static const PIELIGHT kHudValue = pal_RGBA(232, 238, 242, 255);
+static const PIELIGHT kHudGood = pal_RGBA(111, 207, 122, 255);
+static const PIELIGHT kHudWarn = pal_RGBA(232, 193, 61, 255);
+static const PIELIGHT kHudBad = pal_RGBA(229, 87, 79, 255);
+
+bool intInterface2126Active()
+{
+	return war_getInterface2126();
+}
+
+namespace
+{
+
+struct HudTabDef
+{
+	int retIndex;       // index into ReticuleEnabled / retbutstats
+	const char *label;  // untranslated, gettext at display
+	const char *key;
+};
+
+// Reticule indices: 1 manufacture, 2 research, 3 build, 4 design, 5 intel map, 6 command
+static const HudTabDef kHudTabs[] = {
+	{ 3, N_("Build"), "F3" },
+	{ 1, N_("Units"), "F1" },
+	{ 2, N_("Research"), "F2" },
+	{ 4, N_("Design"), "F4" },
+	{ 6, N_("Command"), "F6" },
+	{ 5, N_("Map"), "F5" },
+};
+
+class HudTabButton : public W_BUTTON
+{
+public:
+	HudTabButton(const HudTabDef &def, iV_fonts labelFont) : def(def)
+	{
+		labelText.setText(WzString::fromUtf8(gettext(def.label)), labelFont);
+		keyText.setText(WzString::fromUtf8(def.key), font_small);
+	}
+
+	bool isEnabledTab() const
+	{
+		return ReticuleEnabled[def.retIndex].Enabled && !ReticuleEnabled[def.retIndex].Hidden && !retbutstats[def.retIndex].filename.isEmpty();
+	}
+
+	bool isOpenTab() const
+	{
+		// From the interface mode rather than the hidden reticule button's state, which scripts reset
+		// whenever they refresh the reticule (a new building, a new truck)
+		const bool objectScreen = (intMode == INT_OBJECT || intMode == INT_STAT || intMode == INT_CMDORDER);
+		switch (def.retIndex)
+		{
+		case 3: return objectScreen && (objMode == IOBJ_BUILD || objMode == IOBJ_BUILDSEL || objMode == IOBJ_DEMOLISHSEL);
+		case 1: return objectScreen && objMode == IOBJ_MANUFACTURE;
+		case 2: return objectScreen && objMode == IOBJ_RESEARCH;
+		case 6: return objectScreen && objMode == IOBJ_COMMAND;
+		case 4: return intMode == INT_DESIGN;
+		case 5: return intMode == INT_INTELMAP;
+		default: return false;
+		}
+	}
+
+	void clicked(W_CONTEXT *psContext, WIDGET_KEY key) override
+	{
+		if (!isEnabledTab())
+		{
+			return;
+		}
+		// The open tab closes its panel, any other opens its own
+		setKeyButtonMapping(isOpenTab() ? IDRET_CANCEL : ReticuleEnabled[def.retIndex].id);
+	}
+
+	std::string getTip() override
+	{
+		const std::string &tip = retbutstats[def.retIndex].tip;
+		return tip.empty() ? std::string(gettext(def.label)) : tip;
+	}
+
+	void display(int xOffset, int yOffset) override
+	{
+		const int x0 = xOffset + x(), y0 = yOffset + y(), x1 = x0 + width(), y1 = y0 + height();
+		const bool enabled = isEnabledTab();
+		const bool open = enabled && isOpenTab();
+		const bool hover = enabled && (getState() & WBUT_HIGHLIGHT) != 0;
+		bool flash = enabled && retbutstats[def.retIndex].flashing && !open;
+		if (flash)
+		{
+			flash = ((realTime / 400) % 2) == 0;
+		}
+		pie_UniTransBoxFill(x0, y0, x1, y1, open ? kHudTabActive : (hover ? pal_RGBA(34, 44, 52, 240) : kHudTab));
+		iV_Box(x0, y0, x1 - 1, y1 - 1, open ? kHudAccent : (flash ? kHudWarn : kHudBorder));
+		if (open)
+		{
+			pie_UniTransBoxFill(x0 + 1, y0 + 1, x1 - 1, y0 + 3, kHudAccent); // lit top edge
+		}
+		const PIELIGHT textCol = !enabled ? pal_RGBA(90, 100, 108, 255) : (open || hover || flash ? kHudValue : pal_RGBA(196, 206, 214, 255));
+		const int lineGap = 2;
+		const int blockH = labelText->lineSize() + lineGap + keyText->lineSize();
+		const int top = y0 + (height() - blockH) / 2;
+		labelText->render(x0 + (width() - labelText->width()) / 2, top - labelText->aboveBase(), textCol);
+		keyText->render(x0 + (width() - keyText->width()) / 2, top + labelText->lineSize() + lineGap - keyText->aboveBase(), enabled ? kHudLabel : pal_RGBA(70, 78, 84, 255));
+	}
+
+private:
+	HudTabDef def;
+	WzCachedText labelText;
+	WzCachedText keyText;
+};
+
+class HudTabBar : public W_FORM
+{
+public:
+	void display(int xOffset, int yOffset) override
+	{
+		const int x0 = xOffset + x(), y0 = yOffset + y();
+		pie_UniTransBoxFill(x0, y0, x0 + width(), y0 + height(), kHudBg);
+		iV_Box(x0, y0, x0 + width() - 1, y0 + height() - 1, kHudBorder);
+	}
+};
+
+std::string formatGameClock(uint32_t ms)
+{
+	const uint32_t s = ms / 1000;
+	return (s >= 3600) ? astringf("%u:%02u:%02u", s / 3600, (s / 60) % 60, s % 60) : astringf("%u:%02u", s / 60, s % 60);
+}
+
+std::string formatThousands(int64_t v)
+{
+	std::string digits = std::to_string(v < 0 ? -v : v);
+	std::string out;
+	int n = 0;
+	for (auto it = digits.rbegin(); it != digits.rend(); ++it)
+	{
+		if (n && n % 3 == 0)
+		{
+			out.insert(out.begin(), ',');
+		}
+		out.insert(out.begin(), *it);
+		++n;
+	}
+	return (v < 0 ? "-" : "") + out;
+}
+
+class HudStatusStrip : public WIDGET
+{
+public:
+	void display(int xOffset, int yOffset) override
+	{
+		if (selectedPlayer >= MAX_PLAYERS)
+		{
+			return;
+		}
+		refresh();
+		const int x0 = xOffset + x(), y0 = yOffset + y();
+		pie_UniTransBoxFill(x0, y0, x0 + width(), y0 + height(), kHudBg);
+		iV_Box(x0, y0, x0 + width() - 1, y0 + height() - 1, kHudBorder);
+		int cx = x0 + 12;
+		const int midY = y0 + height() / 2;
+		auto drawText = [&](WzCachedText &t, PIELIGHT col, int extraGap) {
+			t->render(cx, midY - t->lineSize() / 2 - t->aboveBase(), col);
+			cx += t->width() + extraGap;
+		};
+		auto separator = [&]() {
+			pie_UniTransBoxFill(cx, y0 + 6, cx + 1, y0 + height() - 6, kHudBorder);
+			cx += 14;
+		};
+		drawText(powerLabel, kHudLabel, 6);
+		drawText(powerValue, kHudValue, 6);
+		drawText(incomeValue, incomeColour, 14);
+		separator();
+		drawText(unitsLabel, kHudLabel, 6);
+		drawText(unitsValue, unitsColour, 14);
+		separator();
+		drawText(researchLabel, kHudLabel, 6);
+		drawText(researchValue, kHudValue, 6);
+		drawText(researchTime, kHudAccent, 14);
+		separator();
+		drawText(clockValue, kHudValue, 12);
+		const int wanted = cx - x0;
+		if (wanted != idealW)
+		{
+			idealW = wanted;
+			widgScheduleTask([]() {
+				if (auto w = widgGetFromID(psWScreen, IDHUD2126_STATUS))
+				{
+					w->callCalcLayout();
+				}
+			});
+		}
+	}
+
+	int32_t idealWidth() override { return std::max(idealW, 420); }
+
+private:
+	void refresh()
+	{
+		if (lastRefresh != 0 && realTime - lastRefresh < 250)
+		{
+			return;
+		}
+		lastRefresh = realTime;
+		const unsigned player = selectedPlayer;
+		powerLabel.setText(_("POWER"), font_small);
+		powerValue.setText(WzString::fromUtf8(formatThousands(getPower(player))), font_regular_bold);
+		const double perMin = getPowerGeneratedPerSec(player) * 60.0;
+		incomeValue.setText(WzString::fromUtf8(astringf("%+.0f/min", perMin)), font_regular);
+		incomeColour = perMin > 0.5 ? kHudGood : kHudLabel;
+
+		unitsLabel.setText(_("UNITS"), font_small);
+		const int units = static_cast<int>(gameWorld.objects.droids[player].size());
+		const int limit = getMaxDroids(player);
+		unitsValue.setText(WzString::fromUtf8(astringf("%d / %d", units, limit)), font_regular_bold);
+		unitsColour = (limit > 0 && units >= limit) ? kHudBad : (limit > 0 && units * 10 >= limit * 9) ? kHudWarn : kHudValue;
+
+		researchLabel.setText(_("RESEARCH"), font_small);
+		std::string name;
+		int bestSeconds = -1;
+		int busy = 0;
+		for (STRUCTURE *psStruct : gameWorld.objects.structures[player])
+		{
+			if (psStruct->pStructureType->type != REF_RESEARCH || psStruct->status != SS_BUILT || psStruct->pFunctionality == nullptr)
+			{
+				continue;
+			}
+			RESEARCH_FACILITY *psFacility = StructureGetResearch(psStruct);
+			if (psFacility == nullptr || psFacility->psSubject == nullptr || psFacility->psSubject->index >= asPlayerResList[player].size())
+			{
+				continue;
+			}
+			++busy;
+			const int done = static_cast<int>(asPlayerResList[player][psFacility->psSubject->index].currentPoints);
+			const int rate = psFacility->timeStartHold == 0 ? getBuildingResearchPoints(psStruct) : 0;
+			const int left = rate > 0 ? std::max(0, (static_cast<int>(psFacility->psSubject->researchPoints) - done) / rate) : 99999;
+			if (bestSeconds < 0 || left < bestSeconds)
+			{
+				bestSeconds = left;
+				name = getLocalizedStatsName(psFacility->psSubject);
+			}
+		}
+		if (busy == 0)
+		{
+			researchValue.setText(_("Idle"), font_regular);
+			researchTime.setText("", font_regular);
+		}
+		else
+		{
+			if (name.size() > 28)
+			{
+				name = name.substr(0, 27) + "...";
+			}
+			researchValue.setText(WzString::fromUtf8(name), font_regular);
+			std::string t = (bestSeconds >= 0 && bestSeconds < 99999) ? astringf("%d:%02d", bestSeconds / 60, bestSeconds % 60) : std::string(_("on hold"));
+			if (busy > 1)
+			{
+				t += astringf("  +%d", busy - 1);
+			}
+			researchTime.setText(WzString::fromUtf8(t), font_regular);
+		}
+		clockValue.setText(WzString::fromUtf8(formatGameClock(gameTime)), font_regular_bold);
+	}
+
+	uint32_t lastRefresh = 0;
+	int idealW = 0;
+	WzCachedText powerLabel, powerValue, incomeValue, unitsLabel, unitsValue, researchLabel, researchValue, researchTime, clockValue;
+	PIELIGHT incomeColour = kHudLabel;
+	PIELIGHT unitsColour = kHudValue;
+};
+
+// The tab bar is a 2 x 3 grid in the classic reticule's footprint (RET_FORMWIDTH x RET_FORMHEIGHT),
+// so every panel positioned next to the reticule still lines up and nothing overlaps.
+constexpr int kHudCols = 2;
+constexpr int kHudRows = 3;
+constexpr int kHudTabGap = 4;
+constexpr int kHudPad = 4;
+constexpr int kHudTabW = (RET_FORMWIDTH - 2 * kHudPad - (kHudCols - 1) * kHudTabGap) / kHudCols;
+constexpr int kHudTabH = (RET_FORMHEIGHT - 2 * kHudPad - (kHudRows - 1) * kHudTabGap) / kHudRows;
+
+} // anonymous namespace
+
+/// Add (or remove) the 2126 tab bar and status strip, and show or hide the classic reticule to match.
+void intApplyInterfaceStyle2126()
+{
+	if (!ReticuleUp || psWScreen == nullptr)
+	{
+		return;
+	}
+	const bool use2126 = intInterface2126Active();
+	if (auto retForm = widgGetFromID(psWScreen, IDRET_FORM))
+	{
+		retForm->show(!use2126);
+	}
+	if (widgGetFromID(psWScreen, IDPOW_POWERBAR_T))
+	{
+		if (use2126)
+		{
+			widgHide(psWScreen, IDPOW_POWERBAR_T);
+		}
+		else if (powerBarUp)
+		{
+			widgReveal(psWScreen, IDPOW_POWERBAR_T);
+		}
+	}
+	if (!use2126)
+	{
+		widgDelete(psWScreen, IDHUD2126_TABBAR);
+		widgDelete(psWScreen, IDHUD2126_STATUS);
+		return;
+	}
+	if (widgGetFromID(psWScreen, IDHUD2126_TABBAR) == nullptr)
+	{
+		auto bar = std::make_shared<HudTabBar>();
+		bar->id = IDHUD2126_TABBAR;
+		psWScreen->psForm->attach(bar);
+		const int n = static_cast<int>(sizeof(kHudTabs) / sizeof(kHudTabs[0]));
+		// One font for every tab: the largest in which all labels (in the current language) fit
+		iV_fonts labelFont = font_small;
+		for (iV_fonts candidate : { font_regular_bold, font_regular })
+		{
+			bool fits = true;
+			for (int i = 0; i < n && fits; ++i)
+			{
+				fits = iV_GetTextWidth(gettext(kHudTabs[i].label), candidate) <= kHudTabW - 6;
+			}
+			if (fits)
+			{
+				labelFont = candidate;
+				break;
+			}
+		}
+		for (int i = 0; i < n; ++i)
+		{
+			auto tab = std::make_shared<HudTabButton>(kHudTabs[i], labelFont);
+			bar->attach(tab);
+			const int col = i % kHudCols, row = i / kHudCols;
+			tab->setGeometry(kHudPad + col * (kHudTabW + kHudTabGap), kHudPad + row * (kHudTabH + kHudTabGap), kHudTabW, kHudTabH);
+		}
+		bar->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			psWidget->setGeometry(RET_X, RET_Y, RET_FORMWIDTH, RET_FORMHEIGHT);
+		}));
+	}
+	if (widgGetFromID(psWScreen, IDHUD2126_STATUS) == nullptr)
+	{
+		auto strip = std::make_shared<HudStatusStrip>();
+		strip->id = IDHUD2126_STATUS;
+		psWScreen->psForm->attach(strip);
+		strip->setCalcLayout([](WIDGET *psWidget) {
+			const int w = psWidget->idealWidth();
+			psWidget->setGeometry((screenWidth - w) / 2, 0, w, kHud2126StatusHeight);
+		});
 	}
 }
 
@@ -2872,6 +3245,11 @@ void intShowPowerBar()
 	//if its not already on display
 	if (widgGetFromID(psWScreen, IDPOW_POWERBAR_T))
 	{
+		if (intInterface2126Active())
+		{
+			widgHide(psWScreen, IDPOW_POWERBAR_T); // the 2126 status strip shows power
+			return;
+		}
 		widgReveal(psWScreen, IDPOW_POWERBAR_T);
 	}
 }

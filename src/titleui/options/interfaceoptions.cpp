@@ -37,6 +37,8 @@
 #include "../../clparse.h"
 #include "../../frend.h"
 #include "../../main.h"
+#include "../../hci.h"
+#include "../../console.h"
 
 // MARK: -
 
@@ -96,6 +98,29 @@ std::shared_ptr<OptionsForm> makeInterfaceOptionsForm(bool inGame, const std::fu
 	result->setRefreshOptionsOnScreenSizeChange(true);
 
 	result->addSection(OptionsSection(N_("General"), ""), true);
+	{
+		auto optionInfo = OptionInfo("interface.style2126", N_("Interface"), N_("Warzone 2126: a status strip across the top and a tab bar along the bottom. Classic: the original hexagon reticule."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Warzone 2126"), "", true },
+					{ _("Classic"), "", false },
+				};
+				result.setCurrentIdxForValue(war_getInterface2126());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setInterface2126(newValue);
+				widgScheduleTask([]() {
+					intApplyInterfaceStyle2126();
+					updateConsoleLayoutForInterface2126();
+				});
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
 	{
 		auto optionInfo = OptionInfo("interface.language", N_("Language"), "");
 		optionInfo.addAvailabilityCondition(IsNotInGame);

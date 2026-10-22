@@ -301,6 +301,13 @@ bool intHelpOverlayIsUp();
 
 /* Add the reticule widgets to the widget screen */
 bool intAddReticule();
+/// Warzone 2126 interface: tab bar and status strip in place of the reticule (Options > Interface).
+bool intInterface2126Active();
+void intApplyInterfaceStyle2126();
+/// Height of the 2126 status strip at the top of the screen (messages start below it).
+constexpr int kHud2126StatusHeight = 28;
+#define IDHUD2126_TABBAR	2126001
+#define IDHUD2126_STATUS	2126002
 bool intAddInGameOptionsButton();
 bool intShowGroupSelectionMenu();
 bool intAddPower();

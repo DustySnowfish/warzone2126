@@ -459,6 +459,15 @@ std::string getApproxPowerGeneratedPerSecForDisplay(unsigned player)
 	return fmt::format("{:+.0f}", floatingValue);
 }
 
+double getPowerGeneratedPerSec(unsigned player)
+{
+	if (player >= MAX_PLAYERS)
+	{
+		return 0.0;
+	}
+	return (static_cast<double>(asPower[player].powerGeneratedLastUpdate) / FP_ONE) * static_cast<double>(GAME_UPDATES_PER_SEC);
+}
+
 bool requestPowerFor(STRUCTURE *psStruct, int32_t amount)
 {
 	return requestPrecisePowerFor(psStruct, amount * FP_ONE);

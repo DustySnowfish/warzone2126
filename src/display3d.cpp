@@ -5144,14 +5144,21 @@ void display3d_recordSceneOverlays(const gfx_api::RenderPassContext&)
 		char buildInfo[255];
 		bool showMs = (gameTimeGetMod() < Rational(1, 4));
 		getAsciiTime(buildInfo, showMs ? graphicsTime : gameTime, showMs);
-		txtLevelName.render(RET_X + 134, 410 + E_H, WZCOL_TEXT_MEDIUM);
+		const bool hud2126 = intInterface2126Active(); // the 2126 status strip shows the clock
+		if (!hud2126)
+		{
+			txtLevelName.render(RET_X + 134, 410 + E_H, WZCOL_TEXT_MEDIUM);
+		}
 		const DebugInputManager& dbgInputManager = gInputManager.debugManager();
 		if (dbgInputManager.debugMappingsAllowed())
 		{
 			txtDebugStatus.render(RET_X + 134, 436 + E_H, WZCOL_TEXT_MEDIUM);
 		}
-		txtCurrentTime.setText(buildInfo, font_small);
-		txtCurrentTime.render(RET_X + 134, 422 + E_H, WZCOL_TEXT_MEDIUM);
+		if (!hud2126)
+		{
+			txtCurrentTime.setText(buildInfo, font_small);
+			txtCurrentTime.render(RET_X + 134, 422 + E_H, WZCOL_TEXT_MEDIUM);
+		}
 	}
 }
 

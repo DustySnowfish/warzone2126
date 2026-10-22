@@ -279,6 +279,8 @@ bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration 
 void war_setHullSuspension(bool enabled);
 bool war_getHitFlash(); // units and buildings flash when hit
 void war_setHitFlash(bool enabled);
+bool war_getInterface2126(); // Warzone 2126 interface (tab bar and status strip) instead of the classic reticule
+void war_setInterface2126(bool enabled);
 int war_getTimeOfDay(); // time_of_day::Mode: 0 map default, 1 dawn, 2 day, 3 dusk, 4 night, 5 cycle
 void war_setTimeOfDay(int mode);
 bool war_getTaa(); // temporal anti-aliasing (needs HDR)
