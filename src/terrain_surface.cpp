@@ -467,8 +467,93 @@ static float surfaceDetailAmplitude(const float (&p)[4][4], float sharp, float s
 		}
 	}
 	const float slope = std::min(hi - lo, 256.f); // height change across the tile
-	const float amp = 7.f + slope * 0.14f + sharp * 26.f; // about 7 units on flats, up to ~70 on cliffs
+	const float amp = 9.f + slope * 0.26f + sharp * 36.f; // about 9 units on flats, up to ~110 on cliffs (was 7 / 0.14 / 26)
 	return amp * std::max(0.f, 1.f - shore);
+}
+
+// Warzone 2126: erosion-like detail (tester: landscapes "still quite low poly"). Map heights are
+// one per tile (about 4 m apart), so even a smooth surface reads as rounded pillows. Real slopes
+// are cut by gullies running downhill, and cliffs show rock strata:
+//  - gullies: narrow channels of ridged noise, long along the slope and short across it, carved
+//    deeper on steeper ground. Computed in four fixed orientations and blended by how well each
+//    matches the local downhill direction, so the pattern stays continuous across tiles.
+//  - strata: horizontal ledges on cliff faces, bands of about 1.5 m with wavering edges.
+// Render only, like the rest of this file. WZ_TERRAIN_EROSION=0 turns it off for comparison.
+static float erosionStrength()
+{
+	static const float value = []() {
+		float v = 1.8f; // tuned on Sk-Startup: clearly rocky ridges and gullied slopes without noise on flats
+		if (const char* env = getenv("WZ_TERRAIN_EROSION"))
+		{
+			v = std::clamp(static_cast<float>(atof(env)), 0.f, 3.f);
+		}
+		return v;
+	}();
+	return value;
+}
+
+static float gullyNoise(float u, float v)
+{
+	// Ridged value noise: 1 on the channel centre line, falling off quickly to either side
+	const float n = detailValueNoise(u, v);
+	const float r = 1.f - std::abs(n * 2.f - 1.f);
+	const float r2 = r * r;
+	return r2 * r2; // 0..1, narrow
+}
+
+static float erosionDetail(float worldX, float worldY, const float (&p)[4][4], float tx, float ty, float sharp, float shore, float height)
+{
+	const float strength = erosionStrength();
+	if (strength <= 0.f)
+	{
+		return 0.f;
+	}
+	// Local gradient of the tile (height change per tile along x and y), from its corners
+	const float gx = (p[2][1] - p[1][1]) * (1.f - ty) + (p[2][2] - p[1][2]) * ty;
+	const float gy = (p[1][2] - p[1][1]) * (1.f - tx) + (p[2][2] - p[2][1]) * tx;
+	const float slope = std::sqrt(gx * gx + gy * gy); // height units per tile
+	float total = 0.f;
+
+	// Gullies on slopes (not on flats, faded on cliffs where strata take over, none at the shore)
+	const float gullyDepth = std::min(slope * 0.24f, 48.f) * (1.f - 0.6f * sharp) * std::max(0.f, 1.f - shore);
+	if (gullyDepth > 0.5f)
+	{
+		// Downhill direction as an angle in [0, pi) (gullies have no sense of up or down)
+		const float dirX = gx / slope, dirY = gy / slope;
+		static const float kDirs[4][2] = { {1.f, 0.f}, {0.70710678f, 0.70710678f}, {0.f, 1.f}, {-0.70710678f, 0.70710678f} };
+		float sum = 0.f, wsum = 0.f;
+		for (int k = 0; k < 4; ++k)
+		{
+			const float c = dirX * kDirs[k][0] + dirY * kDirs[k][1]; // cos of the angle between them
+			const float w = std::pow(c * c, 3.f);                   // sharpen the blend (cos^6)
+			if (w < 1e-3f)
+			{
+				continue;
+			}
+			// u along the slope (long channels), v across it (narrow spacing)
+			const float u = worldX * kDirs[k][0] + worldY * kDirs[k][1];
+			const float v = -worldX * kDirs[k][1] + worldY * kDirs[k][0];
+			const float warp = (detailValueNoise(u / 520.f + 7.1f * k, v / 520.f) - 0.5f) * 1.6f;
+			const float g = gullyNoise(u / 340.f + 13.7f * k, v / 115.f + warp)
+			              + 0.5f * gullyNoise(u / 170.f + 3.3f * k, v / 58.f + warp * 2.f);
+			sum += w * g;
+			wsum += w;
+		}
+		if (wsum > 0.f)
+		{
+			total -= (sum / wsum) * gullyDepth; // carve the channels in
+		}
+	}
+
+	// Rock strata on cliff faces: ledges every ~48 units of height, edges wavering with noise
+	if (sharp > 0.05f)
+	{
+		const float band = height / 48.f + (detailValueNoise(worldX / 260.f + 5.5f, worldY / 260.f + 9.1f) - 0.5f) * 0.8f;
+		const float f = band - std::floor(band);
+		const float ledge = f < 0.7f ? f / 0.7f * 0.25f : 0.25f + (f - 0.7f) / 0.3f * 0.75f; // slow rise, quick step
+		total += (ledge - 0.5f) * 18.f * sharp * std::max(0.f, 1.f - shore);
+	}
+	return total * strength;
 }
 
 float heightAt(const WorldMapState& mapState, float worldX, float worldY, HeightMode mode)
@@ -534,7 +619,8 @@ float heightAt(const WorldMapState& mapState, float worldX, float worldY, Height
 	result = applyShoreFillet(mapState, i, j, tx, ty, result);
 	const float shore = std::max(std::max(cornerShoreWeight(mapState, i, j), cornerShoreWeight(mapState, i + 1, j)),
 	                             std::max(cornerShoreWeight(mapState, i, j + 1), cornerShoreWeight(mapState, i + 1, j + 1)));
-	return result + surfaceDetail(worldX, worldY) * surfaceDetailAmplitude(p, sharp, shore);
+	result += surfaceDetail(worldX, worldY) * surfaceDetailAmplitude(p, sharp, shore);
+	return result + erosionDetail(worldX, worldY, p, tx, ty, sharp, shore, result);
 }
 
 // Sampling radius (in tiles) for the central-difference vertex normals.
@@ -545,7 +631,7 @@ float heightAt(const WorldMapState& mapState, float worldX, float worldY, Height
 // A fixed radius keeps terrain lighting consistent across detail levels -
 // the value is a middle ground between the subdivided mesh spacing (1/3 tile
 // at High) and the legacy normals' averaging neighborhood (~1 tile).
-static constexpr float NORMAL_SMOOTHING_RADIUS_TILES = 0.25f; // Warzone 2126: was 0.5; small enough for the surface detail to shade
+static constexpr float NORMAL_SMOOTHING_RADIUS_TILES = 0.18f; // Warzone 2126: was 0.5 (then 0.25); small enough for gullies and strata to shade
 
 Vector3f worldNormalAt(const WorldMapState& mapState, float worldX, float worldY, HeightMode mode)
 {
