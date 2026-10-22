@@ -56,6 +56,8 @@
 #include "edit3d.h"
 #include "game.h"
 #include "hci.h"
+#include "hci/unitbar2126.h"
+#include "hci/hud2126_style.h"
 #include "ordersource.h"
 #include "ingameop.h"
 #include "intdisplay.h"
@@ -1011,6 +1013,7 @@ bool intInitialise()
 void interfaceShutDown()
 {
 	intRemoveIntelMapNoAnim(); // always call to ensure overlay screen is destroyed
+	unitBar2126Remove();
 
 	if (replayOverlayScreen)
 	{
@@ -1425,6 +1428,8 @@ INT_RETVAL intRunWidgets()
 		: OrderSource::widget());
 
 	bool			quitting = false;
+
+	unitBar2126Update(); // Warzone 2126 interface: the selected-units bar follows the selection
 
 	if (quitToMainMenuRequested)
 	{
@@ -2418,6 +2423,7 @@ void intRemoveReticule()
 		widgDelete(psWScreen, IDRET_FORM);		// remove reticule
 		widgDelete(psWScreen, IDHUD2126_TABBAR);
 		widgDelete(psWScreen, IDHUD2126_STATUS);
+		unitBar2126Remove();
 		ReticuleUp = false;
 	}
 }
@@ -2746,6 +2752,11 @@ void intApplyInterfaceStyle2126()
 	{
 		widgDelete(psWScreen, IDHUD2126_TABBAR);
 		widgDelete(psWScreen, IDHUD2126_STATUS);
+		unitBar2126Remove();
+		if (auto orderForm = widgGetFromID(psWScreen, IDORDER_FORM))
+		{
+			orderForm->show();
+		}
 		return;
 	}
 	if (widgGetFromID(psWScreen, IDHUD2126_TABBAR) == nullptr)
