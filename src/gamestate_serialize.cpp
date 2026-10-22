@@ -439,11 +439,11 @@ static void readPower(const nlohmann::ordered_json &j, uint32_t version)
 	}
 
 	const nlohmann::ordered_json &jplayers = j.at("players");
-	if (!jplayers.is_array() || jplayers.size() != MAX_PLAYERS)
+	if (!jplayers.is_array() || jplayers.empty() || jplayers.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("power.players must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jplayers.size(); ++p)
 	{
 		const nlohmann::ordered_json &jp = jplayers[p];
 		PlayerPowerState s;
@@ -469,11 +469,11 @@ static void readPower(const nlohmann::ordered_json &j, uint32_t version)
 static void reapplyPowerQueue(const nlohmann::ordered_json &j)
 {
 	const nlohmann::ordered_json &jplayers = j.at("players");
-	if (!jplayers.is_array() || jplayers.size() != MAX_PLAYERS)
+	if (!jplayers.is_array() || jplayers.empty() || jplayers.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("power.players must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jplayers.size(); ++p)
 	{
 		const nlohmann::ordered_json &jp = jplayers[p];
 		std::vector<PowerRequestSave> queue;
@@ -540,11 +540,11 @@ static void readResearch(const nlohmann::ordered_json &j, uint32_t version)
 	}
 
 	const nlohmann::ordered_json &jplayers = j.at("players");
-	if (!jplayers.is_array() || jplayers.size() != MAX_PLAYERS)
+	if (!jplayers.is_array() || jplayers.empty() || jplayers.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("research.players must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jplayers.size(); ++p)
 	{
 		const nlohmann::ordered_json &jtopics = jplayers[p];
 		if (!jtopics.is_array())
@@ -584,11 +584,11 @@ static void readResearch(const nlohmann::ordered_json &j, uint32_t version)
 	const auto readDefaults = [&jdef](const char *key, UDWORD (&dst)[MAX_PLAYERS], size_t statCount)
 	{
 		const nlohmann::ordered_json &arr = jdef.at(key);
-		if (!arr.is_array() || arr.size() != MAX_PLAYERS)
+		if (!arr.is_array() || arr.empty() || arr.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 		{
 			throw StateError("research.defaults size mismatch");
 		}
-		for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+		for (unsigned p = 0; p < arr.size(); ++p)
 		{
 			const UDWORD idx = arr[p].get<UDWORD>();
 			// The index is used to index the stat table later. Validate only when stats of this type are
@@ -656,11 +656,11 @@ static void readAvailability(const nlohmann::ordered_json &j, uint32_t version)
 	}
 
 	const nlohmann::ordered_json &jcomp = j.at("comp");
-	if (!jcomp.is_array() || jcomp.size() != MAX_PLAYERS)
+	if (!jcomp.is_array() || jcomp.empty() || jcomp.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("availability.comp must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jcomp.size(); ++p)
 	{
 		const nlohmann::ordered_json &jplayer = jcomp[p];
 		if (!jplayer.is_array() || jplayer.size() != COMP_NUMCOMPONENTS)
@@ -683,11 +683,11 @@ static void readAvailability(const nlohmann::ordered_json &j, uint32_t version)
 	}
 
 	const nlohmann::ordered_json &jstruct = j.at("structType");
-	if (!jstruct.is_array() || jstruct.size() != MAX_PLAYERS)
+	if (!jstruct.is_array() || jstruct.empty() || jstruct.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("availability.structType must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jstruct.size(); ++p)
 	{
 		const nlohmann::ordered_json &jlist = jstruct[p];
 		if (!jlist.is_array() || jlist.size() != numStructureStats)
@@ -751,11 +751,11 @@ static void readLimits(const nlohmann::ordered_json &j, uint32_t version)
 	const auto readPerPlayer = [&j](const char *key, void (*setter)(UDWORD, int))
 	{
 		const nlohmann::ordered_json &arr = j.at(key);
-		if (!arr.is_array() || arr.size() != MAX_PLAYERS)
+		if (!arr.is_array() || arr.empty() || arr.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 		{
 			throw StateError("limits per-player array size mismatch");
 		}
-		for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+		for (unsigned p = 0; p < arr.size(); ++p)
 		{
 			setter(p, arr[p].get<int>());
 		}
@@ -772,11 +772,11 @@ static void readLimits(const nlohmann::ordered_json &j, uint32_t version)
 	for (unsigned i = 0; i < numStructureStats; ++i)
 	{
 		const nlohmann::ordered_json &row = jstructLimits[i];
-		if (!row.is_array() || row.size() != MAX_PLAYERS)
+		if (!row.is_array() || row.empty() || row.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 		{
 			throw StateError("limits.structLimits row size mismatch");
 		}
-		for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+		for (unsigned p = 0; p < row.size(); ++p)
 		{
 			asStructureStats[i].upgrade[p].limit = row[p].get<uint32_t>();
 		}
@@ -827,11 +827,11 @@ static void readTemplates(const nlohmann::ordered_json &j, uint32_t version)
 	}
 
 	const nlohmann::ordered_json &jplayers = j.at("players");
-	if (!jplayers.is_array() || jplayers.size() != MAX_PLAYERS)
+	if (!jplayers.is_array() || jplayers.empty() || jplayers.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("templates.players must have MAX_PLAYERS entries");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jplayers.size(); ++p)
 	{
 		const nlohmann::ordered_json &jlist = jplayers[p];
 		if (!jlist.is_array())
@@ -1026,11 +1026,11 @@ static void readBaseObjectCommon(const nlohmann::ordered_json &j, BASE_OBJECT *p
 	psObj->lastHitWeapon = static_cast<WEAPON_SUBCLASS>(lastHitWeapon);
 	psObj->flags = std::bitset<OBJECT_FLAG_COUNT>(j.at("flags").get<uint32_t>());
 	const nlohmann::ordered_json &jvis = j.at("visible");
-	if (!jvis.is_array() || jvis.size() != MAX_PLAYERS)
+	if (!jvis.is_array() || jvis.empty() || jvis.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("object.visible size mismatch");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < jvis.size(); ++p)
 	{
 		psObj->visible[p] = jvis[p].get<uint8_t>();
 	}
@@ -4166,11 +4166,11 @@ static void readSimMisc(const nlohmann::ordered_json &j, uint32_t version)
 		throw StateError("unsupported simMisc section version");
 	}
 	const nlohmann::ordered_json &fsl = j.at("formationSpeedLimiting");
-	if (!fsl.is_array() || fsl.size() != MAX_PLAYERS)
+	if (!fsl.is_array() || fsl.empty() || fsl.size() > MAX_PLAYERS) // Warzone 2126: older saves have fewer players
 	{
 		throw StateError("simMisc.formationSpeedLimiting size mismatch");
 	}
-	for (unsigned p = 0; p < MAX_PLAYERS; ++p)
+	for (unsigned p = 0; p < fsl.size(); ++p)
 	{
 		moveRestoreFormationSpeedLimiting(p, fsl[p].get<bool>());
 	}

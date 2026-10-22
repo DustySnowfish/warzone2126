@@ -205,6 +205,18 @@ struct RUN_DATA
 // return positions for vtols, at one time.
 Vector2i asVTOLReturnPos[MAX_PLAYERS];
 
+// Warzone 2126: up to 16 players (15 plus scavengers). The old binary save format always holds
+// exactly 11 player entries, so it keeps that count; JSON saves hold MAX_PLAYERS entries and
+// older JSON saves with fewer are read with defaults for the missing players.
+static constexpr unsigned LEGACY_BINARY_SAVE_MAX_PLAYERS = 11;
+static_assert(LEGACY_BINARY_SAVE_MAX_PLAYERS <= MAX_PLAYERS, "binary saves must fit");
+
+/// Number of per-player entries to read from a JSON array (older saves have fewer than MAX_PLAYERS).
+static unsigned jsonPlayerCount(const nlohmann::json &arr)
+{
+	return arr.is_array() ? static_cast<unsigned>(std::min<size_t>(arr.size(), MAX_PLAYERS)) : 0;
+}
+
 struct GAME_SAVEHEADER
 {
 	char        aFileType[4];
@@ -533,7 +545,7 @@ static bool serializeMultiplayerGame(PHYSFS_file *fileHandle, const MULTIPLAYERG
 		return false;
 	}
 
-	for (unsigned int i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned int i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		// dummy, was `skDiff` for each player
 		if (!PHYSFS_writeUBE8(fileHandle, 0))
@@ -600,7 +612,7 @@ static bool deserializeMultiplayerGame(PHYSFS_file *fileHandle, MULTIPLAYERGAME 
 	}
 	challengeActive = dummy8;	// hack
 
-	for (unsigned int i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned int i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		// dummy, was `skDiff` for each player
 		if (!PHYSFS_readUBE8(fileHandle, &dummy8))
@@ -699,7 +711,7 @@ static void serializeNetPlay_json(nlohmann::json &o, const NETPLAY *serializeNet
 }
 static bool serializeNetPlay(PHYSFS_file *fileHandle, const NETPLAY *serializeNetPlay)
 {
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!serializePlayer(fileHandle, &serializeNetPlay->players[i], i))
 		{
@@ -720,7 +732,7 @@ static void deserializeNetPlay_json(const nlohmann::json &o, NETPLAY *serializeN
 {
 	const auto players = o.at("netPlayers");
 	ASSERT_OR_RETURN(, players.is_array(), "unexpected type, wanted array");
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(players); ++i)
 	{
 		deserializePlayer_json(players.at(i), &serializeNetPlay->players[i], i);
 	}
@@ -740,7 +752,7 @@ static bool deserializeNetPlay(PHYSFS_file *fileHandle, NETPLAY *serializeNetPla
 	unsigned int i;
 	bool retv;
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!deserializePlayer(fileHandle, &serializeNetPlay->players[i], i))
 		{
@@ -853,7 +865,7 @@ static bool serializeSaveGameV10Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!serializeSavePowerData(fileHandle, &serializeGame->power[i]))
 		{
@@ -868,7 +880,7 @@ static void deserializeSaveGameV10Data_json(const nlohmann::json &o, SAVE_GAME_V
 	deserializeSaveGameV7Data_json(o,  (SAVE_GAME_V7 *) serializeGame);
 	nlohmann::json power= o.at("power");
 	ASSERT(power.is_array(), "unexpected type");
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(power); ++i)
 	{
 		deserializeSavePowerData_json(power.at(i), &serializeGame->power[i]);
 	}
@@ -882,7 +894,7 @@ static bool deserializeSaveGameV10Data(PHYSFS_file *fileHandle, SAVE_GAME_V10 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!deserializeSavePowerData(fileHandle, &serializeGame->power[i]))
 		{
@@ -1008,7 +1020,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE16(fileHandle, serializeGame->iTranspEntryTileX[i]))
 		{
@@ -1016,7 +1028,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE16(fileHandle, serializeGame->iTranspEntryTileY[i]))
 		{
@@ -1024,7 +1036,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE16(fileHandle, serializeGame->iTranspExitTileX[i]))
 		{
@@ -1032,7 +1044,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE16(fileHandle, serializeGame->iTranspExitTileY[i]))
 		{
@@ -1040,7 +1052,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE32(fileHandle, serializeGame->aDefaultSensor[i]))
 		{
@@ -1048,7 +1060,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE32(fileHandle, serializeGame->aDefaultECM[i]))
 		{
@@ -1056,7 +1068,7 @@ static bool serializeSaveGameV14Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE32(fileHandle, serializeGame->aDefaultRepair[i]))
 		{
@@ -1077,7 +1089,7 @@ static void deserializeSaveGameV14Data_json(const nlohmann::json &o, SAVE_GAME_V
 	 serializeGame->missionPlayerY = o.at("missionPlayerY").get<int32_t>();
 	nlohmann::json arr = o.at("data");
 	ASSERT_OR_RETURN(, arr.is_array(), "unexpected type, wanted array");
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(arr); ++i)
 	{
 		serializeGame->iTranspEntryTileX[i] = o.at("data").at(i).at("iTranspEntryTileX").get<uint16_t>();
 		serializeGame->iTranspEntryTileY[i] = o.at("data").at(i).at("iTranspEntryTileY").get<uint16_t>();
@@ -1103,7 +1115,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE16(fileHandle, &serializeGame->iTranspEntryTileX[i]))
 		{
@@ -1111,7 +1123,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE16(fileHandle, &serializeGame->iTranspEntryTileY[i]))
 		{
@@ -1119,7 +1131,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE16(fileHandle, &serializeGame->iTranspExitTileX[i]))
 		{
@@ -1127,7 +1139,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE16(fileHandle, &serializeGame->iTranspExitTileY[i]))
 		{
@@ -1135,7 +1147,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE32(fileHandle, &serializeGame->aDefaultSensor[i]))
 		{
@@ -1143,7 +1155,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE32(fileHandle, &serializeGame->aDefaultECM[i]))
 		{
@@ -1151,7 +1163,7 @@ static bool deserializeSaveGameV14Data(PHYSFS_file *fileHandle, SAVE_GAME_V14 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE32(fileHandle, &serializeGame->aDefaultRepair[i]))
 		{
@@ -1190,7 +1202,7 @@ static bool serializeSaveGameV15Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		for (j = 0; j < MAX_RECYCLED_DROIDS; ++j)
 		{
@@ -1228,7 +1240,7 @@ static bool deserializeSaveGameV15Data(PHYSFS_file *fileHandle, SAVE_GAME_V15 *s
 
 	serializeGame->offWorldKeepLists = boolOffWorldKeepLists;
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		for (j = 0; j < MAX_RECYCLED_DROIDS; ++j)
 		{
@@ -1421,9 +1433,9 @@ static bool serializeSaveGameV19Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
-		for (j = 0; j < MAX_PLAYERS; ++j)
+		for (j = 0; j < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++j)
 		{
 			if (!PHYSFS_writeUBE8(fileHandle, serializeGame->alliances[i][j]))
 			{
@@ -1432,7 +1444,7 @@ static bool serializeSaveGameV19Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE8(fileHandle, serializeGame->playerColour[i]))
 		{
@@ -1446,13 +1458,25 @@ static bool serializeSaveGameV19Data(PHYSFS_file *fileHandle, const SAVE_GAME_V1
 static void deserializeSaveGameV19Data_json(const nlohmann::json &o, SAVE_GAME_V19 *serializeGame)
 {
 	deserializeSaveGameV18Data_json(o, (SAVE_GAME_V18 *) serializeGame);
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	// The alliance table is stored row by row; older saves used a smaller player count as the stride
+	const nlohmann::json &allianceTable = o.at("alliances");
+	unsigned stride = 0;
+	while ((stride + 1) * (stride + 1) <= allianceTable.size())
 	{
-		for (unsigned j = 0; j < MAX_PLAYERS; ++j)
+		++stride;
+	}
+	const unsigned rows = std::min<unsigned>(stride, MAX_PLAYERS);
+	for (unsigned i = 0; i < rows; ++i)
+	{
+		for (unsigned j = 0; j < rows; ++j)
 		{
-			serializeGame->alliances[i][j] = o.at("alliances").at(i * MAX_PLAYERS + j).get<uint8_t>();
+			serializeGame->alliances[i][j] = allianceTable.at(i * stride + j).get<uint8_t>();
 		}
-		serializeGame->playerColour[i] = o.at("colours").at(i).get<uint8_t>();
+	}
+	const nlohmann::json &colours = o.at("colours");
+	for (unsigned i = 0; i < jsonPlayerCount(colours); ++i)
+	{
+		serializeGame->playerColour[i] = colours.at(i).get<uint8_t>();
 	}
 	serializeGame->radarZoom = o.at("radarZoom").get<uint8_t>();
 }
@@ -1466,9 +1490,9 @@ static bool deserializeSaveGameV19Data(PHYSFS_file *fileHandle, SAVE_GAME_V19 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
-		for (j = 0; j < MAX_PLAYERS; ++j)
+		for (j = 0; j < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++j)
 		{
 			if (!PHYSFS_readUBE8(fileHandle, &serializeGame->alliances[i][j]))
 			{
@@ -1477,7 +1501,7 @@ static bool deserializeSaveGameV19Data(PHYSFS_file *fileHandle, SAVE_GAME_V19 *s
 		}
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE8(fileHandle, &serializeGame->playerColour[i]))
 		{
@@ -1516,7 +1540,7 @@ static bool serializeSaveGameV20Data(PHYSFS_file *fileHandle, const SAVE_GAME_V2
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!serializeVector2i(fileHandle, &serializeGame->asVTOLReturnPos[i]))
 		{
@@ -1532,7 +1556,7 @@ static void deserializeSaveGameV20Data_json(const nlohmann::json &o, SAVE_GAME_V
 	deserializeSaveGameV19Data_json(o, (SAVE_GAME_V19 *) serializeGame);
 	serializeGame->bDroidsToSafetyFlag = o.at("bDroidsToSafetyFlag").get<uint8_t>();
 
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(o.at("VTOLReturnPos")); ++i)
 	{
 		deserializeVector2i_json(o.at("VTOLReturnPos").at(i), &serializeGame->asVTOLReturnPos[i]);
 	}
@@ -1548,7 +1572,7 @@ static bool deserializeSaveGameV20Data(PHYSFS_file *fileHandle, SAVE_GAME_V20 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!deserializeVector2i(fileHandle, &serializeGame->asVTOLReturnPos[i]))
 		{
@@ -1584,7 +1608,7 @@ static bool serializeSaveGameV22Data(PHYSFS_file *fileHandle, const SAVE_GAME_V2
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!serializeRunData(fileHandle, &serializeGame->asRunData[i]))
 		{
@@ -1599,7 +1623,7 @@ static void deserializeSaveGameV22Data_json(const nlohmann::json &o, SAVE_GAME_V
 {
 	deserializeSaveGameV20Data_json(o, (SAVE_GAME_V20 *) serializeGame);
 	ASSERT_OR_RETURN(, o.at("runData").is_array(), "unexpected type, wanted array");
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(o.at("runData")); ++i)
 	{
 		const nlohmann::json runData = o.at("runData");
 		ASSERT_OR_RETURN(, runData.is_array(), "unexpected type, wanted array");
@@ -1617,7 +1641,7 @@ static bool deserializeSaveGameV22Data(PHYSFS_file *fileHandle, SAVE_GAME_V22 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!deserializeRunData(fileHandle, &serializeGame->asRunData[i]))
 		{
@@ -1690,7 +1714,7 @@ static bool serializeSaveGameV27Data(PHYSFS_file *fileHandle, const SAVE_GAME_V2
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		for (j = 0; j < MAX_RECYCLED_DROIDS; ++j)
 		{
@@ -1716,7 +1740,7 @@ static bool deserializeSaveGameV27Data(PHYSFS_file *fileHandle, SAVE_GAME_V27 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		for (j = 0; j < MAX_RECYCLED_DROIDS; ++j)
 		{
@@ -1884,7 +1908,7 @@ static bool serializeSaveGameV33Data(PHYSFS_file *fileHandle, const SAVE_GAME_V3
 		return false;
 	}
 
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_writeUBE32(fileHandle, serializeGame->sPlayerIndex[i]))
 		{
@@ -1905,7 +1929,7 @@ static void deserializeSaveGameV33Data_json(const nlohmann::json &o, SAVE_GAME_V
 	serializeGame->multiPlayer = o.at("multiPlayer").get<int32_t>();
 	const auto playerIndices = o.at("sPlayerIndices");
 	ASSERT_OR_RETURN(, playerIndices.is_array(), "unexpected type, wanted array");
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(playerIndices); ++i)
 	{
 		serializeGame->sPlayerIndex[i] = playerIndices.at(i).get<uint32_t>();
 	}
@@ -1928,7 +1952,7 @@ static bool deserializeSaveGameV33Data(PHYSFS_file *fileHandle, SAVE_GAME_V33 *s
 
 	serializeGame->multiPlayer = boolMultiPlayer;
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (!PHYSFS_readUBE32(fileHandle, &serializeGame->sPlayerIndex[i]))
 		{
@@ -1963,7 +1987,7 @@ static bool serializeSaveGameV34Data(PHYSFS_file *fileHandle, const SAVE_GAME_V3
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (WZ_PHYSFS_writeBytes(fileHandle, serializeGame->sPlayerName[i], StringSize) != StringSize)
 		{
@@ -1977,7 +2001,7 @@ static bool serializeSaveGameV34Data(PHYSFS_file *fileHandle, const SAVE_GAME_V3
 static void deserializeSaveGameV34Data_json(const nlohmann::json &o, SAVE_GAME_V34 *serializeGame)
 {
 	deserializeSaveGameV33Data_json(o, (SAVE_GAME_V33 *) serializeGame);
-	for (unsigned i = 0; i < MAX_PLAYERS; ++i)
+	for (unsigned i = 0; i < jsonPlayerCount(o.at("playerNames")); ++i)
 	{
 		sstrcpy(serializeGame->sPlayerName[i], o.at("playerNames").at(i).get<std::string>().c_str());
 	}
@@ -1991,7 +2015,7 @@ static bool deserializeSaveGameV34Data(PHYSFS_file *fileHandle, SAVE_GAME_V34 *s
 		return false;
 	}
 
-	for (i = 0; i < MAX_PLAYERS; ++i)
+	for (i = 0; i < LEGACY_BINARY_SAVE_MAX_PLAYERS; ++i)
 	{
 		if (WZ_PHYSFS_readBytes(fileHandle, serializeGame->sPlayerName[i], StringSize) != StringSize)
 		{
@@ -4448,6 +4472,7 @@ LoadingTask<> gameLoadV(ResourceLoadingController& controller, PHYSFS_file *file
 	}
 	else if (version <= CURRENT_VERSION_NUM)
 	{
+		saveGameData = SAVE_GAME(); // Warzone 2126: players missing from older saves start from defaults, not the last load
 		if (gamJson.has_value())
 		{
 			debug(LOG_SAVEGAME, "gam json found, loading that.");

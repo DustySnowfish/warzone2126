@@ -1,0 +1,159 @@
+{
+	"challenge": {
+		"map": "Random-512-Rockies",
+		"maxPlayers": 15,
+		"scavengers": "true",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 2,
+		"name": "Visual bench - 15 players on a random 512 map",
+		"version": 2
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0,
+		"colour": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"colour": 1,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_2": {
+		"team": 2,
+		"position": 2,
+		"colour": 2,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_3": {
+		"team": 3,
+		"position": 3,
+		"colour": 3,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_4": {
+		"team": 4,
+		"position": 4,
+		"colour": 4,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_5": {
+		"team": 5,
+		"position": 5,
+		"colour": 5,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_6": {
+		"team": 6,
+		"position": 6,
+		"colour": 6,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_7": {
+		"team": 7,
+		"position": 7,
+		"colour": 7,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_8": {
+		"team": 8,
+		"position": 8,
+		"colour": 8,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_9": {
+		"team": 9,
+		"position": 9,
+		"colour": 9,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_10": {
+		"team": 10,
+		"position": 10,
+		"colour": 10,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_11": {
+		"team": 11,
+		"position": 11,
+		"colour": 11,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_12": {
+		"team": 12,
+		"position": 12,
+		"colour": 12,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_13": {
+		"team": 13,
+		"position": 13,
+		"colour": 13,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"player_14": {
+		"team": 14,
+		"position": 14,
+		"colour": 14,
+		"difficulty": "Medium",
+		"ai": "nb_generic.js"
+	},
+	"visualbench": {
+		"localAI": "nb_generic.js",
+		"warmupGameSeconds": 180,
+		"warmupSpeed": 8,
+		"settleSeconds": 2,
+		"shots": [
+			{
+				"name": "rnd_base",
+				"anchor": "start:0",
+				"offset": [
+					0,
+					0
+				],
+				"distance": 2600,
+				"pitch": -45,
+				"yaw": 0,
+				"hold": 4
+			},
+			{
+				"name": "rnd_wide",
+				"anchor": "start:0",
+				"offset": [
+					0,
+					20
+				],
+				"distance": 5000,
+				"pitch": -40,
+				"yaw": 180,
+				"hold": 4
+			},
+			{
+				"name": "rnd_centre",
+				"anchor": "centre",
+				"offset": [
+					0,
+					0
+				],
+				"distance": 3500,
+				"pitch": -50,
+				"yaw": 30,
+				"hold": 4
+			}
+		]
+	}
+}

@@ -52,7 +52,7 @@ class IOProvider;
 #  define MAPLIB_DECL_FORMAT(archetype, string_index, first_to_check)
 #endif
 
-#define MAX_PLAYERS         11                 ///< Maximum number of players in the game.
+#define MAX_PLAYERS         16                 ///< Maximum number of players in the game. Warzone 2126: 15 plus scavengers (was 11).
 
 #define LOG_INFO_VERBOSE LoggingProtocol::LogLevel::Info_Verbose
 #define LOG_INFO LoggingProtocol::LogLevel::Info

@@ -267,6 +267,8 @@ bool lobbyNameChangeRequestAllowed(uint32_t sender);
 #define MULTIOP_PLAYERS_TABS_H	24
 #define MULTIOP_PLAYERSH		(384 + MULTIOP_PLAYERS_TABS_H + 1)
 #define MULTIOP_BLIND_WAITING_ROOM	10233
+#define MULTIOP_PLAYERS_ROWLIST	10234 // Warzone 2126: scrollable list holding the player rows (more than 10 slots)
+#define MULTIOP_PLAYERS_ROWS		10235 // Warzone 2126: the rows' container inside that list
 
 #define MULTIOP_ROW_WIDTH		298
 

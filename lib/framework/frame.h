@@ -56,7 +56,7 @@
 
 extern uint32_t selectedPlayer;      ///< The player number corresponding to this client.
 extern uint32_t realSelectedPlayer;  ///< The player number corresponding to this client (same as selectedPlayer, unless changing players in the debug menu).
-#define MAX_PLAYERS         11                 ///< Maximum number of players in the game.
+#define MAX_PLAYERS         16                 ///< Maximum number of players in the game. Warzone 2126: 15 plus scavengers (was 11).
 #define MAX_PLAYERS_IN_GUI  (MAX_PLAYERS - 1)  ///< One player reserved for scavengers.
 #define PLAYER_FEATURE      (MAX_PLAYERS + 1)
 #define MAX_PLAYER_SLOTS    (MAX_PLAYERS + 2)  ///< Max players plus 1 baba and 1 reserved for features. Actually, if baba is a regular player, then it's plus 1 unused?

@@ -1411,6 +1411,12 @@ int WzMultiplayerOptionsTitleUI::playerRowY0(uint32_t row) const
 	{
 		return -1;
 	}
+	// Warzone 2126: rows live in a scrollable list; return the position relative to the players form
+	auto pRowList = std::dynamic_pointer_cast<ScrollableListWidget>(widgFormGetFromID(psWScreen->psForm, MULTIOP_PLAYERS_ROWLIST));
+	if (pRowList && playerRows[row]->parent() != nullptr && playerRows[row]->parent()->id == MULTIOP_PLAYERS_ROWS)
+	{
+		return pRowList->y() + playerRows[row]->y() - static_cast<int>(pRowList->getScrollPosition());
+	}
 	return playerRows[row]->y();
 }
 
@@ -1425,6 +1431,9 @@ static int playerBoxHeight(uint32_t rowPosition)
 	{
 		gap = 0;
 	}
+	// Warzone 2126: with more slots than fit (up to 15 players), rows keep a small gap and the
+	// list scrolls instead of the rows overlapping
+	gap = std::max(gap, 2 * gapDiv);
 	STATIC_ASSERT(MULTIOP_TEAMSHEIGHT == MULTIOP_PLAYERHEIGHT);  // Why are these different defines?
 	return playersTop + (MULTIOP_TEAMSHEIGHT * gapDiv + gap) * rowPosition / gapDiv;
 }
@@ -3821,6 +3830,40 @@ void WzMultiplayerOptionsTitleUI::addPlayerBox(bool players)
 		}
 		const auto playerDisplayView = (playersTabButtons) ? playersTabButtons->getDisplayView() : WzPlayerBoxTabs::PlayerDisplayView::Players;
 
+		// Warzone 2126: the rows sit in a scrollable list, so up to 15 player slots fit the box
+		const int rowsTop = (playersTabButtons) ? MULTIOP_PLAYERS_TABS_H + 1 : 1;
+		auto rowList = std::dynamic_pointer_cast<ScrollableListWidget>(widgFormGetFromID(psWScreen->psForm, MULTIOP_PLAYERS_ROWLIST));
+		std::shared_ptr<WIDGET> rowsContainer = widgFormGetFromID(psWScreen->psForm, MULTIOP_PLAYERS_ROWS);
+		if (!rowList || !rowsContainer)
+		{
+			rowList = ScrollableListWidget::make();
+			rowList->id = MULTIOP_PLAYERS_ROWLIST;
+			rowList->setScrollbarWidth(8);
+			rowList->setExpandWhenScrollbarInvisible(true);
+			rowList->setSnapOffset(false);
+			playersForm->attach(rowList);
+			// A container taller than the visible list counts as clipped, and the widget system then
+			// skips its children; this one lets its rows draw (each row is still clipped on its own)
+			class RowsContainer : public WIDGET
+			{
+			public:
+				void displayRecursive(WidgetGraphicsContext const &context) override
+				{
+					WIDGET::displayRecursive(context.setAllowChildDisplayRecursiveIfSelfClipped(true));
+				}
+			};
+			auto container = std::make_shared<RowsContainer>();
+			container->id = MULTIOP_PLAYERS_ROWS;
+			container->setGeometry(0, 0, MULTIOP_PLAYERSW, MULTIOP_PLAYERSH);
+			rowList->addItem(container);
+			rowsContainer = container;
+		}
+		rowList->setGeometry(0, rowsTop, MULTIOP_PLAYERSW, MULTIOP_PLAYERSH - rowsTop - 1);
+		int rowsBottom = 0;
+		// Narrower rows when the list scrolls, so the scrollbar does not cover their right-hand buttons
+		const bool rowsScroll = playerBoxHeight(numSlotsToBeDisplayed()) - rowsTop > MULTIOP_PLAYERSH - rowsTop - 1;
+		const int rowWidth = rowsScroll ? MULTIOP_PLAYERWIDTH - 10 : MULTIOP_PLAYERWIDTH;
+
 		ASSERT(static_cast<size_t>(MAX_CONNECTED_PLAYERS) <= NetPlay.players.size(), "Insufficient array size: %zu versus %zu", NetPlay.players.size(), (size_t)MAX_CONNECTED_PLAYERS);
 		uint32_t numSlotsDisplayed = 0;
 		if (playerRows.empty())
@@ -3834,7 +3877,7 @@ void WzMultiplayerOptionsTitleUI::addPlayerBox(bool players)
 
 				// Create player row
 				auto playerRow = WzPlayerRow::make(i, titleUI);
-				playersForm->attach(playerRow);
+				rowsContainer->attach(playerRow);
 				playerRows.push_back(playerRow);
 			}
 		}
@@ -3881,16 +3924,30 @@ void WzMultiplayerOptionsTitleUI::addPlayerBox(bool players)
 			}
 
 			uint32_t playerRowPosition = (playerDisplayView == WzPlayerBoxTabs::PlayerDisplayView::Players) ? NetPlay.players[i].position : numSlotsDisplayed;
-			playerRow->setGeometry(PLAYERBOX_X0, playerBoxHeight(playerRowPosition), MULTIOP_PLAYERWIDTH, MULTIOP_PLAYERHEIGHT);
+			playerRow->setGeometry(PLAYERBOX_X0, playerBoxHeight(playerRowPosition) - rowsTop, rowWidth, MULTIOP_PLAYERHEIGHT);
+			rowsBottom = std::max(rowsBottom, playerRow->y() + playerRow->height() + 2);
 			playerRow->show();
 			playerRow->updateState();
-			// make sure it's attached to the current player form
-			if (playerRow->parent() == nullptr)
+			// make sure it's attached to the current rows container
+			if (playerRow->parent() != rowsContainer)
 			{
-				playersForm->attach(playerRow);
+				if (playerRow->parent() != nullptr)
+				{
+					playerRow->parent()->detach(playerRow);
+				}
+				rowsContainer->attach(playerRow);
 			}
 
 			numSlotsDisplayed++;
+		}
+
+		// Content height: the list only scrolls when the rows do not fit
+		const int viewHeight = MULTIOP_PLAYERSH - rowsTop - 1;
+		const int contentHeight = std::max(rowsBottom, viewHeight);
+		if (rowsContainer->height() != contentHeight)
+		{
+			rowsContainer->setGeometry(0, 0, MULTIOP_PLAYERSW, contentHeight);
+			rowList->setLayoutDirty();
 		}
 
 		std::shared_ptr<W_BUTTON> spectatorAddButton = std::dynamic_pointer_cast<W_BUTTON>(widgFormGetFromID(psWScreen->psForm, MULTIOP_ADD_SPECTATOR_SLOTS));

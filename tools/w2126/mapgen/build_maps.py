@@ -30,6 +30,7 @@ MAPS = [
     ("Random-384-Rockies", 384, 8, "rockie"),
     ("Random-512-Arizona", 512, 8, "arizona"),
     ("Random-512-Urban", 512, 10, "urban"),
+    ("Random-512-Rockies", 512, 15, "rockie"),
 ]
 
 TILESETS = {
