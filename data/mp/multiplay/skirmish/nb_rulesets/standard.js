@@ -117,6 +117,9 @@ const bodyStats = [
 	{ res: "R-Vehicle-Body03", stat: "Body3MBT", weight: WEIGHT.MEDIUM, usage: BODYUSAGE.UNIVERSAL, armor: BODYCLASS.THERMAL }, // retaliation
 	{ res: "R-Vehicle-Body07", stat: "Body7ABT", weight: WEIGHT.HEAVY, usage: BODYUSAGE.COMBAT, armor: BODYCLASS.THERMAL }, // retribution
 	{ res: "R-Vehicle-Body10", stat: "Body10MBT", weight: WEIGHT.HEAVY, usage: BODYUSAGE.GROUND, armor: BODYCLASS.THERMAL }, // vengeance
+	// Warzone 2126 ship hulls (also count as kinetic for guessing enemy armour)
+	{ res: "R-Vehicle-Prop-NavalScrew", stat: "NavalPatrol", weight: WEIGHT.LIGHT, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
+	{ res: "R-Vehicle-Body-NavalFrigate", stat: "NavalFrigate", weight: WEIGHT.HEAVY, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
 ];
 
 const classResearch = {
@@ -171,6 +174,8 @@ const propulsionStats = [
 	{ res: "R-Vehicle-Prop-Tracks", stat: "tracked01", usage: PROPULSIONUSAGE.GROUND },
 	{ res: "R-Vehicle-Prop-Hover", stat: "hover01", usage: PROPULSIONUSAGE.HOVER },
 	{ res: "R-Vehicle-Prop-VTOL", stat: "V-Tol", usage: PROPULSIONUSAGE.VTOL },
+	{ res: "R-Vehicle-Prop-NavalScrew", stat: "NavalScrew", usage: PROPULSIONUSAGE.NAVAL },
+	{ res: "R-Vehicle-Prop-NavalJet", stat: "NavalJet", usage: PROPULSIONUSAGE.NAVAL },
 ];
 
 

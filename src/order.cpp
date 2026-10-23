@@ -133,6 +133,23 @@ struct RtrBestResult
 static bool secondaryCheckDamageLevelDeselect(DROID *psDroid, SECONDARY_STATE repairState);
 static RtrBestResult decideWhereToRepairAndBalance(DROID *psDroid);
 
+/// Warzone 2126: ships go back to a shipyard for repairs
+static bool isShipyardObj2126(const BASE_OBJECT *psObj)
+{
+	const STRUCTURE *psStruct = castStructure(psObj);
+	return psStruct != nullptr && psStruct->pStructureType->isShipyard;
+}
+
+/// Where a droid repairing at this object waits, and how close it must be
+static Vector2i rtrPoint2126(const BASE_OBJECT *psObj)
+{
+	return isShipyardObj2126(psObj) ? shipyardBerth2126(castStructure(psObj)) : psObj->pos.xy();
+}
+static int rtrRange2126(const BASE_OBJECT *psObj)
+{
+	return isShipyardObj2126(psObj) ? kShipyardRepairRange2126 : REPAIR_RANGE;
+}
+
 /** This function checks if the droid is off range. If yes, it uses actionDroid() to make the droid to move to its target if its target is on range, or to move to its order position if not.
  * @todo droid doesn't shoot while returning to the guard position.
  */
@@ -1042,7 +1059,9 @@ bool orderUpdateDroid(DROID *psDroid)
 			psStruct = (STRUCTURE *)psDroid->order.psObj;
 			ASSERT(psStruct != nullptr, "orderUpdateUnit: invalid structure pointer");
 
-			if (objPosDiffSq(psDroid->pos, psDroid->order.psObj->pos) < REPAIR_RANGE * REPAIR_RANGE)
+			const Vector2i rtrDiff = psDroid->pos.xy() - rtrPoint2126(psDroid->order.psObj);
+			const int rtrRange = rtrRange2126(psDroid->order.psObj);
+			if (dot(rtrDiff, rtrDiff) < rtrRange * rtrRange)
 			{
 				/* action droid to wait */
 				actionDroid(psDroid, DACTION_WAITFORREPAIR);
@@ -1056,7 +1075,7 @@ bool orderUpdateDroid(DROID *psDroid)
 		}
 		if ((psDroid->action == DACTION_WAITFORREPAIR || psDroid->action == DACTION_WAITDURINGREPAIR) &&
 				psDroid->order.psObj &&
-				objPosDiffSq(psDroid->pos, psDroid->order.psObj->pos) > REPAIR_RANGE * REPAIR_RANGE)
+				[&]{ const Vector2i d = psDroid->pos.xy() - rtrPoint2126(psDroid->order.psObj); const int r = rtrRange2126(psDroid->order.psObj); return dot(d, d) > r * r; }())
 		{ // was being repaired, but somehow got lost. recalculate reparing point
 			psDroid->order.psObj = nullptr;
 		}
@@ -1893,6 +1912,14 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 					objTrace(psDroid->id, "Go to repair facility at (%d, %d)!", rtrData.psObj->pos.x, rtrData.psObj->pos.y);
 					actionDroid(psDroid, DACTION_MOVE, rtrData.psObj, psDroid->order.pos.x, psDroid->order.pos.y);
 				}
+			}
+			/* Warzone 2126: ships go to a shipyard's berth */
+			else if (rtrData.type == RTR_TYPE_HQ && isShipyardObj2126(rtrData.psObj))
+			{
+				psDroid->order = DroidOrder(psOrder->type, rtrData.psObj, RTR_TYPE_HQ);
+				psDroid->order.pos = shipyardBerth2126(castStructure(rtrData.psObj));
+				objTrace(psDroid->id, "Go to shipyard berth at (%d, %d)", psDroid->order.pos.x, psDroid->order.pos.y);
+				actionDroid(psDroid, DACTION_MOVE, psDroid->order.pos.x, psDroid->order.pos.y);
 			}
 			/* give repair order if repair droid found */
 			else if (rtrData.type == RTR_TYPE_DROID && !psDroid->isTransporter())
@@ -3519,6 +3546,11 @@ void secondaryCheckDamageLevel(DROID *psDroid)
 					orderDroidObj(psDroid, DORDER_RTR, result.psObj, ModeQueue);
 					return;
 				}
+				else if (result.type == RTR_TYPE_HQ && isShipyardObj2126(result.psObj))
+				{
+					orderDroidObj(psDroid, DORDER_RTR, result.psObj, ModeQueue);
+					return;
+				}
 				else if (result.type == RTR_TYPE_HQ)
 				{
 					ASSERT(result.psObj != nullptr, "RTR_TYPE_HQ but target is null");
@@ -3677,6 +3709,31 @@ static inline RtrBestResult decideWhereToRepairAndBalance(DROID *psDroid)
 	{
 		uint32_t which = gameRand(vDroidCloseEnough.size());
 		return RtrBestResult(RTR_TYPE_DROID, vDroid[vDroidCloseEnough[which]]);
+	}
+
+	// Warzone 2126: a ship with no repair facility or repair unit in reach goes to the nearest shipyard
+	if (psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR)
+	{
+		STRUCTURE *psBestYard = nullptr;
+		int bestYardDist = INT32_MAX;
+		for (STRUCTURE *psStruct : gameWorld.objects.structures[psDroid->player])
+		{
+			if (!psStruct->pStructureType->isShipyard || psStruct->status != SS_BUILT || psStruct->died)
+			{
+				continue;
+			}
+			const Vector2i diff = psDroid->pos.xy() - shipyardBerth2126(psStruct);
+			const int dist = dot(diff, diff);
+			if (dist < bestYardDist)
+			{
+				bestYardDist = dist;
+				psBestYard = psStruct;
+			}
+		}
+		if (psBestYard != nullptr)
+		{
+			return RtrBestResult(RTR_TYPE_HQ, psBestYard);
+		}
 	}
 
 	// go to headquarters, if any

@@ -109,6 +109,11 @@
 			"water": "spray_hover",
 			"spacing": 36,
 			"minSpeed": 60
+		},
+		"propellor": {
+			"water": "wake_ship",
+			"spacing": 26,
+			"minSpeed": 25
 		}
 	}
 }

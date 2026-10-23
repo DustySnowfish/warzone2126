@@ -358,6 +358,8 @@ function checkVtolProduction()
 }
 
 _global.checkProduction = function() {
+	checkShipProduction(); // Warzone 2126 (Shipyards only build ships, so this takes nothing from the rest)
+
 	switch (chooseObjectType())
 	{
 		case 1:
@@ -386,6 +388,10 @@ _global.checkProduction = function() {
 		checkVtolProduction();
 	}
 };
+
+// Warzone 2126: for ship production (naval.js)
+_global.chooseShipWeapon = chooseWeapon;
+_global.chooseShipBodyWeaponPair = chooseBodyWeaponPair;
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 })(this);

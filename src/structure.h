@@ -119,6 +119,13 @@ STRUCTURE *buildStructureDir(GameWorld& world, STRUCTURE_STATS *pStructureType, 
 /// not heap-allocated and thus doesn't have a stable address!
 nonstd::optional<STRUCTURE> buildBlueprint(WorldMapState& mapState, STRUCTURE_STATS const *psStats, Vector3i xy, uint16_t direction, unsigned moduleIndex, STRUCT_STATES state, uint8_t ownerPlayer);
 /* The main update routine for all Structures */
+/// Warzone 2126: the point on the water in front of a shipyard where ships moor
+Vector2i shipyardBerth2126(const STRUCTURE *psShipyard);
+/// How close to the berth a ship must be for the shipyard to repair it
+static constexpr int kShipyardRepairRange2126 = 4 * 128; // four tiles
+/// Repair friendly ships at a shipyard's berth (called every tick for built shipyards)
+void shipyardRepairShips2126(STRUCTURE *psShipyard);
+
 void structureUpdate(STRUCTURE *psBuilding, GameWorld& world);
 
 /* Remove a structure and free it's memory */

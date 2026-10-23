@@ -96,6 +96,14 @@ struct Piece
 	float leanAngle = 0.f;
 	float footprint = 0.f;         // half size, for dust around the base
 	float nextDust = 0.f;
+	// Warzone 2126: going down in water (sunk ships, debris that lands in the sea)
+	bool sinking = false;
+	float sinkStart = 0.f;
+	float sinkTime = 3.f;
+	float sinkDepth = 50.f;
+	glm::vec3 listAxis { 0.f, 0.f, 1.f };
+	float listAngle = 0.f;
+	float nextBubble = 0.f;
 };
 
 std::vector<Piece> pieces;
@@ -147,6 +155,36 @@ void addPiece(const iIMDBaseShape* base, int team, const glm::vec3& pos, const g
 	}
 }
 
+bool waterAt(const glm::vec3& renderPos)
+{
+	const int x = std::max(0, std::min(static_cast<int>(renderPos.x), world_coord(gameWorld.map.width) - 1));
+	const int y = std::max(0, std::min(static_cast<int>(-renderPos.z), world_coord(gameWorld.map.height) - 1));
+	return terrainType(mapTile(gameWorld.map, map_coord(x), map_coord(y))) == TER_WATER;
+}
+
+void startSinking(Piece& p, float time, float depth, float listAngle)
+{
+	p.sinking = true;
+	p.resting = true;
+	p.vel = glm::vec3(0.f);
+	p.angVel = glm::vec3(0.f);
+	p.sinkStart = p.age;
+	p.sinkTime = time;
+	p.sinkDepth = depth;
+	p.life = p.age + time;
+	const float a = rand01() * 6.2832f;
+	p.listAxis = glm::vec3(std::cos(a), 0.f, std::sin(a));
+	p.listAngle = listAngle;
+	p.nextBubble = p.age;
+}
+
+const iIMDBaseShape* shipHullImd(const DROID* psDroid)
+{
+	const int bodyStat = psDroid->asBits[COMP_BODY];
+	const int propStat = psDroid->asBits[COMP_PROPULSION];
+	return asBodyStats[bodyStat].ppIMDList[propStat * NUM_PROP_SIDES + LEFT_PROP];
+}
+
 } // anonymous namespace
 
 void droidDestroyed(const DROID* psDroid)
@@ -162,8 +200,60 @@ void droidDestroyed(const DROID* psDroid)
 	const glm::quat hullRot = glm::angleAxis(heading, glm::vec3(0.f, 1.f, 0.f));
 	const float flying = psDroid->isFlying() ? 1.f : 0.f;
 
-	// Hull: a short hop and a lazy tumble, then it settles as the wreck
 	const iIMDBaseShape* body = BODY_IMD(psDroid, psDroid->player);
+	if (psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR)
+	{
+		// Warzone 2126: a ship stays afloat for a moment, burning, then lists over and goes down
+		// with its guns still on (a heavy hull sinks more slowly)
+		const BODY_SIZE size = psDroid->getBodyStats()->size;
+		const float sinkTime = size >= SIZE_HEAVY ? 11.f : (size == SIZE_MEDIUM ? 9.f : 7.f);
+		const float a = rand01() * 6.2832f;
+		const glm::vec3 listAxis(std::cos(a), 0.f, std::sin(a));
+		const float listAngle = randRange(0.35f, 0.7f);
+		auto sinkWith = [&](const iIMDBaseShape* shape, const glm::vec3& at, const glm::quat& rot, bool smokes)
+		{
+			if (shape == nullptr)
+			{
+				return;
+			}
+			if (Piece* p = addShape(shape->displayModel(), team, at, rot, glm::vec3(0.f), glm::vec3(0.f), smokes))
+			{
+				startSinking(*p, sinkTime, 110.f, listAngle);
+				p->listAxis = listAxis;
+				p->bottom = 0.f;
+				p->shade = 170;
+			}
+		};
+		sinkWith(shipHullImd(psDroid), base + glm::vec3(0.f, -10.f, 0.f), hullRot, false);
+		sinkWith(body, base, hullRot, true);
+		for (int w = 0; w < static_cast<int>(psDroid->numWeaps); ++w)
+		{
+			if (psDroid->asWeaps[w].nStat == 0 || body == nullptr || body->displayModel() == nullptr || static_cast<size_t>(w) >= body->displayModel()->connectors.size())
+			{
+				continue;
+			}
+			const Vector3i c = body->displayModel()->connectors[w];
+			const glm::vec3 mountPos = base + glm::rotate(hullRot, glm::vec3(static_cast<float>(c.x), static_cast<float>(c.z), static_cast<float>(c.y)));
+			const glm::quat turretRot = hullRot * glm::angleAxis(-UNDEG(psDroid->asWeaps[w].rot.direction), glm::vec3(0.f, 1.f, 0.f));
+			// (each piece lists about its own origin, so the turret drifts off the hull a little as
+			// it rolls: hidden by the smoke and the water)
+			sinkWith(WEAPON_MOUNT_IMD(psDroid, w), mountPos, turretRot, false);
+			sinkWith(WEAPON_IMD(psDroid, w), mountPos, turretRot, false);
+		}
+		particles::spawn("water_splash", Vector3f(base.x, -base.z, base.y + 4.f), Vector3f(0.f, 0.f, 1.f), size >= SIZE_HEAVY ? 2.f : 1.4f);
+		// Plating thrown out, to splash down around it
+		for (int i = 0; i < 3; ++i)
+		{
+			const float d = rand01() * 6.2832f;
+			addPiece(getRandomDebrisImd(), team, base + glm::vec3(0.f, 12.f, 0.f),
+			         glm::angleAxis(rand01() * 6.2832f, glm::normalize(glm::vec3(rand01() - 0.5f, rand01(), rand01() - 0.5f))),
+			         glm::vec3(std::cos(d) * randRange(120.f, 280.f), randRange(220.f, 420.f), std::sin(d) * randRange(120.f, 280.f)),
+			         glm::vec3(randRange(-9.f, 9.f), randRange(-9.f, 9.f), randRange(-9.f, 9.f)), false);
+		}
+		return;
+	}
+
+	// Hull: a short hop and a lazy tumble, then it settles as the wreck
 	addPiece(body, team, base + glm::vec3(0.f, 4.f, 0.f), hullRot,
 	         glm::vec3(randRange(-60.f, 60.f), randRange(90.f, 180.f) + flying * 50.f, randRange(-60.f, 60.f)),
 	         glm::vec3(randRange(-1.2f, 1.2f), randRange(-0.6f, 0.6f), randRange(-1.2f, 1.2f)), true);
@@ -279,6 +369,22 @@ void update()
 			pieces.pop_back();
 			continue;
 		}
+		if (p.sinking)
+		{
+			const float t = (p.age - p.sinkStart) / p.sinkTime;
+			if (p.age >= p.nextBubble && t < 0.9f)
+			{
+				p.nextBubble = p.age + randRange(0.25f, 0.6f) * (p.smokes ? 1.f : 2.5f);
+				particles::spawn("ship_bubbles", Vector3f(p.pos.x, -p.pos.z, groundAt(p.pos) + 2.f), Vector3f(0.f, 0.f, 1.f), p.smokes ? 1.2f : 0.5f);
+			}
+			if (p.smokes && t < 0.55f && p.age >= p.nextSmoke)
+			{
+				p.nextSmoke = p.age + randRange(0.3f, 0.6f);
+				particles::spawn(t < 0.3f ? "damage_fire" : "damage_smoke", Vector3f(p.pos.x, -p.pos.z, p.pos.y + 14.f), Vector3f(0.f, 0.f, 1.f), 1.2f);
+			}
+			++i;
+			continue;
+		}
 		if (p.collapse)
 		{
 			// Dust pouring out around the base while it goes down
@@ -302,6 +408,16 @@ void update()
 				p.rot = glm::normalize(glm::angleAxis(spin * dt, p.angVel / spin) * p.rot);
 			}
 			const float ground = groundAt(p.pos) + p.bottom;
+			if (p.pos.y < ground && waterAt(p.pos))
+			{
+				// Splash down and sink (Warzone 2126)
+				particles::spawn("water_splash", Vector3f(p.pos.x, -p.pos.z, ground + 2.f), Vector3f(0.f, 0.f, 1.f), 0.7f);
+				p.pos.y = ground - p.bottom * 0.5f;
+				p.smokes = false;
+				startSinking(p, 2.5f, 40.f * p.scale, randRange(0.2f, 0.6f));
+				++i;
+				continue;
+			}
 			if (p.pos.y < ground)
 			{
 				p.pos.y = ground;
@@ -357,6 +473,14 @@ void draw(const glm::mat4& viewMatrix)
 			pos.y -= p.collapseDepth * t * t;
 			rot = glm::angleAxis(p.leanAngle * std::sqrt(t), p.leanAxis) * rot;
 			shade = static_cast<uint8_t>(200.f - 80.f * t);
+		}
+		else if (p.sinking)
+		{
+			// Settles slowly at first, then goes under; lists over as it fills
+			const float t = std::min(1.f, (p.age - p.sinkStart) / p.sinkTime);
+			pos.y -= p.sinkDepth * t * t;
+			rot = glm::angleAxis(p.listAngle * std::min(1.f, t * 1.6f), p.listAxis) * rot;
+			shade = static_cast<uint8_t>(static_cast<float>(p.shade) * (1.f - 0.45f * t));
 		}
 		else if (p.age > p.life - kSinkTime)
 		{

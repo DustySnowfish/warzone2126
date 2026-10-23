@@ -75,7 +75,8 @@ const RESASPECTS = {
 const PROPULSIONUSAGE = {
 	GROUND : 1,
 	HOVER: 2,
-	VTOL: 4
+	VTOL: 4,
+	NAVAL: 8, // Warzone 2126: ships
 };
 
 // what to use this body for? (bit field)
@@ -85,6 +86,7 @@ const BODYUSAGE = {
 	COMBAT: 3, // GROUND | AIR
 	TRUCK: 4, // trucks, sensors and repair droids
 	UNIVERSAL: 7, // COMBAT | TRUCK
+	NAVAL: 8, // Warzone 2126: ship hulls
 };
 
 // what sort of weapons this body is resistant to?

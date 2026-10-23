@@ -745,6 +745,7 @@ _global.checkConstruction = function() {
 		finishStructures,
 		buildOrder,
 		buildExpand,
+		buildShipyard,
 		buildEnergy,
 		buildModules,
 		buildVtols,

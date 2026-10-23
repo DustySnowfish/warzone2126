@@ -44,6 +44,12 @@ function doResearch(lab)
 		}
 	}
 
+	// Warzone 2126: ships, on maps where they can reach an enemy
+	if (navalResearch(lab))
+	{
+		return true;
+	}
+
 	// if we need to quickly get a certain propulsion to reach the enemy, prioritize that.
 	const fastest = needFastestResearch();
 

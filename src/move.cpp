@@ -2011,6 +2011,73 @@ static void moveUpdateGroundModel(DROID *psDroid, SDWORD speed, uint16_t directi
 	updateDroidOrientation(psDroid, gameWorld.map);
 }
 
+/* Warzone 2126: ships. They keep their way on: they turn in arcs with a rate that grows with
+   speed (a rudder needs water flowing past it), only slow down for sharp turns, drift sideways
+   in a turn, and coast to a stop. For propellers, turnSpeed is the turn rate in degrees per
+   second at full speed and spinSpeed the rate when stopped. */
+static void moveUpdateShipModel(DROID *psDroid, SDWORD speed, uint16_t direction)
+{
+	int			fPerpSpeed, fNormalSpeed;
+	uint16_t                iDroidDir;
+	uint16_t                slideDir;
+	int32_t                 dx, dy, bx, by;
+
+	CHECK_DROID(psDroid);
+
+	if (moveDroidStopped(psDroid, speed) == true)
+	{
+		return;
+	}
+
+	PROPULSION_STATS *psPropStats = psDroid->getPropulsionStats();
+
+	moveCheckFinalWaypoint(psDroid, &speed);
+
+	iDroidDir = psDroid->rot.direction;
+	if (psDroid->sMove.Status != MOVEPAUSE)
+	{
+		const int diff = angleDelta(direction - iDroidDir);
+		const int absDiff = std::abs(diff);
+		// Only sharp turns take speed off: none up to 45 degrees, down to 35% for a reversal
+		if (absDiff > DEG(45))
+		{
+			speed = std::max<int>(speed * 35 / 100, speed - int64_t(speed) * (absDiff - DEG(45)) / DEG(180));
+		}
+		// Rudder authority grows with the speed through the water
+		const int maxSpeed = std::max<int>(1, psDroid->baseSpeed);
+		const int currentSpeed = std::min<int>(std::abs(psDroid->sMove.speed), maxSpeed);
+		const int slowRate = DEG(std::max<int>(1, psPropStats->spinSpeed));
+		const int fastRate = DEG(std::max<int>(1, psPropStats->turnSpeed));
+		const int turnRate = slowRate + int64_t(fastRate - slowRate) * currentSpeed / maxSpeed;
+		const int maxChange = std::max(1, gameTimeAdjustedAverage(turnRate));
+		iDroidDir += clip(diff, -maxChange, maxChange);
+	}
+
+	fNormalSpeed = moveCalcNormalSpeed(psDroid, speed, iDroidDir, psPropStats->acceleration, psPropStats->deceleration);
+	fPerpSpeed   = moveCalcPerpSpeed(psDroid, iDroidDir, psPropStats->skidDeceleration);
+
+	moveCombineNormalAndPerpSpeeds(psDroid, fNormalSpeed, fPerpSpeed, iDroidDir);
+	moveGetDroidPosDiffs(psDroid, &dx, &dy);
+	moveCalcDroidSlide(psDroid, &dx, &dy);
+	bx = dx;
+	by = dy;
+	moveCalcBlockingSlide(psDroid, &bx, &by, direction, &slideDir);
+	if (bx != dx || by != dy)
+	{
+		// Scraping along the shore: lose way and turn along it
+		moveUpdateDroidDirection(psDroid, &speed, slideDir, DEG(180), psDroid->baseSpeed * DEG(1) / 2, psDroid->baseSpeed * DEG(1) / 4, &iDroidDir);
+		psDroid->rot.direction = iDroidDir;
+		psDroid->sMove.speed = psDroid->sMove.speed * 7 / 8;
+	}
+
+	moveUpdateDroidPos(psDroid, bx, by);
+
+	psDroid->pos.z = map_Height(gameWorld.map, psDroid->pos.x, psDroid->pos.y);
+	// Ships stay level on the water (the bobbing is drawn, not simulated)
+	psDroid->rot.pitch = 0;
+	psDroid->rot.roll = 0;
+}
+
 /* Update a persons position and speed given target values */
 static void moveUpdatePersonModel(DROID *psDroid, SDWORD speed, uint16_t direction)
 {
@@ -2809,6 +2876,10 @@ void moveUpdateDroid(DROID *psDroid)
 	else if (psPropStats->propulsionType == PROPULSION_TYPE_LIFT)
 	{
 		moveUpdateVtolModel(psDroid, moveSpeed, moveDir);
+	}
+	else if (psPropStats->propulsionType == PROPULSION_TYPE_PROPELLOR)
+	{
+		moveUpdateShipModel(psDroid, moveSpeed, moveDir);
 	}
 	else
 	{

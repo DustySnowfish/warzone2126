@@ -20,6 +20,7 @@ _global.setTimers = function() {
 	setTimer("checkAttack", 100);
 	setTimer("adaptCycle", 100);
 	setTimer("rebalanceGroups", 10000 + 20 * rnd());
+	setTimer("navalTick", 4000 + 10 * rnd());
 
 	if (difficulty === EASY)
 	{

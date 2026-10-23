@@ -1037,6 +1037,52 @@ float recoilKick(const WEAPON_STATS* weapon)
 	}
 }
 
+// Warzone 2126: ships ride the swell (heave, pitch and roll on slow waves, each ship out of step
+// with the others), lift the bow when under way and heel over in a turn. Display only.
+struct ShipMotion
+{
+	uint32_t lastTime = 0;
+	uint16_t lastDir = 0;
+	float heel = 0.f;
+};
+static std::unordered_map<uint32_t, ShipMotion> shipMotions;
+
+glm::mat4 shipMotion(const DROID* psDroid)
+{
+	if (shipMotions.size() > 4096)
+	{
+		shipMotions.clear();
+	}
+	ShipMotion& m = shipMotions[psDroid->id];
+	if (m.lastTime == 0 || graphicsTime < m.lastTime)
+	{
+		m.lastTime = graphicsTime;
+		m.lastDir = psDroid->rot.direction;
+	}
+	const float dt = std::min(0.1f, static_cast<float>(graphicsTime - m.lastTime) / 1000.f);
+	if (dt > 0.f)
+	{
+		const float turnRate = static_cast<float>(angleDelta(psDroid->rot.direction - m.lastDir)) * (360.f / 65536.f) / dt; // degrees per second
+		const float speedFrac = std::min(1.f, std::abs(static_cast<float>(psDroid->sMove.speed)) / std::max(1.f, static_cast<float>(psDroid->baseSpeed)));
+		const float target = std::max(-7.f, std::min(7.f, turnRate * 0.12f * speedFrac));
+		m.heel += (target - m.heel) * std::min(1.f, dt * 2.5f);
+		m.lastDir = psDroid->rot.direction;
+		m.lastTime = graphicsTime;
+	}
+	const BODY_SIZE size = psDroid->getBodyStats()->size;
+	const float swell = size == SIZE_LIGHT ? 1.3f : (size >= SIZE_HEAVY ? 0.7f : 1.f);
+	const float t = static_cast<float>(graphicsTime) / 1000.f;
+	const float phase = static_cast<float>(psDroid->id % 997) * 0.618f;
+	const float speedFrac = std::min(1.f, std::abs(static_cast<float>(psDroid->sMove.speed)) / std::max(1.f, static_cast<float>(psDroid->baseSpeed)));
+	const float heave = std::sin(t * 1.5f + phase) * 1.6f * swell;
+	// (a positive rotation about X tips the bow down)
+	const float pitch = std::sin(t * 1.1f + phase * 1.7f) * 1.6f * swell - speedFrac * 2.5f;
+	const float roll = std::sin(t * 0.8f + phase * 0.6f) * 2.4f * swell + m.heel;
+	return glm::translate(glm::vec3(0.f, heave, 0.f))
+		* glm::rotate(glm::radians(pitch), glm::vec3(1.f, 0.f, 0.f))
+		* glm::rotate(glm::radians(roll), glm::vec3(0.f, 0.f, 1.f));
+}
+
 glm::mat4 hullSuspension(const DROID* psDroid)
 {
 	const PROPULSION_TYPE propulsion = psDroid->getPropulsionStats()->propulsionType;
@@ -1137,6 +1183,10 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 		glm::rotate(UNDEG(rotation.x), glm::vec3(1.f, 0.f, 0.f)) *
 		glm::rotate(UNDEG(rotation.z), glm::vec3(0.f, 0.f, 1.f)) *
 		hullSuspension(psDroid);
+	if (psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR)
+	{
+		modelMatrix *= shipMotion(psDroid);
+	}
 
 	if (psDroid->timeLastHit - graphicsTime < ELEC_DAMAGE_DURATION && psDroid->lastHitWeapon == WSC_ELECTRONIC)
 	{

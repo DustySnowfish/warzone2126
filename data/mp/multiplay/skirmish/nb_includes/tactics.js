@@ -568,6 +568,11 @@ _global.unsetTarget = function(player) {
 };
 
 _global.groupDroid = function(droid) {
+	if (isNavalDroid(droid))
+	{
+		return; // Warzone 2126: ships are handled by naval.js
+	}
+
 	if (droid.droidType === DROID_WEAPON || droid.droidType === DROID_CYBORG)
 	{
 		if (isVTOL(droid))

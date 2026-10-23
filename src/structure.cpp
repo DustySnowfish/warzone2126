@@ -3921,6 +3921,47 @@ int gateCurrentOpenHeight(const STRUCTURE *psStructure, uint32_t time, int minim
 }
 
 /* The main update routine for all Structures */
+Vector2i shipyardBerth2126(const STRUCTURE *psShipyard)
+{
+	// The front (water) side faces the structure's direction: +y at 0, +x at a quarter turn
+	const uint16_t dir = snapDirection(psShipyard->rot.direction);
+	const bool sideways = dir == 0x4000 || dir == 0xC000;
+	const int depth = sideways ? psShipyard->pStructureType->baseWidth : psShipyard->pStructureType->baseBreadth;
+	const int out = world_coord(depth) / 2 + TILE_UNITS;
+	return psShipyard->pos.xy() + Vector2i(iSinR(dir, out), iCosR(dir, out));
+}
+
+void shipyardRepairShips2126(STRUCTURE *psShipyard)
+{
+	// Once a second, mend friendly ships moored at the berth: 4% of their hull, so a wreck is
+	// good as new in 25 seconds
+	if (gameTime / GAME_TICKS_PER_SEC == (gameTime - deltaGameTime) / GAME_TICKS_PER_SEC)
+	{
+		return;
+	}
+	const Vector2i berth = shipyardBerth2126(psShipyard);
+	for (BASE_OBJECT *psObj : gridStartIterate(berth.x, berth.y, kShipyardRepairRange2126))
+	{
+		DROID *psDroid = castDroid(psObj);
+		if (psDroid == nullptr || psDroid->died || !psDroid->isDamaged() || psDroid->isVtol()
+		    || psDroid->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR
+		    || !(psDroid->player == psShipyard->player || aiCheckAlliancesInRange(psDroid->player, psShipyard->player)))
+		{
+			continue;
+		}
+		const unsigned original = psDroid->originalBody;
+		psDroid->body = std::min(original, psDroid->body + std::max(1u, original * 4 / 100));
+		if (psDroid->visibleForLocalDisplay())
+		{
+			particles::spawn("build_sparks", Vector3f(psDroid->pos.x, psDroid->pos.y, psDroid->pos.z + 20), Vector3f(0.f, 0.f, 1.f), 0.8f);
+		}
+		if (!psDroid->isDamaged() && (psDroid->order.type == DORDER_RTR || psDroid->order.type == DORDER_RTR_SPECIFIED))
+		{
+			droidWasFullyRepaired(psDroid, nullptr);
+		}
+	}
+}
+
 void structureUpdate(STRUCTURE *psBuilding, GameWorld& world)
 {
 	WZ_PERF_SCOPE(T_structureUpdate);
@@ -4018,6 +4059,10 @@ void structureUpdate(STRUCTURE *psBuilding, GameWorld& world)
 	if (psBuilding->status == SS_BUILT)
 	{
 		aiUpdateStructure(psBuilding, world);
+		if (psBuilding->pStructureType->isShipyard)
+		{
+			shipyardRepairShips2126(psBuilding);
+		}
 	}
 
 	if (psBuilding->status != SS_BUILT)
