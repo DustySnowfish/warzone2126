@@ -26,6 +26,8 @@
 #include "lib/widget/bar.h"
 #include "lib/widget/label.h"
 #include "research.h"
+#include "hud2126_style.h"
+#include "lib/widget/editbox.h"
 #include "../qtscript.h"
 #include "../component.h"
 #include "../mission.h"
@@ -73,9 +75,24 @@ nonstd::optional<size_t> ResearchController::getHighlightedFacilityIndex()
 	return found == facilities.end() ? nonstd::nullopt : nonstd::optional<size_t>(found - facilities.begin());
 }
 
+std::string ResearchController::nameFilter2126;
+
+static std::string lowerAscii2126(std::string s)
+{
+	for (auto &c : s)
+	{
+		if (c >= 'A' && c <= 'Z')
+		{
+			c = static_cast<char>(c - 'A' + 'a');
+		}
+	}
+	return s;
+}
+
 void ResearchController::updateResearchOptionsList()
 {
 	stats.clear();
+	const std::string filter = lowerAscii2126(nameFilter2126);
 
 	auto highlightedIndex = getHighlightedFacilityIndex();
 	auto research = highlightedIndex.has_value() ? (RESEARCH *)getObjectStatsAt(highlightedIndex.value()) : nullptr;
@@ -83,6 +100,12 @@ void ResearchController::updateResearchOptionsList()
 
 	for (auto researchOption: fillResearchList(selectedPlayer, researchIndex, MAXRESEARCH))
 	{
+		// Matches the shown name or the internal id (so "mg" finds R-Wpn-MG-Damage01)
+		if (!filter.empty() && lowerAscii2126(getLocalizedStatsName(&asResearch[researchOption])).find(filter) == std::string::npos
+			&& lowerAscii2126(asResearch[researchOption].id.toUtf8()).find(filter) == std::string::npos)
+		{
+			continue;
+		}
 		stats.push_back(&asResearch[researchOption]);
 	}
 
@@ -823,7 +846,7 @@ private:
 		auto button = WzResearchHeaderButton::make(WzString::fromUtf8(_("View Tree")),
 		                                           _("Open the research tree"));
 		attach(button);
-		const int right = STAT_WIDTH - CLOSE_WIDTH - RESEARCH_HEADER_PAD;
+		const int right = (use2126Layout ? width2126() : STAT_WIDTH) - CLOSE_WIDTH - RESEARCH_HEADER_PAD;
 		button->setGeometry(RESEARCH_HEADER_PAD, (STAT_TABFORMY - RESEARCH_HEADER_BUTTON_HEIGHT) / 2,
 		                    std::max(10, right - RESEARCH_HEADER_PAD), RESEARCH_HEADER_BUTTON_HEIGHT);
 		button->addOnClickHandler([](W_BUTTON&) {
@@ -833,7 +856,36 @@ private:
 		});
 	}
 
+	// Warzone 2126 panel: a search box under the header; the list shows matching topics as you type
+	void addHeader2126() override
+	{
+		searchBox = std::make_shared<W_EDITBOX>();
+		searchBox->pBoxDisplay = [](WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset) {
+			const int x0 = xOffset + psWidget->x(), y0 = yOffset + psWidget->y();
+			pie_UniTransBoxFill(x0, y0, x0 + psWidget->width(), y0 + psWidget->height(), pal_RGBA(8, 12, 16, 230));
+			iV_Box(x0, y0, x0 + psWidget->width() - 1, y0 + psWidget->height() - 1, hud2126::border());
+		};
+		searchBox->setPlaceholder(_("Search research"));
+		searchBox->setPlaceholderTextColor(WZCOL_TEXT_DARK);
+		searchBox->setMaxStringSize(40);
+		searchBox->setString(WzString::fromUtf8(ResearchController::nameFilter()));
+		searchBox->setOnEscapeHandler([](W_EDITBOX &box) { box.setString(""); });
+		attach(searchBox);
+		searchBox->setGeometry(6, k2126HeaderRowY, width2126() - 12, k2126HeaderRowH);
+		searchBox->setTip(_("Type part of a name to show only matching topics; Esc clears"));
+	}
+
+	void display(int xOffset, int yOffset) override
+	{
+		if (searchBox)
+		{
+			controller->setNameFilter2126(searchBox->getString().toUtf8());
+		}
+		BaseWidget::display(xOffset, yOffset);
+	}
+
 	std::shared_ptr<ResearchController> controller;
+	std::shared_ptr<W_EDITBOX> searchBox;
 };
 
 bool ResearchController::showInterface()

@@ -106,6 +106,17 @@ public:
 		queuedJumpToHighlightedStatsObject = false;
 	}
 
+	/// Warzone 2126 panel: 0 all, 1 base, 2 defence, 3 support
+	static int category2126;
+	void setCategory2126(int category)
+	{
+		if (category != category2126)
+		{
+			category2126 = category;
+			updateBuildOptionsList();
+		}
+	}
+
 private:
 	void updateBuildersList();
 	void updateBuildOptionsList();

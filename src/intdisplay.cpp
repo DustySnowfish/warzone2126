@@ -49,6 +49,8 @@
 #include "lib/sound/audio.h"
 
 #include "intdisplay.h"
+#include "hci/hud2126_style.h"
+#include "main.h"
 
 #include "objects.h"
 #include "loop.h"
@@ -744,6 +746,15 @@ void IntFormAnimated::display(int xOffset, int yOffset)
 	                   aBegin.width()  + (aEnd.width()  - aBegin.width()) * num / den,
 	                   aBegin.height() + (aEnd.height() - aBegin.height()) * num / den);
 
+	if (GetGameMode() == GS_NORMAL && intInterface2126Active())
+	{
+		// Warzone 2126 interface: flat dark panels with a light-blue edge, as the status strip
+		const int x0 = aCur.x(), y0 = aCur.y(), x1 = x0 + aCur.width(), y1 = y0 + aCur.height();
+		pie_UniTransBoxFill(x0, y0, x1, y1, pal_RGBA(16, 22, 28, 232));
+		iV_Box(x0, y0, x1 - 1, y1 - 1, hud2126::border());
+		pie_UniTransBoxFill(x0 + 1, y0 + 1, x1 - 1, y0 + 3, hud2126::accent());
+		return;
+	}
 	RenderWindowFrame(FRAME_NORMAL, aCur.x(), aCur.y(), aCur.width(), aCur.height());
 }
 
@@ -946,6 +957,21 @@ bool intInitialiseGraphics()
 // Clear a button bitmap. ( copy the button background ).
 void IntFancyButton::displayClear(int xOffset, int yOffset)
 {
+	if (GetGameMode() == GS_NORMAL && intInterface2126Active())
+	{
+		// Warzone 2126 interface: a flat card; lit edge when hovered or selected
+		const int x0 = xOffset + x(), y0 = yOffset + y(), x1 = x0 + width(), y1 = y0 + height();
+		const bool down = isDown();
+		const bool hot = isHighlighted();
+		pie_UniTransBoxFill(x0, y0, x1, y1, down ? hud2126::tabActive() : hot ? hud2126::tabHover() : hud2126::tab());
+		iV_Box(x0, y0, x1 - 1, y1 - 1, down ? hud2126::accent() : hot ? pal_RGBA(79, 179, 232, 150) : hud2126::border());
+		if (buttonType == IntFancyButton::ButtonType::BTMBUTTON)
+		{
+			// Object buttons sit under their stats button: a small notch shows they belong together
+			pie_UniTransBoxFill(x0 + width() / 2 - 6, y0, x0 + width() / 2 + 6, y0 + 2, down ? hud2126::accent() : hud2126::border());
+		}
+		return;
+	}
 	UWORD buttonId = 0;
 	switch (buttonType)
 	{

@@ -22,6 +22,8 @@
 
 #include "../hci.h"
 #include "../intdisplay.h"
+#include "lib/widget/paragraph.h"
+#include "lib/framework/input.h"
 
 #define STAT_GAP	   2
 #define STAT_BUTWIDTH  60
@@ -174,6 +176,14 @@ class StatsFormButton : public StatsButton
 {
 public:
 	void addCostBar();
+	// Warzone 2126 panels: what the info footer shows for the hovered button
+	BASE_STATS *statsForInfo2126() { return getStats(); }
+	uint32_t costForInfo2126() { return getCost(); }
+	bool isHovered2126() const
+	{
+		const int mx = mouseX() - screenPosX(), my = mouseY() - screenPosY();
+		return mx >= 0 && my >= 0 && mx < width() && my < height();
+	}
 
 protected:
 	std::string getTip() override
@@ -232,6 +242,24 @@ protected:
 	void addNewButton();
 	void removeLastButton();
 	virtual std::shared_ptr<StatsFormButton> makeOptionButton(size_t buttonIndex) const = 0;
+
+	// Warzone 2126 interface: a taller, three-column panel from below the status strip down to the
+	// tab bar, an extra header row (search, categories) and a footer naming the hovered item with its
+	// cost and time
+	bool use2126Layout = false;
+	static constexpr int k2126HeaderRowY = 24;
+	static constexpr int k2126HeaderRowH = 22;
+	static constexpr int k2126ListY = 52;
+	static constexpr int k2126FooterH = 52;
+	static int width2126() { return STAT_BUTWIDTH * 3 + STAT_GAP * 2 + 12; }
+	virtual void addHeader2126() {}
+	/// Seconds to build or research these stats with the panel's highlighted building or truck (-1 if unknown)
+	virtual int estimateSeconds2126(BASE_STATS *) { return -1; }
+	void displayFooter2126(int xOffset, int yOffset);
+	WzCachedText footerName2126, footerLine2126;
+	BASE_STATS *footerStats2126 = nullptr;
+	uint32_t footerCost2126 = 0;
+	int footerSeconds2126 = -2;
 	virtual BaseStatsController &getController() const = 0;
 
 	std::shared_ptr<IntListTabWidget> optionList;
@@ -253,6 +281,7 @@ public:
 protected:
 	void updateLayout() override;
 	void goToHighlightedTab();
+	int estimateSeconds2126(BASE_STATS *stats) override;
 	BASE_STATS *previousHighlighted = nullptr;
 };
 

@@ -23,6 +23,8 @@
 #include "lib/widget/label.h"
 #include "lib/widget/bar.h"
 #include "build.h"
+#include "lib/widget/paragraph.h"
+#include "hud2126_style.h"
 #include "../display.h"
 #include "lib/ivis_opengl/pieblitfunc.h"
 #include "../objmem.h"
@@ -59,11 +61,36 @@ void BuildController::updateBuildersList()
 	std::reverse(builders.begin(), builders.end());
 }
 
+int BuildController::category2126 = 0;
+
+/// Warzone 2126 build categories: 1 base, 2 defence, 3 support
+static int buildCategoryOf2126(const STRUCTURE_STATS *stats)
+{
+	switch (stats->type)
+	{
+	case REF_HQ: case REF_FACTORY: case REF_FACTORY_MODULE: case REF_POWER_GEN: case REF_POWER_MODULE:
+	case REF_RESOURCE_EXTRACTOR: case REF_RESEARCH: case REF_RESEARCH_MODULE: case REF_COMMAND_CONTROL:
+	case REF_CYBORG_FACTORY: case REF_VTOL_FACTORY: case REF_LAB:
+		return 1;
+	case REF_DEFENSE: case REF_WALL: case REF_WALLCORNER: case REF_GATE: case REF_FORTRESS:
+		return 2;
+	default:
+		return 3;
+	}
+}
+
 void BuildController::updateBuildOptionsList()
 {
 	auto newBuildOptions = fillStructureList(gameWorld.objects, selectedPlayer, MAXSTRUCTURES - 1, shouldShowFavorites());
 
-	stats = std::vector<STRUCTURE_STATS *>(newBuildOptions.begin(), newBuildOptions.end());
+	stats.clear();
+	for (STRUCTURE_STATS *option : newBuildOptions)
+	{
+		if (category2126 == 0 || !intInterface2126Active() || buildCategoryOf2126(option) == category2126)
+		{
+			stats.push_back(option);
+		}
+	}
 }
 
 STRUCTURE_STATS *BuildController::getObjectStatsAt(size_t objectIndex) const
@@ -709,6 +736,56 @@ private:
 				_favoriteButton.setChoice(newValue);
 			}
 		});
+	}
+
+	// Warzone 2126 panel: category tabs under the header
+	class CategoryTab2126 : public W_BUTTON
+	{
+	public:
+		CategoryTab2126(int category, const char *label) : category(category)
+		{
+			text.setText(WzString::fromUtf8(label), font_small);
+		}
+		void display(int xOffset, int yOffset) override
+		{
+			const int x0 = xOffset + x(), y0 = yOffset + y(), x1 = x0 + width(), y1 = y0 + height();
+			const bool active = BuildController::category2126 == category;
+			const bool hot = (getState() & WBUT_HIGHLIGHT) != 0;
+			pie_UniTransBoxFill(x0, y0, x1, y1, active ? hud2126::tabActive() : hot ? hud2126::tabHover() : hud2126::tab());
+			iV_Box(x0, y0, x1 - 1, y1 - 1, active ? hud2126::accent() : hud2126::border());
+			text->render(x0 + (width() - text->width()) / 2, y0 + (height() - text->lineSize()) / 2 - text->aboveBase(), active || hot ? hud2126::value() : hud2126::text());
+		}
+		const int category;
+	private:
+		WzCachedText text;
+	};
+
+	void addHeader2126() override
+	{
+		const char *labels[] = { N_("All"), N_("Base"), N_("Defence"), N_("Support") };
+		const char *tips[] = {
+			N_("Everything the selected trucks can build"),
+			N_("HQ, factories, research, power, derricks and modules"),
+			N_("Defences, hardpoints, walls and gates"),
+			N_("Repair, rearm pads and everything else"),
+		};
+		const int n = 4;
+		const int gap = 2;
+		const int tabW = (width2126() - 12 - gap * (n - 1)) / n;
+		auto weakController = std::weak_ptr<BuildController>(controller);
+		for (int i = 0; i < n; ++i)
+		{
+			auto tab = std::make_shared<CategoryTab2126>(i, gettext(labels[i]));
+			attach(tab);
+			tab->setGeometry(6 + i * (tabW + gap), k2126HeaderRowY, tabW, k2126HeaderRowH);
+			tab->setTip(gettext(tips[i]));
+			tab->addOnClickHandler([weakController, i](W_BUTTON &) {
+				if (auto buildController = weakController.lock())
+				{
+					buildController->setCategory2126(i);
+				}
+			});
+		}
 	}
 
 	std::shared_ptr<BuildController> controller;

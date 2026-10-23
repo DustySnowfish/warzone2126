@@ -20,6 +20,12 @@
 #include "lib/widget/button.h"
 #include "lib/widget/bar.h"
 #include "objects_stats.h"
+#include "hud2126_style.h"
+#include "../research.h"
+#include "../structure.h"
+#include "../droid.h"
+#include "../stats.h"
+#include "../template.h"
 #include "../display3d.h"
 #include "../qtscript.h"
 #include "../warcam.h"
@@ -349,18 +355,33 @@ void ObjectsForm::removeLastButton()
 void StatsForm::initialize()
 {
 	id = IDSTAT_FORM;
-	setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
-		psWidget->setGeometry(STAT_X, STAT_Y, STAT_WIDTH, STAT_HEIGHT);
-	}));
+	use2126Layout = intInterface2126Active();
+	if (use2126Layout)
+	{
+		setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			const int top = kHud2126StatusHeight + 8;
+			psWidget->setGeometry(STAT_X, top, StatsForm::width2126(), std::max(200, static_cast<int>(RET_Y) - 6 - top));
+		}));
+	}
+	else
+	{
+		setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			psWidget->setGeometry(STAT_X, STAT_Y, STAT_WIDTH, STAT_HEIGHT);
+		}));
+	}
 
 	addCloseButton();
 	addTabList();
+	if (use2126Layout)
+	{
+		addHeader2126();
+	}
 }
 
 void StatsForm::addCloseButton()
 {
 	W_BUTINIT init;
-	init.x = STAT_WIDTH - CLOSE_WIDTH;
+	init.x = (use2126Layout ? width2126() : STAT_WIDTH) - CLOSE_WIDTH;
 	init.y = 0;
 	init.width = CLOSE_WIDTH;
 	init.height = CLOSE_HEIGHT;
@@ -383,14 +404,121 @@ void StatsForm::addTabList()
 	optionList->id = IDSTAT_TABFORM;
 	optionList->setChildSize(STAT_BUTWIDTH, STAT_BUTHEIGHT);
 	optionList->setChildSpacing(STAT_GAP, STAT_GAP);
+	if (use2126Layout)
+	{
+		optionList->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			auto parent = psWidget->parent();
+			const int listWidth = STAT_BUTWIDTH * 3 + STAT_GAP * 2;
+			const int parentH = parent ? parent->height() : STAT_HEIGHT;
+			psWidget->setGeometry(6, StatsForm::k2126ListY, listWidth, std::max(STAT_BUTHEIGHT, parentH - StatsForm::k2126ListY - StatsForm::k2126FooterH - 4));
+		}));
+		return;
+	}
 	int statListWidth = STAT_BUTWIDTH * 2 + STAT_GAP;
 	optionList->setGeometry((STAT_WIDTH - statListWidth) / 2, STAT_TABFORMY, statListWidth, STAT_HEIGHT - STAT_TABFORMY);
+}
+
+void StatsForm::displayFooter2126(int xOffset, int yOffset)
+{
+	// The hovered button (or the last one hovered) names the item, its cost and its time
+	std::shared_ptr<StatsFormButton> hovered;
+	std::function<void(const std::shared_ptr<WIDGET> &)> findHovered = [&](const std::shared_ptr<WIDGET> &w) {
+		for (const auto &child : w->children())
+		{
+			if (hovered || !child->visible())
+			{
+				continue;
+			}
+			auto button = std::dynamic_pointer_cast<StatsFormButton>(child);
+			if (button && button->isHovered2126())
+			{
+				hovered = button;
+				return;
+			}
+			findHovered(child);
+		}
+	};
+	findHovered(optionList);
+	{
+		{
+			auto button = hovered;
+			if (button)
+			{
+				BASE_STATS *stats = button->statsForInfo2126();
+				const uint32_t cost = button->costForInfo2126();
+				const int seconds = stats ? estimateSeconds2126(stats) : -1;
+				if (stats != footerStats2126 || cost != footerCost2126 || seconds != footerSeconds2126)
+				{
+					footerStats2126 = stats;
+					footerCost2126 = cost;
+					footerSeconds2126 = seconds;
+					footerName2126.setText(stats ? WzString::fromUtf8(getLocalizedStatsName(stats)) : WzString(), font_regular_bold);
+					std::string line = astringf(_("Cost %u"), cost);
+					if (seconds >= 0)
+					{
+						line += astringf(_("    Time %d:%02d"), seconds / 60, seconds % 60);
+					}
+					footerLine2126.setText(WzString::fromUtf8(line), font_regular);
+				}
+			}
+		}
+	}
+	const int x0 = xOffset + x(), y1 = yOffset + y() + height();
+	const int fy = y1 - k2126FooterH;
+	pie_UniTransBoxFill(x0 + 6, fy, x0 + width() - 6, fy + 1, hud2126::border());
+	if (footerStats2126 == nullptr)
+	{
+		if (footerName2126->width() == 0)
+		{
+			footerName2126.setText(_("Hover an item for details"), font_small);
+		}
+		footerName2126->render(x0 + 8, fy + 10 - footerName2126->aboveBase(), hud2126::label());
+		return;
+	}
+	footerName2126->render(x0 + 8, fy + 8 - footerName2126->aboveBase(), hud2126::value());
+	footerLine2126->render(x0 + 8, fy + 8 + footerName2126->lineSize() + 4 - footerLine2126->aboveBase(), hud2126::text());
 }
 
 void StatsForm::display(int xOffset, int yOffset)
 {
 	updateLayout();
 	BaseWidget::display(xOffset, yOffset);
+	if (use2126Layout && !isClosing())
+	{
+		displayFooter2126(xOffset, yOffset);
+	}
+}
+
+int ObjectStatsForm::estimateSeconds2126(BASE_STATS *stats)
+{
+	BASE_OBJECT *object = getController().getHighlightedObject();
+	if (stats == nullptr || object == nullptr)
+	{
+		return -1;
+	}
+	if (stats->hasType(STAT_RESEARCH) && object->type == OBJ_STRUCTURE)
+	{
+		const RESEARCH *research = static_cast<const RESEARCH *>(stats);
+		const int rate = getBuildingResearchPoints(static_cast<const STRUCTURE *>(object));
+		const int done = (research->index < asPlayerResList[selectedPlayer].size()) ? static_cast<int>(asPlayerResList[selectedPlayer][research->index].currentPoints) : 0;
+		return rate > 0 ? std::max(0, (static_cast<int>(research->researchPoints) - done) / rate) : -1;
+	}
+	if (stats->hasType(STAT_STRUCTURE) && object->type == OBJ_DROID)
+	{
+		const DROID *droid = static_cast<const DROID *>(object);
+		if (droid->asBits[COMP_CONSTRUCT] == 0 || droid->asBits[COMP_CONSTRUCT] >= asConstructStats.size())
+		{
+			return -1;
+		}
+		const int rate = constructorPoints(asConstructStats[droid->asBits[COMP_CONSTRUCT]], droid->player);
+		return rate > 0 ? static_cast<int>(static_cast<const STRUCTURE_STATS *>(stats)->buildPoints) / rate : -1;
+	}
+	if (stats->hasType(STAT_TEMPLATE) && object->type == OBJ_STRUCTURE)
+	{
+		const int rate = getBuildingProductionPoints(static_cast<const STRUCTURE *>(object));
+		return rate > 0 ? static_cast<int>(calcTemplateBuild(static_cast<const DROID_TEMPLATE *>(stats))) / rate : -1;
+	}
+	return -1;
 }
 
 void StatsForm::updateLayout()

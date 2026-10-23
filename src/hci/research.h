@@ -85,7 +85,19 @@ public:
 		queuedJumpToHighlightedStatsObject = false;
 	}
 
+	/// Warzone 2126 panel: only topics whose name contains this text (case-insensitive); "" shows all
+	void setNameFilter2126(const std::string &filter)
+	{
+		if (filter != nameFilter2126)
+		{
+			nameFilter2126 = filter;
+			updateResearchOptionsList();
+		}
+	}
+	static const std::string &nameFilter() { return nameFilter2126; }
+
 private:
+	static std::string nameFilter2126;
 	void updateFacilitiesList();
 	void updateResearchOptionsList();
 	std::vector<RESEARCH *> stats;
