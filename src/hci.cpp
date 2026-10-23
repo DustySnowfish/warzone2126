@@ -2614,8 +2614,30 @@ public:
 			pie_UniTransBoxFill(cx, y0 + 6, cx + 1, y0 + height() - 6, kHudBorder);
 			cx += 14;
 		};
+		// Cost of the hovered build, research or production (what the classic power bar showed)
+		const int hoverCost = intTakeShadowPower2126();
+		if (hoverCost != shownCost)
+		{
+			shownCost = hoverCost;
+			if (hoverCost > 0)
+			{
+				costText.setText(WzString::fromUtf8(astringf("-%s", formatThousands(hoverCost).c_str())), font_regular_bold);
+			}
+		}
 		drawText(powerLabel, kHudLabel, 6);
 		drawText(powerValue, kHudValue, 6);
+		if (hoverCost > 0)
+		{
+			// Amber when it can be paid now, red when it would wait for power
+			const bool affordable = hoverCost <= availablePower;
+			const int cx0 = cx - 3, cy0 = y0 + 4;
+			pie_UniTransBoxFill(cx0, cy0, cx0 + costText->width() + 6, y0 + height() - 4, affordable ? pal_RGBA(232, 193, 61, 40) : pal_RGBA(229, 87, 79, 50));
+			drawText(costText, affordable ? kHudWarn : kHudBad, 8);
+		}
+		else if (queuedPower > 0)
+		{
+			drawText(queuedText, kHudLabel, 8);
+		}
 		drawText(incomeValue, incomeColour, 14);
 		separator();
 		drawText(unitsLabel, kHudLabel, 6);
@@ -2651,7 +2673,14 @@ private:
 		lastRefresh = realTime;
 		const unsigned player = selectedPlayer;
 		powerLabel.setText(_("POWER"), font_small);
-		powerValue.setText(WzString::fromUtf8(formatThousands(getPower(player))), font_regular_bold);
+		// Power after what is already queued for payment, as the classic power bar showed it
+		availablePower = std::max(0, static_cast<int>(getPowerMinusQueued(player)));
+		queuedPower = std::max(0, getQueuedPower(static_cast<int>(player)));
+		powerValue.setText(WzString::fromUtf8(formatThousands(availablePower)), font_regular_bold);
+		if (queuedPower > 0)
+		{
+			queuedText.setText(WzString::fromUtf8(astringf(_("(%s queued)"), formatThousands(queuedPower).c_str())), font_small);
+		}
 		const double perMin = getPowerGeneratedPerSec(player) * 60.0;
 		incomeValue.setText(WzString::fromUtf8(astringf("%+.0f/min", perMin)), font_regular);
 		incomeColour = perMin > 0.5 ? kHudGood : kHudLabel;
@@ -2711,6 +2740,10 @@ private:
 
 	uint32_t lastRefresh = 0;
 	int idealW = 0;
+	int availablePower = 0;
+	int queuedPower = 0;
+	int shownCost = -1;
+	WzCachedText costText, queuedText;
 	WzCachedText powerLabel, powerValue, incomeValue, unitsLabel, unitsValue, researchLabel, researchValue, researchTime, clockValue;
 	PIELIGHT incomeColour = kHudLabel;
 	PIELIGHT unitsColour = kHudValue;

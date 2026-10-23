@@ -308,5 +308,6 @@ void intDisplayUpdateAllyBar(W_BARGRAPH *psBar, const RESEARCH &research, const 
 STRUCTURE *droidGetCommandFactory(DROID *psDroid);
 
 void intSetShadowPower(int quantity);
+int intTakeShadowPower2126();
 
 #endif // __INCLUDED_SRC_INTDISPLAY_H__

@@ -1952,3 +1952,12 @@ void intSetShadowPower(int quantity)
 {
 	ManuPower = quantity;
 }
+
+/* Warzone 2126 status strip: the cost the hovered build, research or production button would take
+   (set every frame while hovering), then cleared like the classic power bar clears it */
+int intTakeShadowPower2126()
+{
+	const int value = static_cast<int>(ManuPower);
+	ManuPower = 0;
+	return value;
+}
