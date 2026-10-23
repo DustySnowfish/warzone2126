@@ -3625,5 +3625,36 @@
 			"RocketSuper"
 		],
 		"width": 2
+	},
+	"A0Shipyard": {
+		"armour": 10,
+		"breadth": 3,
+		"buildPoints": 650,
+		"buildPower": 150,
+		"height": 2,
+		"hitpoints": 1100,
+		"id": "A0Shipyard",
+		"name": "Shipyard",
+		"productionPoints": 10,
+		"moduleProductionPoints": 10,
+		"resistance": 150,
+		"sensorID": "DefaultSensor1Mk1",
+		"shipyard": 1,
+		"strength": "MEDIUM",
+		"structureModel": [
+			"blshipyard.pie",
+			"blshipyard.pie",
+			"blshipyard.pie",
+			"blshipyard.pie",
+			"blshipyard.pie"
+		],
+		"thermal": 10,
+		"type": "FACTORY",
+		"userLimits": [
+			0,
+			5,
+			5
+		],
+		"width": 4
 	}
 }

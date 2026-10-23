@@ -597,6 +597,7 @@ bool loadStructureStats(WzConfig &ini)
 			continue;
 		}
 		psStats->type = structType[type];
+		psStats->isShipyard = ini.value("shipyard", 0).toInt() != 0;
 
 		// save indexes of special structures for futher use
 		initModuleStats(statWriteIdx, psStats->type);  // This function looks like a hack. But slightly less hacky than before.
@@ -1494,7 +1495,8 @@ static void buildFlatten(STRUCTURE *pStructure, WorldMapState& mapState, int h)
 static bool isPulledToTerrain(const STRUCTURE *psBuilding)
 {
 	STRUCTURE_TYPE type = psBuilding->pStructureType->type;
-	return type == REF_DEFENSE || type == REF_GATE || type == REF_WALL || type == REF_WALLCORNER || type == REF_REARM_PAD;
+	return type == REF_DEFENSE || type == REF_GATE || type == REF_WALL || type == REF_WALLCORNER || type == REF_REARM_PAD
+		|| psBuilding->pStructureType->isShipyard; // Warzone 2126: stands on piles over the water, no levelling
 }
 
 void alignStructure(STRUCTURE *psBuilding, WorldMapState& mapState)
@@ -4516,6 +4518,37 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 		case REF_LASSAT:
 		case REF_FORTRESS:
 			{
+				if (psBuilding->isShipyard)
+				{
+					// Warzone 2126 shipyard: the back row on land, the rows in front (the side ships
+					// leave from) on water
+					// (Coasts are ragged: the back row needs most of its tiles on land and the front
+					// row, where ships leave, must be all water; the row between may be either)
+					const uint16_t snapped = snapDirection(direction);
+					const int maxDepth = (snapped == 0x4000 || snapped == 0xC000) ? b.size.x - 1 : b.size.y - 1;
+					int backLand = 0, backTiles = 0;
+					for (int j = 0; j < b.size.y; ++j)
+						for (int i = 0; i < b.size.x; ++i)
+						{
+							const int depth = snapped == 0x0 ? j : snapped == 0x4000 ? i : snapped == 0x8000 ? (b.size.y - 1 - j) : (b.size.x - 1 - i);
+							MAPTILE const *psTile = mapTile(world.map, b.map.x + i, b.map.y + j);
+							const bool isWater = terrainType(psTile) == TER_WATER;
+							if (terrainType(psTile) == TER_CLIFFFACE || (depth == maxDepth && !isWater))
+							{
+								return false;
+							}
+							if (depth == 0)
+							{
+								++backTiles;
+								backLand += isWater ? 0 : 1;
+							}
+						}
+					if (backLand * 2 < backTiles + 1)
+					{
+						return false;
+					}
+				}
+				else
 				/*need to check each tile the structure will sit on is not water*/
 				for (int j = 0; j < b.size.y; ++j)
 					for (int i = 0; i < b.size.x; ++i)
@@ -4541,7 +4574,8 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 				if (!(psBuilding->type == REF_REPAIR_FACILITY ||
 				      psBuilding->type == REF_DEFENSE ||
 				      psBuilding->type == REF_GATE ||
-				      psBuilding->type == REF_WALL))
+				      psBuilding->type == REF_WALL ||
+				      psBuilding->isShipyard))
 				{
 					/*cannot build on ground that is too steep*/
 					for (int j = 0; j < b.size.y; ++j)
@@ -5886,6 +5920,16 @@ bool validTemplateForFactory(const DROID_TEMPLATE *psTemplate, STRUCTURE *psFact
 	{
 		debug(level, "Cannot build transporter in campaign.");
 		return false;
+	}
+
+	// Warzone 2126: ships only from a shipyard, and a shipyard only builds ships
+	{
+		const bool navalTemplate = psTemplate->asParts[COMP_PROPULSION] && psTemplate->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR;
+		if (navalTemplate != psFactory->pStructureType->isShipyard)
+		{
+			debug(level, navalTemplate ? "Ships can only be built in a shipyard, not in %s." : "A shipyard can only build ships, not in %s.", objInfo(psFactory));
+			return false;
+		}
 	}
 
 	//check if droid is a cyborg

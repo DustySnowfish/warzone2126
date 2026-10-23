@@ -9300,5 +9300,53 @@
 		],
 		"statID": "Rocket-Sunburst",
 		"techCode": 1
+	},
+	"R-Vehicle-Prop-NavalScrew": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Prop-NavalScrew",
+		"name": "Shipbuilding",
+		"requiredResearch": [
+			"R-Vehicle-Prop-Hover"
+		],
+		"researchPoints": 3600,
+		"researchPower": 112,
+		"resultComponents": [
+			"NavalScrew",
+			"NavalPatrol"
+		],
+		"resultStructures": [
+			"A0Shipyard"
+		],
+		"statID": "NavalScrew"
+	},
+	"R-Vehicle-Body-NavalFrigate": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalFrigate",
+		"name": "Frigate Hull",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Vehicle-Body05"
+		],
+		"researchPoints": 7200,
+		"researchPower": 200,
+		"resultComponents": [
+			"NavalFrigate"
+		],
+		"statID": "NavalFrigate"
+	},
+	"R-Vehicle-Prop-NavalJet": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Prop-NavalJet",
+		"name": "Water Jet Propulsion",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Vehicle-Engine04"
+		],
+		"researchPoints": 7200,
+		"researchPower": 200,
+		"resultComponents": [
+			"NavalJet"
+		],
+		"statID": "NavalJet"
 	}
 }

@@ -518,6 +518,7 @@ struct BODY_STATS : public COMPONENT_STATS
 	std::vector<iIMDBaseShape *> ppMoveIMDList;	///< list of IMDs to use when droid is moving - up to numPropulsionStats
 	std::vector<iIMDBaseShape *> ppStillIMDList;///< list of IMDs to use when droid is still - up to numPropulsionStats
 	WzString         bodyClass;		///< rules hint to script about its classification
+	bool             isNaval = false;	///< Warzone 2126: a ship hull ("naval": 1); only with propeller propulsion
 
 	struct UPGRADE : COMPONENT_STATS::UPGRADE
 	{

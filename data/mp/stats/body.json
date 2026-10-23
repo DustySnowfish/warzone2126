@@ -1038,5 +1038,55 @@
 		},
 		"size": "LIGHT",
 		"weaponSlots": 1
+	},
+	"NavalPatrol": {
+		"armourHeat": 8,
+		"armourKinetic": 12,
+		"buildPoints": 220,
+		"buildPower": 55,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 200,
+		"id": "NavalPatrol",
+		"model": "drlbod01.pie",
+		"name": "Patrol Hull",
+		"naval": 1,
+		"powerOutput": 12000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval1.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval1.pie"
+			}
+		},
+		"size": "LIGHT",
+		"weaponSlots": 1,
+		"weight": 1400
+	},
+	"NavalFrigate": {
+		"armourHeat": 20,
+		"armourKinetic": 30,
+		"buildPoints": 600,
+		"buildPower": 160,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 650,
+		"id": "NavalFrigate",
+		"model": "drhbod14.pie",
+		"name": "Frigate Hull",
+		"naval": 1,
+		"powerOutput": 24000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval1.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval1.pie"
+			}
+		},
+		"size": "HEAVY",
+		"weaponSlots": 2,
+		"weight": 4200
 	}
 }

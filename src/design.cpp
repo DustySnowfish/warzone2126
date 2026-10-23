@@ -2827,6 +2827,17 @@ bool intValidTemplate(DROID_TEMPLATE *psTempl, const char *newName, bool complai
 		return false;
 	}
 
+	// Warzone 2126: ship hulls go only with propeller propulsion, and propellers only on ship hulls
+	{
+		const bool navalBody = psTempl->getBodyStats()->isNaval;
+		const bool navalProp = psTempl->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR;
+		if (navalBody != navalProp)
+		{
+			debug(level, "Ship hulls need a ship propulsion, and ship propulsions need a ship hull");
+			return false;
+		}
+	}
+
 	const bool isTransportTempl = isTransporter(psTempl);
 
 	// Check a turret has been installed

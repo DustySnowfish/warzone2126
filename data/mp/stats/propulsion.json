@@ -75,6 +75,38 @@
 		"type": "Propellor",
 		"weight": 300
 	},
+	"NavalJet": {
+		"acceleration": 220,
+		"buildPoints": 140,
+		"buildPower": 110,
+		"deceleration": 160,
+		"designable": 1,
+		"hitpointPctOfBody": 110,
+		"id": "NavalJet",
+		"model": "prhnaval1.pie",
+		"name": "Water Jet",
+		"speed": 520,
+		"spinSpeed": 150,
+		"turnSpeed": 110,
+		"type": "Propellor",
+		"weight": 180
+	},
+	"NavalScrew": {
+		"acceleration": 120,
+		"buildPoints": 90,
+		"buildPower": 60,
+		"deceleration": 100,
+		"designable": 1,
+		"hitpointPctOfBody": 150,
+		"id": "NavalScrew",
+		"model": "prhnaval1.pie",
+		"name": "Screw Propeller",
+		"speed": 320,
+		"spinSpeed": 90,
+		"turnSpeed": 60,
+		"type": "Propellor",
+		"weight": 250
+	},
 	"V-Tol": {
 		"acceleration": 200,
 		"buildPoints": 125,

@@ -583,8 +583,9 @@ static bool displayCompObj(const DROID *psDroid, bool bButton, const glm::mat4& 
 
 	if (!bButton && psPropStats->propulsionType == PROPULSION_TYPE_PROPELLOR)
 	{
-		// FIXME: change when adding submarines to the game
-		modifiedModelMatrix *= glm::translate(glm::vec3(0.f, -world_coord(1) / 2.3f, 0.f));
+		// Warzone 2126: ships sit with their waterline just below the hull's midline (the original
+		// value, a third of a tile, sank the hull out of sight)
+		modifiedModelMatrix *= glm::translate(glm::vec3(0.f, -10.f, 0.f));
 	}
 
 	const iIMDBaseShape *psShapeProp = (leftFirst ? getLeftPropulsionIMD(psDroid) : getRightPropulsionIMD(psDroid));

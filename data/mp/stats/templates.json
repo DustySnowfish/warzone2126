@@ -2762,5 +2762,44 @@
 		"weapons": [
 			"Missile-A-T"
 		]
+	},
+	"Ship-Patrol-HMG": {
+		"body": "NavalPatrol",
+		"id": "Ship-Patrol-HMG",
+		"name": "Heavy Machinegun Patrol Boat",
+		"propulsion": "NavalScrew",
+		"type": "DROID",
+		"weapons": [
+			"MG3Mk1"
+		]
+	},
+	"Ship-Patrol-Rockets": {
+		"body": "NavalPatrol",
+		"id": "Ship-Patrol-Rockets",
+		"name": "Mini-Rocket Patrol Boat",
+		"propulsion": "NavalScrew",
+		"type": "DROID",
+		"weapons": [
+			"Rocket-Pod"
+		]
+	},
+	"Ship-Frigate-Cannons": {
+		"body": "NavalFrigate",
+		"id": "Ship-Frigate-Cannons",
+		"name": "Twin Cannon Frigate",
+		"propulsion": "NavalScrew",
+		"type": "DROID",
+		"weapons": [
+			"Cannon2A-TMk1",
+			"Cannon2A-TMk1"
+		]
+	},
+	"Ship-Patrol-Truck": {
+		"body": "NavalPatrol",
+		"construct": "Spade1Mk1",
+		"id": "Ship-Patrol-Truck",
+		"name": "Construction Boat",
+		"propulsion": "NavalScrew",
+		"type": "CONSTRUCT"
 	}
 }

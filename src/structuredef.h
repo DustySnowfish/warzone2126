@@ -108,6 +108,7 @@ struct STRUCTURE_STATS : public BASE_STATS
 	}
 
 	STRUCTURE_TYPE type;            /* the type of structure */
+	bool isShipyard = false;        ///< Warzone 2126: a FACTORY that builds ships, half on land and half on water ("shipyard": 1)
 	STRUCT_STRENGTH strength;       /* strength against the weapon effects */
 	UDWORD baseWidth;               /*The width of the base in tiles*/
 	UDWORD baseBreadth;             /*The breadth of the base in tiles*/
