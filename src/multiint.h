@@ -390,4 +390,8 @@ bool lobbyNameChangeRequestAllowed(uint32_t sender);
 #define MULTIOP_BUTW			35
 #define MULTIOP_BUTH			24
 
+/// Warzone 2126: switch to another Random map with the same number of slots, keeping the random map
+/// settings (host only); false when not possible
+bool lobbySwitchRandomMap2126(const std::string &levelName);
+
 #endif // __INCLUDED_SRC_MULTIINT_H__

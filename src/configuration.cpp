@@ -481,6 +481,9 @@ bool loadConfig()
 	war_SetPauseOnFocusLoss(iniGetBool("PauseOnFocusLoss", false).value());
 	NETsetLobbyserverAddress(iniGetString("lobbyserver", std::string(netlobby::GetDefaultLobbyAddress())).value());
 	war_setLastIpServerConnect(iniGetString("server_name", "").value());
+	// Warzone 2126: the host's last random map settings (the seed is always new)
+	game.randomMap = RandomMapSettings2126::fromStorageString(iniGetString("randomMap2126", "").value());
+	game.randomMap.seed = 0;
 //	iV_font(ini.value("fontname", "DejaVu Sans").toString().toUtf8().constData(),
 //	        ini.value("fontface", "Book").toString().toUtf8().constData(),
 //	        ini.value("fontfacebold", "Bold").toString().toUtf8().constData());
@@ -1061,6 +1064,11 @@ bool saveConfig()
 	iniSetBool("PauseOnFocusLoss", war_GetPauseOnFocusLoss());
 	iniSetString("lobbyserver", NETgetLobbyserverAddress());
 	iniSetString("server_name", war_getLastIpServerConnect());
+	{
+		RandomMapSettings2126 remembered = game.randomMap;
+		remembered.seed = 0;
+		iniSetString("randomMap2126", remembered.toStorageString());
+	}
 	if (!netGameserverPortOverride) // do not save the config port setting if there's a command-line override
 	{
 		iniSetInteger("gameserver_port", (int)NETgetGameserverPort());

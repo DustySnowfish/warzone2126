@@ -1,7 +1,7 @@
 // Warzone 2126 random map generator (core).
 //
 // build_maps.py prepends a header that defines:
-//   MAP_SIZE   map width and height in tiles (64..512)
+//   MAP_SIZE   default map width and height in tiles (64..512); mapOptions.size overrides it
 //   PLAYERS    number of start positions
 //   TS         tileset tables: { name, ground: [names], tiles: [[tl,tr,bl,br] ground index per tile],
 //              types: [terrain type per tile], decals: [tile numbers], features: {name: [w, h]} }
@@ -11,7 +11,7 @@
 // specified by IEEE 754; Math.sin and friends are not, so a series is used instead).
 //
 // Outline:
-//   1. Pick a landscape style (rolling hills, plateaus, lakes, canyons, highlands).
+//   1. Pick a landscape style (rolling hills, plateaus, lakes, canyons, highlands, islands).
 //   2. Height from fractal noise, shaped by the style (ridges, terraces, water).
 //   3. Start positions on a ring around the centre; oil sites and scavenger camps placed with the
 //      same rotation for every player, so each start has the same resources at the same distances.
@@ -23,7 +23,12 @@
 
 'use strict';
 
-const N = MAP_SIZE;
+// Settings from the lobby (Random map settings), see src/randommap2126.h: style 0 random or 1-6,
+// sliders 0-100 where 50 is the style's usual look, size in tiles (0 = the map's default), mirror
+// 0/1. Missing options (older games, tests) mean random, 50, default size and natural terrain.
+const OPT = (typeof mapOptions === "object" && mapOptions !== null) ? mapOptions : {};
+const N = (typeof OPT.size === "number" && OPT.size >= 64 && OPT.size <= 512) ? OPT.size : MAP_SIZE;
+const MIRROR = OPT.mirror === 1;
 const AREA = N * N;
 const PI = 3.141592653589793;
 
@@ -49,6 +54,37 @@ function sinT(x) {
 	return sum;
 }
 function cosT(x) { return sinT(x + PI / 2); }
+// Arc tangent from basic arithmetic and sqrt only (two halvings of the angle, then a series)
+function atanT(z) {
+	const neg = z < 0;
+	if (neg) { z = -z; }
+	const inv = z > 1;
+	if (inv) { z = 1 / z; }
+	z = z / (1 + Math.sqrt(1 + z * z));
+	z = z / (1 + Math.sqrt(1 + z * z));
+	const z2 = z * z;
+	let term = z, sum = z;
+	for (let k = 1; k <= 10; ++k) {
+		term *= -z2;
+		sum += term / (2 * k + 1);
+	}
+	let a = sum * 4;
+	if (inv) { a = PI / 2 - a; }
+	return neg ? -a : a;
+}
+function atan2T(y, x) {
+	if (x > 0) { return atanT(y / x); }
+	if (x < 0) { return atanT(y / x) + (y >= 0 ? PI : -PI); }
+	return y > 0 ? PI / 2 : y < 0 ? -PI / 2 : 0;
+}
+// Per-tile random value in [0, 1) from integer hashing (for mirrored decoration)
+function hash01(x, y, salt) {
+	let h = Math.imul(x + 1, 73856093) ^ Math.imul(y + 1, 19349663) ^ salt;
+	h = Math.imul(h ^ (h >>> 15), 2246822507);
+	h = Math.imul(h ^ (h >>> 13), 3266489909);
+	h ^= h >>> 16;
+	return (h >>> 0) / 4294967296;
+}
 
 function idx(x, y) { return y * N + x; }
 function inMap(x, y, m) { return x >= m && y >= m && x < N - m && y < N - m; }
@@ -63,6 +99,8 @@ const STYLES = {
 	lakes:     { weight: 2, terraces: 3, water: 0.16, relief: 0.80, ridged: false, cliff: 80, label: "Lakes" },
 	canyons:   { weight: 2, terraces: 3, water: 0.00, relief: 1.00, ridged: true,  cliff: 80, label: "Canyons" },
 	highlands: { weight: 2, terraces: 5, water: 0.00, relief: 1.00, ridged: false, cliff: 80, label: "Highlands" },
+	// Not in the random pick (weight 0): each player on an island; only hover and air units cross
+	islands:   { weight: 0, terraces: 0, water: 0.00, relief: 0.60, ridged: false, cliff: 150, label: "Islands", islands: true },
 };
 function chooseStyle() {
 	const names = Object.keys(STYLES);
@@ -71,19 +109,16 @@ function chooseStyle() {
 	let r = rand(total);
 	for (const n of names) {
 		r -= STYLES[n].weight;
-		if (r < 0) { return n; }
+		if (r < 0 && STYLES[n].weight > 0) { return n; }
 	}
 	return names[0];
 }
-// Settings from the lobby (Random map settings): mapOptions.style 0 random or 1-5, and sliders
-// 0-100 where 50 is the style's usual look. Missing options (older games, tests) mean 50 / random.
-const OPT = (typeof mapOptions === "object" && mapOptions !== null) ? mapOptions : {};
 function optv(name) { const v = OPT[name]; return (typeof v === "number") ? clamp(v, 0, 100) : 50; }
-const STYLE_KEYS = ["", "rolling", "plateaus", "lakes", "canyons", "highlands"];
+const STYLE_KEYS = ["", "rolling", "plateaus", "lakes", "canyons", "highlands", "islands"];
 // The random pick is always drawn, so locking the style a random map came out with keeps the
 // rest of that map the same
 const randomStyleName = chooseStyle();
-const styleName = (OPT.style >= 1 && OPT.style <= 5) ? STYLE_KEYS[OPT.style] : randomStyleName;
+const styleName = (OPT.style >= 1 && OPT.style < STYLE_KEYS.length) ? STYLE_KEYS[OPT.style] : randomStyleName;
 const baseStyle = STYLES[styleName];
 const style = {};
 for (const k of Object.keys(baseStyle)) { style[k] = baseStyle[k]; }
@@ -110,10 +145,15 @@ const oilFactor = 0.5 + S_OIL / 100;
 // Trees, rocks and wrecks: none to twice the usual
 const decorFactor = S_TREES / 50;
 // Feature size: half to twice the size of the big landscape shapes
-const scaleFactor = Math.pow(2, (S_SCALE - 50) / 50);
+// (2^((s - 50) / 50) for s = 0, 5 .. 100, as constants: Math.pow is not exactly specified)
+const SCALE_STEPS = [0.5, 0.5358867313, 0.5743491775, 0.6155722067, 0.6597539554, 0.7071067812, 0.7578582833,
+	0.8122523964, 0.8705505633, 0.9330329915, 1, 1.0717734625, 1.1486983550, 1.2311444133, 1.3195079108,
+	1.4142135624, 1.5157165665, 1.6245047928, 1.7411011266, 1.8660659831, 2];
+const scaleFactor = SCALE_STEPS[Math.round(S_SCALE / 5)];
 function scaled(base) { return Math.max(8, Math.round(base * scaleFactor / 8) * 8); }
 log("W2126 random map: " + N + "x" + N + ", " + PLAYERS + " players, " + TS.name + ", " + style.label +
-	", water " + S_WATER + " height " + S_HEIGHT + " cliffs " + S_CLIFFS + " oil " + S_OIL + " trees " + S_TREES + " scale " + S_SCALE);
+	", water " + S_WATER + " height " + S_HEIGHT + " cliffs " + S_CLIFFS + " oil " + S_OIL + " trees " + S_TREES + " scale " + S_SCALE +
+	(MIRROR ? ", mirrored" : ""));
 
 // ---------------------------------------------------------------------------------------------
 // Tileset look: ground types from low to high ground, plus special grounds.
@@ -159,24 +199,8 @@ const nBase = noise(1 << 20, 6, bigScale);
 const nDetail = noise(1 << 20, 5, 16);
 const nMoist = noise(1 << 20, 6, scaled(32));
 
-const elev = new Array(AREA);
-for (let i = 0; i < AREA; ++i) {
-	// Large shapes only here; the detail noise is added after terracing, so it roughens the
-	// ground without breaking cliffs into specks
-	let e = style.terraces > 0 || style.ridged ? nBase[i] / 1000 : (nBase[i] * 0.82 + nDetail[i] * 0.18) / 1000;
-	e = clamp((e - 0.12) / 0.76, 0, 1);
-	if (style.ridged) {
-		// Valleys along the mid contour: canyons winding across the map
-		const r = Math.abs(e - 0.5) * 2;
-		e = clamp(Math.sqrt(r) * 1.05 - 0.05, 0, 1);
-	}
-	if (heightContrast !== 1) { e = clamp(0.5 + (e - 0.5) * heightContrast, 0, 1); }
-	elev[i] = e;
-}
-
-// Terraces: gently sloping shelves with a sharp step (a cliff) at each contour. Where the
-// ramp pattern is high the step stays smooth instead, which leaves natural ways up.
 const nRamp = noise(1 << 20, 5, scaled(N >= 256 ? 64 : 32));
+const elev = new Array(AREA);
 function terrace(e, levels) {
 	if (levels <= 0) { return e; }
 	const t = e * levels;
@@ -184,27 +208,48 @@ function terrace(e, levels) {
 	const f = t - k;
 	return clamp((k + f * 0.18) / levels, 0, 1);
 }
-if (style.terraces > 0) {
+function buildElevation() {
 	for (let i = 0; i < AREA; ++i) {
-		const m = clamp((nRamp[i] / 1000 - rampThreshold) * 5, 0, 1);
-		elev[i] = terrace(elev[i], style.terraces) * (1 - m) + elev[i] * m;
+		// Large shapes only here; the detail noise is added after terracing, so it roughens the
+		// ground without breaking cliffs into specks
+		let e = style.terraces > 0 || style.ridged ? nBase[i] / 1000 : (nBase[i] * 0.82 + nDetail[i] * 0.18) / 1000;
+		e = clamp((e - 0.12) / 0.76, 0, 1);
+		if (style.ridged) {
+			// Valleys along the mid contour: canyons winding across the map
+			const r = Math.abs(e - 0.5) * 2;
+			e = clamp(Math.sqrt(r) * 1.05 - 0.05, 0, 1);
+		}
+		if (heightContrast !== 1) { e = clamp(0.5 + (e - 0.5) * heightContrast, 0, 1); }
+		elev[i] = e;
 	}
-}
-if (style.terraces > 0 || style.ridged) {
-	for (let i = 0; i < AREA; ++i) { elev[i] = clamp(elev[i] + (nDetail[i] / 1000 - 0.5) * 0.04, 0, 1); }
+	// Terraces: gently sloping shelves with a sharp step (a cliff) at each contour. Where the
+	// ramp pattern is high the step stays smooth instead, which leaves natural ways up.
+	if (style.terraces > 0) {
+		for (let i = 0; i < AREA; ++i) {
+			const m = clamp((nRamp[i] / 1000 - rampThreshold) * 5, 0, 1);
+			elev[i] = terrace(elev[i], style.terraces) * (1 - m) + elev[i] * m;
+		}
+	}
+	if (style.terraces > 0 || style.ridged) {
+		for (let i = 0; i < AREA; ++i) { elev[i] = clamp(elev[i] + (nDetail[i] / 1000 - 0.5) * 0.04, 0, 1); }
+	}
 }
 
 // Water level: the elevation below which the chosen fraction of the map is water
 let waterLevel = -1;
-if (style.water > 0) {
+function findWaterLevel(fraction) {
+	if (fraction <= 0) { return -1; }
 	const hist = new Array(1001).fill(0);
 	for (let i = 0; i < AREA; ++i) { ++hist[Math.floor(elev[i] * 1000)]; }
 	let acc = 0;
 	for (let b = 0; b <= 1000; ++b) {
 		acc += hist[b];
-		if (acc >= AREA * style.water) { waterLevel = (b + 0.5) / 1000; break; }
+		if (acc >= AREA * fraction) { return (b + 0.5) / 1000; }
 	}
+	return -1;
 }
+buildElevation();
+waterLevel = findWaterLevel(style.water);
 
 // ---------------------------------------------------------------------------------------------
 // 3. Start positions, oil sites and scavenger camps (rotationally symmetric about the centre)
@@ -242,7 +287,7 @@ for (let p = 0; p < PLAYERS; ++p) { starts.push(polar(p, 0, ringR)); }
 // Pads: flat areas for bases, oil sites and camps
 const pads = []; // {x, y, r, kind}
 const baseR = 11;
-for (const s of starts) { pads.push({ x: s[0], y: s[1], r: baseR, kind: "base" }); }
+starts.forEach((s, p) => { pads.push({ x: s[0], y: s[1], r: baseR, kind: "base", owner: p }); });
 
 // Oil sites: one pattern per player, rotated with them
 const wedge = PI / PLAYERS;
@@ -252,8 +297,13 @@ const sitePattern = []; // {da, rad, oils}
 	let tries = 0;
 	while (sitePattern.length < sitesPerPlayer && tries < 4000) {
 		++tries;
-		const da = (randf() * 2 - 1) * wedge * 0.85;
-		const rad = N * 0.08 + randf() * (ringR * 1.02 - N * 0.08);
+		let da = (randf() * 2 - 1) * wedge * 0.85;
+		let rad = N * 0.08 + randf() * (ringR * 1.02 - N * 0.08);
+		if (style.islands) {
+			// On islands the sites stay close to their base, on the same island
+			da *= 0.45;
+			rad = ringR * 0.72 + (rad - N * 0.08) / Math.max(1, ringR * 1.02 - N * 0.08) * ringR * 0.3;
+		}
 		const oils = 1 + rand(3);
 		let ok = true;
 		const pts = [];
@@ -271,12 +321,12 @@ const sitePattern = []; // {da, rad, oils}
 		}
 		if (!ok) { continue; }
 		sitePattern.push({ da: da, rad: rad, oils: oils });
-		for (const q of pts) { pads.push({ x: q[0], y: q[1], r: 4, kind: "oil", oils: oils }); }
+		pts.forEach((q, p) => { pads.push({ x: q[0], y: q[1], r: 4, kind: "oil", oils: oils, owner: p }); });
 	}
 }
 // The centre: a contested oil field
 const centreOils = N >= 192 ? 4 : 2;
-pads.push({ x: Math.round(C), y: Math.round(C), r: 5, kind: "oil", oils: centreOils });
+pads.push({ x: Math.round(C), y: Math.round(C), r: 5, kind: "oil", oils: centreOils, owner: -1 });
 
 // Scavenger camps between neighbouring players
 const camps = [];
@@ -286,7 +336,8 @@ const camps = [];
 		const pts = [];
 		let ok = true;
 		for (let p = 0; p < PLAYERS && ok; ++p) {
-			const q = polar(p, wedge, ringR * f);
+			// (On islands the camps sit inside each player's slice, so the sea lanes between players stay open)
+			const q = polar(p, style.islands ? wedge * 0.55 : wedge, ringR * f);
 			ok = inMap(q[0], q[1], edgeMargin);
 			for (const sp of pads) { if (dist(q[0], q[1], sp.x, sp.y) < sp.r + 8) { ok = false; } }
 			pts.push(q);
@@ -294,9 +345,100 @@ const camps = [];
 		if (!ok) { continue; }
 		for (const q of pts) {
 			camps.push(q);
-			pads.push({ x: q[0], y: q[1], r: 6, kind: "camp" });
+			pads.push({ x: q[0], y: q[1], r: 6, kind: "camp", owner: -1 });
 		}
 		break;
+	}
+}
+
+// Mirrored terrain: every player's slice of the map is a copy of player 0's, turned with them (and
+// each slice is mirror-symmetric about its player's axis, so the slices join smoothly).
+// The noise is resampled from the first slice, then the height field is rebuilt from it.
+if (MIRROR && PLAYERS > 1) {
+	const sector = 2 * PI / PLAYERS;
+	const source = new Array(AREA);
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			const dx = x - C, dy = y - C;
+			const r = Math.sqrt(dx * dx + dy * dy);
+			// Angle from player 0's direction, folded into the first slice (centred on player 0) and
+			// mirrored about the player's axis, so neighbouring slices meet without a seam
+			let a = atan2T(dy, dx) - theta0 + sector / 2;
+			a = Math.abs(a - Math.floor(a / sector) * sector - sector / 2);
+			const sx = Math.round(C + cosT(theta0 + a) * r), sy = Math.round(C + sinT(theta0 + a) * r);
+			source[idx(x, y)] = inMap(sx, sy, 0) ? idx(sx, sy) : idx(x, y);
+		}
+	}
+	for (const arr of [nBase, nDetail, nMoist, nRamp]) {
+		const copy = arr.slice();
+		for (let i = 0; i < AREA; ++i) { arr[i] = copy[source[i]]; }
+	}
+	buildElevation();
+	waterLevel = findWaterLevel(style.water);
+}
+// Mirrored decoration uses the slice-0 tile's hash instead of the running random sequence
+const decorSalt = MIRROR ? rand(1 << 30) : 0; // drawn only when mirrored, so other maps keep their sequence
+function mirroredTile(x, y) {
+	if (!MIRROR || PLAYERS < 2) { return [x, y]; }
+	const sector = 2 * PI / PLAYERS;
+	const dx = x - C, dy = y - C;
+	const r = Math.sqrt(dx * dx + dy * dy);
+	let a = atan2T(dy, dx) - theta0 + sector / 2;
+	a = Math.abs(a - Math.floor(a / sector) * sector - sector / 2);
+	return [Math.round(C + cosT(theta0 + a) * r), Math.round(C + sinT(theta0 + a) * r)];
+}
+
+// Islands: land around each player's base and oil sites (and the centre and camps), sea between.
+// The Water slider sets how big the islands are. Ground units stay on their own island (fords
+// join a player's own sites); hover and air units cross the sea.
+const ISLANDS = !!style.islands;
+if (ISLANDS) {
+	const islandScale = 1.3 - S_WATER / 100 * 0.6; // 1.3 (big islands) to 0.7 (small)
+	const centreR = 15 * islandScale;
+	const sector = 2 * PI / Math.max(1, PLAYERS);
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			const i = idx(x, y);
+			let core = -2;
+			for (const pad of pads) {
+				const R = (pad.kind === "base" ? 26 : pad.kind === "camp" ? 12 : pad.owner < 0 ? 15 : 12) * islandScale;
+				const d = dist(x, y, pad.x, pad.y);
+				if (d < R * 1.6) { core = Math.max(core, 1 - d / R); }
+			}
+			let land;
+			if (core > -0.4) {
+				// Ragged coasts around the islands
+				land = core + (nBase[i] / 1000 - 0.5) * 0.45 + (nDetail[i] / 1000 - 0.5) * 0.2;
+			} else {
+				// Open sea, with a few islets where the big noise peaks
+				land = nBase[i] > 880 ? (nBase[i] - 880) / 120 * 0.4 - 0.05 : -0.5;
+			}
+			// Keep the islands apart: thin sea lanes on the borders between players and a ring of
+			// sea round the centre island
+			if (PLAYERS > 1) {
+				const dx = x - C, dy = y - C;
+				const r = Math.sqrt(dx * dx + dy * dy);
+				let a = atan2T(dy, dx) - theta0 + sector / 2;
+				a = Math.abs(a - Math.floor(a / sector) * sector - sector / 2); // 0 on a player's axis
+				const toBorder = (sector / 2 - a) * r;
+				if (r > centreR + 2 && toBorder < 3) { land = Math.min(land, -0.15); }
+				if (r > centreR + 2 && r < centreR + 6) { land = Math.min(land, -0.15); }
+			}
+			elev[i] = land > 0 ? clamp(0.45 + land * 0.55 + (nDetail[i] / 1000 - 0.5) * 0.08, 0.46, 1) : clamp(0.42 + land * 0.4, 0, 0.42);
+		}
+	}
+	waterLevel = 0.44;
+}
+// Which player's slice each tile is in (islands: fords stay inside their own player's slice)
+const sliceOf = ISLANDS ? new Array(AREA) : null;
+if (ISLANDS) {
+	const sector = 2 * PI / Math.max(1, PLAYERS);
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			let a = atan2T(y - C, x - C) - theta0 + sector / 2;
+			a = a - Math.floor(a / (2 * PI)) * 2 * PI;
+			sliceOf[idx(x, y)] = Math.floor(a / sector) % PLAYERS;
+		}
 	}
 }
 
@@ -390,11 +532,12 @@ for (const pad of pads) {
 const carved = new Array(AREA).fill(false);
 const BORDER = 3; // units cannot drive within 3 tiles of the edge
 
-function connectAll() {
-	// 0-1 BFS from base 0: open ground costs 0, cliff or water costs 1
+function connectAll(fromPlayer) {
+	// 0-1 BFS from a base: open ground costs 0, cliff or water costs 1. On islands each player is
+	// joined only to their own sites; elsewhere base 0 is joined to everything.
 	const cost = new Array(AREA).fill(1e9);
 	const parent = new Array(AREA).fill(-1);
-	let front = [idx(starts[0][0], starts[0][1])];
+	let front = [idx(starts[fromPlayer][0], starts[fromPlayer][1])];
 	cost[front[0]] = 0;
 	let next = [];
 	let level = 0;
@@ -408,6 +551,7 @@ function connectAll() {
 				const ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
 				if (!inMap(nx, ny, BORDER)) { continue; }
 				const j = idx(nx, ny);
+				if (ISLANDS && sliceOf[j] !== fromPlayer) { continue; }
 				const c = level + (cat[j] === LAND ? 0 : 1);
 				if (c < cost[j]) {
 					cost[j] = c;
@@ -422,6 +566,7 @@ function connectAll() {
 	}
 	let cuts = 0;
 	for (const pad of pads) {
+		if (ISLANDS && pad.owner !== fromPlayer) { continue; }
 		let i = idx(pad.x, pad.y);
 		if (cost[i] === 0 || cost[i] >= 1e9) { continue; }
 		++cuts;
@@ -480,15 +625,24 @@ function applyCuts() {
 }
 
 for (let round = 0; round < 8; ++round) {
-	if (connectAll() === 0) { break; }
+	let cuts = 0;
+	if (ISLANDS) {
+		for (let p = 0; p < PLAYERS; ++p) { cuts += connectAll(p); }
+	} else {
+		cuts = connectAll(0);
+	}
+	if (cuts === 0) { break; }
 	applyCuts();
 }
 
-// Reachable ground from base 0 (used to place oil, drums and camps on usable land)
+// Reachable ground from the bases (used to place oil, drums and camps on usable land)
 const reach = new Array(AREA).fill(false);
 {
-	const q = [idx(starts[0][0], starts[0][1])];
-	reach[q[0]] = true;
+	const q = [];
+	for (const st of (ISLANDS ? starts : [starts[0]])) {
+		const i0 = idx(st[0], st[1]);
+		if (!reach[i0]) { reach[i0] = true; q.push(i0); }
+	}
 	for (let qi = 0; qi < q.length; ++qi) {
 		const i = q[qi];
 		const x = i % N, y = (i - x) / N;
@@ -788,14 +942,22 @@ if (!preview) {
 			if (nearEdge) { continue; }
 			const m = nMoist[i] / 1000;
 			const treeChance = look.treeDensity * decorFactor * clamp((m - 0.45) * 5, 0, 3);
-			const r = randf();
+			let r, r2 = 0;
+			if (MIRROR) {
+				const mt = mirroredTile(x, y);
+				r = hash01(mt[0], mt[1], decorSalt);
+				r2 = hash01(mt[0], mt[1], decorSalt ^ 0x5bd1e995);
+			} else {
+				r = randf();
+			}
+			const choose = (list) => MIRROR ? list[Math.floor(r2 * list.length)] : pick(list);
 			if (r < treeChance) {
 				const list = look.snowTrees && hgt[i] > snowLine ? look.snowTrees : look.trees;
-				addFeature(pick(list), x, y);
+				addFeature(choose(list), x, y);
 			} else if (r < treeChance + look.rockDensity * decorFactor) {
-				addFeature(pick(look.rocks), x, y);
+				addFeature(choose(look.rocks), x, y);
 			} else if (r < treeChance + (look.rockDensity + look.wreckDensity) * decorFactor) {
-				addFeature(pick(look.wrecks), x, y);
+				addFeature(choose(look.wrecks), x, y);
 			}
 		}
 	}

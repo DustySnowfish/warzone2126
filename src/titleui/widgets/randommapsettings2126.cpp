@@ -35,6 +35,7 @@
 #include "src/main.h"
 #include "src/multiplay.h"
 #include "src/multirecv.h"
+#include "src/multiint.h"
 #include "src/randommap2126.h"
 #include "src/hci/hud2126_style.h"
 
@@ -106,6 +107,22 @@ void displayCodeBox(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	iV_Box(x0, y0, x0 + psWidget->width() - 1, y0 + psWidget->height() - 1, hud2126::border());
 }
 
+void fillDropdown(DropdownWidget &dropdown, const std::vector<std::string> &items)
+{
+	dropdown.clear();
+	dropdown.setListHeight(kControlH * static_cast<uint32_t>(items.size()));
+	for (const auto &text : items)
+	{
+		auto item = std::make_shared<W_LABEL>();
+		item->setFont(font_regular, hud2126::value());
+		item->setString(WzString::fromUtf8("  " + text));
+		item->setGeometry(0, 0, 200, kControlH);
+		dropdown.addItem(item);
+	}
+}
+
+const char kTilesetLetters[] = { 'A', 'U', 'R' };
+
 std::shared_ptr<W_LABEL> makeLabel(const WzString &text, iV_fonts font, PIELIGHT colour)
 {
 	auto label = std::make_shared<W_LABEL>();
@@ -136,15 +153,14 @@ public:
 		attach(styleLabel);
 		styleDropdown = std::make_shared<DropdownWidget>();
 		attach(styleDropdown);
-		styleDropdown->setListHeight(kControlH * RandomMapSettings2126::STYLE_COUNT);
 		styleDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
-		for (int i = 0; i < RandomMapSettings2126::STYLE_COUNT; ++i)
 		{
-			auto item = std::make_shared<W_LABEL>();
-			item->setFont(font_regular, hud2126::value());
-			item->setString(WzString::fromUtf8(std::string("  ") + gettext(randomMapStyleName2126(i))));
-			item->setGeometry(0, 0, 200, kControlH);
-			styleDropdown->addItem(item);
+			std::vector<std::string> names;
+			for (int i = 0; i < RandomMapSettings2126::STYLE_COUNT; ++i)
+			{
+				names.push_back(gettext(randomMapStyleName2126(i)));
+			}
+			fillDropdown(*styleDropdown, names);
 		}
 		styleDropdown->setSelectedIndex(game.randomMap.style);
 		styleDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
@@ -158,7 +174,90 @@ public:
 			game.randomMap.style = static_cast<uint8_t>(index.value());
 			self->changed();
 		});
-		styleDropdown->setTip(_("The kind of landscape. Random picks one of the five for each new map."));
+		styleDropdown->setTip(_("The kind of landscape. Random picks one of the first five for each new map; Islands puts every player on their own island (hover and air units cross the sea)."));
+
+		// Tileset: switches to the Random map with the same number of slots
+		tilesetLabel = makeLabel(_("Tileset"), font_regular, hud2126::text());
+		attach(tilesetLabel);
+		tilesetDropdown = std::make_shared<DropdownWidget>();
+		attach(tilesetDropdown);
+		tilesetDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
+		fillDropdown(*tilesetDropdown, { _("Arizona (desert)"), _("Urban (ruined city)"), _("Rockies (mountains, snow)") });
+		tilesetDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
+		tilesetDropdown->setOnChange([weakSelf](DropdownWidget &dropdown) {
+			auto self = weakSelf.lock();
+			auto index = dropdown.getSelectedIndex();
+			if (!self || !index.has_value() || index.value() >= 3 || !canEdit())
+			{
+				return;
+			}
+			auto identity = randomMapIdentity2126(game.map, game.maxPlayers);
+			if (!identity.has_value() || identity->tileset == kTilesetLetters[index.value()])
+			{
+				return;
+			}
+			RandomMapIdentity2126 target = identity.value();
+			target.tileset = kTilesetLetters[index.value()];
+			widgScheduleTask([weakSelf, target]() {
+				auto strongSelf = weakSelf.lock();
+				if (lobbySwitchRandomMap2126(randomMapLevelName2126(target)))
+				{
+					if (strongSelf)
+					{
+						strongSelf->syncFromGame(true);
+						if (strongSelf->onChanged)
+						{
+							strongSelf->onChanged();
+						}
+					}
+				}
+				else if (strongSelf)
+				{
+					strongSelf->setMessage(_("The map cannot be changed now"), true);
+					strongSelf->syncFromGame(true);
+				}
+			});
+		});
+		tilesetDropdown->setTip(_("The ground, plants and buildings. The size and number of players stay the same."));
+
+		// Map size (choices depend on the number of players; filled in syncFromGame)
+		sizeLabel = makeLabel(_("Map size"), font_regular, hud2126::text());
+		attach(sizeLabel);
+		sizeDropdown = std::make_shared<DropdownWidget>();
+		attach(sizeDropdown);
+		sizeDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
+		sizeDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
+		sizeDropdown->setOnChange([weakSelf](DropdownWidget &dropdown) {
+			auto self = weakSelf.lock();
+			auto index = dropdown.getSelectedIndex();
+			if (!self || !index.has_value() || index.value() >= self->sizeValues.size() || !canEdit())
+			{
+				return;
+			}
+			game.randomMap.size = static_cast<uint16_t>(self->sizeValues[index.value()]);
+			self->changed(true);
+		});
+		sizeDropdown->setTip(_("Map width and height in tiles. Bigger maps take longer to cross and to generate."));
+
+		// Terrain: natural or mirrored
+		terrainLabel = makeLabel(_("Terrain"), font_regular, hud2126::text());
+		attach(terrainLabel);
+		terrainDropdown = std::make_shared<DropdownWidget>();
+		attach(terrainDropdown);
+		terrainDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
+		fillDropdown(*terrainDropdown, { _("Natural"), _("Mirrored (identical for every player)") });
+		terrainDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
+		terrainDropdown->setOnChange([weakSelf](DropdownWidget &dropdown) {
+			auto self = weakSelf.lock();
+			auto index = dropdown.getSelectedIndex();
+			if (!self || !index.has_value() || !canEdit())
+			{
+				return;
+			}
+			game.randomMap.mirror = index.value() == 1 ? 1 : 0;
+			self->changed(true);
+		});
+		terrainDropdown->setTip(_("Mirrored: every player's part of the map is a turned copy of the first, for strictly fair games. Natural: one landscape, so routes differ between players."));
 
 		// Sliders
 		for (int i = 0; i < RandomMapSettings2126::SLIDER_COUNT; ++i)
@@ -288,7 +387,7 @@ public:
 	int32_t idealWidth() override { return kPanelW; }
 	int32_t idealHeight() override
 	{
-		return kPad + 22 + 18 + 10 + kRowH * (1 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + kPad;
+		return kPad + 22 + 18 + 10 + kRowH * (4 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + kPad;
 	}
 
 	void geometryChanged() override
@@ -304,6 +403,14 @@ public:
 		styleLabel->setGeometry(kPad, y + (kControlH - styleLabel->height()) / 2, kLabelW, styleLabel->height());
 		styleDropdown->setGeometry(controlX, y, controlW, kControlH);
 		y += kRowH;
+		const std::pair<std::shared_ptr<W_LABEL>, std::shared_ptr<DropdownWidget>> extraRows[] = {
+			{ tilesetLabel, tilesetDropdown }, { sizeLabel, sizeDropdown }, { terrainLabel, terrainDropdown } };
+		for (const auto &row : extraRows)
+		{
+			row.first->setGeometry(kPad, y + (kControlH - row.first->height()) / 2, kLabelW, row.first->height());
+			row.second->setGeometry(controlX, y, controlW, kControlH);
+			y += kRowH;
+		}
 		for (int i = 0; i < RandomMapSettings2126::SLIDER_COUNT; ++i)
 		{
 			sliderLabels[i]->setGeometry(kPad, y + (kControlH - sliderLabels[i]->height()) / 2, kLabelW, sliderLabels[i]->height());
@@ -340,14 +447,15 @@ public:
 		const int x0 = xOffset + x(), y0 = yOffset + y();
 		pie_UniTransBoxFill(x0, y0, x0 + width(), y0 + height(), pal_RGBA(14, 19, 24, 245));
 		iV_Box(x0, y0, x0 + width() - 1, y0 + height() - 1, hud2126::accent());
-		// The landscape dropdown's box and arrow (the dropdown itself only draws its items)
+		// The dropdowns' boxes and arrows (the dropdown itself only draws its items)
+		for (const auto &dropdown : { styleDropdown, tilesetDropdown, sizeDropdown, terrainDropdown })
 		{
-			const int dx0 = x0 + styleDropdown->x(), dy0 = y0 + styleDropdown->y();
-			const int dx1 = dx0 + styleDropdown->width(), dy1 = dy0 + styleDropdown->height();
-			const bool hot = canEdit() && styleDropdown->isMouseOverWidget();
+			const int dx0 = x0 + dropdown->x(), dy0 = y0 + dropdown->y();
+			const int dx1 = dx0 + dropdown->width(), dy1 = dy0 + dropdown->height();
+			const bool hot = canEdit() && dropdown->isMouseOverWidget();
 			pie_UniTransBoxFill(dx0, dy0, dx1, dy1, hot ? hud2126::tabHover() : hud2126::tab());
 			iV_Box(dx0, dy0, dx1 - 1, dy1 - 1, hot ? hud2126::accent() : hud2126::border());
-			const int ax = dx1 - 18, ay = dy0 + styleDropdown->height() / 2 - 2;
+			const int ax = dx1 - 18, ay = dy0 + dropdown->height() / 2 - 2;
 			for (int r = 0; r < 4; ++r)
 			{
 				pie_UniTransBoxFill(ax + r, ay + r, ax + 8 - r, ay + r + 1, canEdit() ? hud2126::text() : hud2126::disabled());
@@ -395,11 +503,19 @@ private:
 			return;
 		}
 		auto current = randomMapIdentity2126(game.map, game.maxPlayers);
-		if (!current.has_value() || !(current.value() == decoded->first))
+		if (!current.has_value() || current->players != decoded->first.players)
 		{
-			const std::string want = randomMapLevelName2126(decoded->first);
-			setMessage(astringf(_("That code is for %s (%d players): pick that map first"), want.c_str(), decoded->first.players).c_str(), true);
+			setMessage(astringf(_("That code is for a Random map with %d players: pick that map first"), decoded->first.players).c_str(), true);
 			return;
+		}
+		if (current->tileset != decoded->first.tileset)
+		{
+			// Same slots, other tileset: switch to it
+			if (!lobbySwitchRandomMap2126(randomMapLevelName2126(decoded->first)))
+			{
+				setMessage(_("The map cannot be changed now"), true);
+				return;
+			}
 		}
 		game.randomMap = decoded->second;
 		changed(true);
@@ -454,6 +570,47 @@ private:
 		{
 			sliders[i]->pos = shown.sliders[i] / RandomMapSettings2126::SLIDER_STEP;
 		}
+		auto currentIdentity = randomMapIdentity2126(game.map, game.maxPlayers);
+		if (currentIdentity.has_value())
+		{
+			for (size_t t = 0; t < 3; ++t)
+			{
+				if (kTilesetLetters[t] == currentIdentity->tileset && tilesetDropdown->getSelectedIndex().value_or(99) != t)
+				{
+					tilesetDropdown->setSelectedIndex(t);
+				}
+			}
+			// Size choices for this number of players
+			if (sizeForPlayers != currentIdentity->players)
+			{
+				sizeForPlayers = currentIdentity->players;
+				sizeValues.clear();
+				std::vector<std::string> names;
+				sizeValues.push_back(0);
+				names.push_back(astringf(_("Auto (%d)"), randomMapDefaultSize2126(sizeForPlayers)));
+				for (int choice : randomMapSizeChoices2126())
+				{
+					if (choice >= randomMapMinSize2126(sizeForPlayers))
+					{
+						sizeValues.push_back(choice);
+						names.push_back(astringf("%d x %d", choice, choice));
+					}
+				}
+				fillDropdown(*sizeDropdown, names);
+			}
+			for (size_t k = 0; k < sizeValues.size(); ++k)
+			{
+				const int effective = shown.size ? std::max<int>(shown.size, randomMapMinSize2126(sizeForPlayers)) : 0;
+				if (sizeValues[k] == effective && sizeDropdown->getSelectedIndex().value_or(99) != k)
+				{
+					sizeDropdown->setSelectedIndex(k);
+				}
+			}
+		}
+		if (terrainDropdown->getSelectedIndex().value_or(99) != shown.mirror)
+		{
+			terrainDropdown->setSelectedIndex(shown.mirror);
+		}
 		const std::string code = currentCode();
 		if (!codeBox->isEditing())
 		{
@@ -462,7 +619,7 @@ private:
 		auto identity = randomMapIdentity2126(game.map, game.maxPlayers);
 		if (identity.has_value())
 		{
-			subtitle->setString(WzString::fromUtf8(astringf(_("%s, %d players. Every player gets this exact map."), game.map, static_cast<int>(game.maxPlayers))));
+			subtitle->setString(WzString::fromUtf8(astringf(_("%s, %d players, %d x %d tiles. Every player gets this exact map."), game.map, static_cast<int>(game.maxPlayers), randomMapResolvedSize2126(game.randomMap, game.maxPlayers), randomMapResolvedSize2126(game.randomMap, game.maxPlayers))));
 		}
 		else
 		{
@@ -473,7 +630,10 @@ private:
 
 	std::function<void()> onChanged;
 	std::shared_ptr<W_LABEL> title, subtitle, styleLabel, codeLabel, message;
-	std::shared_ptr<DropdownWidget> styleDropdown;
+	std::shared_ptr<DropdownWidget> styleDropdown, tilesetDropdown, sizeDropdown, terrainDropdown;
+	std::shared_ptr<W_LABEL> tilesetLabel, sizeLabel, terrainLabel;
+	std::vector<int> sizeValues;
+	int sizeForPlayers = -1;
 	std::array<std::shared_ptr<W_LABEL>, RandomMapSettings2126::SLIDER_COUNT> sliderLabels;
 	std::array<std::shared_ptr<W_SLIDER>, RandomMapSettings2126::SLIDER_COUNT> sliders;
 	std::array<int, RandomMapSettings2126::SLIDER_COUNT> sliderRowY = {};

@@ -129,6 +129,8 @@ void sendOptions()
 	{
 		NETuint8_t(w, v);
 	}
+	NETuint16_t(w, game.randomMap.size);
+	NETuint8_t(w, game.randomMap.mirror);
 
 	for (unsigned i = 0; i < MAX_PLAYERS; i++)
 	{
@@ -275,6 +277,8 @@ bool recvOptions(NETQUEUE queue)
 		{
 			NETuint8_t(r, v);
 		}
+		NETuint16_t(r, received.size);
+		NETuint8_t(r, received.mirror);
 		RandomMapSettings2126 checked = received;
 		checked.sanitise();
 		if (checked != received)

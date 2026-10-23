@@ -3006,7 +3006,8 @@ LoadingTask<> loadGame(ResourceLoadingController& controller, const GameLoadDeta
 		// reproducible from its map code); benchmarks keep the synchronised seed so they repeat
 		const uint32_t syncedSeed = gameRandU32();
 		const bool useLobbySeed = randomMapUsesLobbySeed2126();
-		applyRandomMapScriptOptions2126(useLobbySeed ? game.randomMap : RandomMapSettings2126());
+		// The settings always apply (benchmarks set theirs with "randomMapCode"); only the seed differs
+		applyRandomMapScriptOptions2126(game.randomMap);
 		data = gameToLoad.getMap(useLobbySeed ? game.randomMap.seed : syncedSeed);
 		if (useLobbySeed)
 		{

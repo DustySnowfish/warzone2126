@@ -1,6 +1,7 @@
 {
 	"challenge": {
-		"map": "Random-512-Rockies",
+		"map": "Random-Rockies-15",
+		"randomMapCode": "512R15-0AAAAAA0-1",
 		"maxPlayers": 15,
 		"scavengers": "true",
 		"alliances": 0,

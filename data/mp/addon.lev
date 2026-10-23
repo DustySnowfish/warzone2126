@@ -463,51 +463,93 @@ dataset MULTI_CAM_1
 game    "multiplay/maps/W2126-Big512.gam"
 
 // W2126 random maps begin (generated)
-level   Random-128-Arizona
+level   Random-Arizona-2
 players 2
 type    14
 dataset MULTI_CAM_1
-game    "multiplay/maps/2c-Random-128-Arizona.gam"
+game    "multiplay/maps/2c-Random-Arizona.gam"
 
-level   Random-192-Urban
+level   Random-Arizona-4
+players 4
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/4c-Random-Arizona.gam"
+
+level   Random-Arizona-8
+players 8
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/8c-Random-Arizona.gam"
+
+level   Random-Arizona-10
+players 10
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/10c-Random-Arizona.gam"
+
+level   Random-Arizona-15
+players 15
+type    14
+dataset MULTI_CAM_1
+game    "multiplay/maps/15c-Random-Arizona.gam"
+
+level   Random-Urban-2
+players 2
+type    14
+dataset MULTI_CAM_2
+game    "multiplay/maps/2c-Random-Urban.gam"
+
+level   Random-Urban-4
 players 4
 type    14
 dataset MULTI_CAM_2
-game    "multiplay/maps/4c-Random-192-Urban.gam"
+game    "multiplay/maps/4c-Random-Urban.gam"
 
-level   Random-256-Rockies
-players 4
-type    14
-dataset MULTI_CAM_3
-game    "multiplay/maps/4c-Random-256-Rockies.gam"
-
-level   Random-256-Arizona
+level   Random-Urban-8
 players 8
 type    14
-dataset MULTI_CAM_1
-game    "multiplay/maps/8c-Random-256-Arizona.gam"
+dataset MULTI_CAM_2
+game    "multiplay/maps/8c-Random-Urban.gam"
 
-level   Random-384-Rockies
-players 8
-type    14
-dataset MULTI_CAM_3
-game    "multiplay/maps/8c-Random-384-Rockies.gam"
-
-level   Random-512-Arizona
-players 8
-type    14
-dataset MULTI_CAM_1
-game    "multiplay/maps/8c-Random-512-Arizona.gam"
-
-level   Random-512-Urban
+level   Random-Urban-10
 players 10
 type    14
 dataset MULTI_CAM_2
-game    "multiplay/maps/10c-Random-512-Urban.gam"
+game    "multiplay/maps/10c-Random-Urban.gam"
 
-level   Random-512-Rockies
+level   Random-Urban-15
+players 15
+type    14
+dataset MULTI_CAM_2
+game    "multiplay/maps/15c-Random-Urban.gam"
+
+level   Random-Rockies-2
+players 2
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/2c-Random-Rockies.gam"
+
+level   Random-Rockies-4
+players 4
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/4c-Random-Rockies.gam"
+
+level   Random-Rockies-8
+players 8
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/8c-Random-Rockies.gam"
+
+level   Random-Rockies-10
+players 10
+type    14
+dataset MULTI_CAM_3
+game    "multiplay/maps/10c-Random-Rockies.gam"
+
+level   Random-Rockies-15
 players 15
 type    14
 dataset MULTI_CAM_3
-game    "multiplay/maps/15c-Random-512-Rockies.gam"
+game    "multiplay/maps/15c-Random-Rockies.gam"
 // W2126 random maps end

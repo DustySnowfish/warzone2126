@@ -1,6 +1,7 @@
 {
 	"challenge": {
-		"map": "Random-512-Arizona",
+		"map": "Random-Arizona-8",
+		"randomMapCode": "512A8-0AAAAAA0-1",
 		"maxPlayers": 8,
 		"scavengers": "true",
 		"alliances": 0,

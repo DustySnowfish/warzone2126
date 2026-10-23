@@ -24,11 +24,14 @@
 /// replaces the game's random seed for generating the map, so the lobby preview, every player's
 /// game and anyone who enters the same code all get the same map.
 ///
-/// Map code: <size><tileset><players>-<style><six sliders>-<seed>, for example 512R15-2AAAAAA-1BX9QZ
+/// Map code: <size><tileset><players>-<style><six sliders><terrain>-<seed>, e.g. 512R15-2AAAAAA0-1BX9QZ
 ///   size     map size in tiles; tileset A Arizona, U Urban, R Rockies; players the player count
-///   style    0 random, 1 rolling hills, 2 plateaus, 3 lakes, 4 canyons, 5 highlands
+///   style    0 random, 1 rolling hills, 2 plateaus, 3 lakes, 4 canyons, 5 highlands, 6 islands
 ///   sliders  water, height, cliffs, oil, trees, scale; one base-36 digit each, 0-K for 0-100 in steps of 5
+///   terrain  0 natural, 1 mirrored (optional: codes without it are natural)
 ///   seed     base 36. Letters are case-insensitive; spaces are ignored.
+/// The Random maps are one per tileset and player count ("Random-Rockies-15"); the size
+/// comes from the settings (0 = that player count's default).
 
 #ifndef __INCLUDED_SRC_RANDOMMAP2126_H__
 #define __INCLUDED_SRC_RANDOMMAP2126_H__
@@ -54,42 +57,53 @@ struct RandomMapSettings2126
 		SCALE,
 		SLIDER_COUNT
 	};
-	static constexpr int STYLE_COUNT = 6; // including 0, random
+	static constexpr int STYLE_COUNT = 7; // including 0, random
 	static constexpr uint8_t SLIDER_DEFAULT = 50;
 	static constexpr uint8_t SLIDER_STEP = 5;
 
 	uint32_t seed = 0; ///< 0 until a random map is chosen in the lobby
 	uint8_t style = 0;
 	std::array<uint8_t, SLIDER_COUNT> sliders = {SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT};
+	uint16_t size = 0;  ///< map size in tiles, 0 = the player count's default
+	uint8_t mirror = 0; ///< 1 = mirrored terrain (every player's slice the same)
 
-	/// Bring every value into range (style 0-5, sliders 0-100 on a step of 5)
+	/// Bring every value into range (style, sliders 0-100 on a step of 5, size one of the choices or 0)
 	void sanitise();
-	bool operator==(const RandomMapSettings2126 &o) const { return seed == o.seed && style == o.style && sliders == o.sliders; }
+	bool operator==(const RandomMapSettings2126 &o) const { return seed == o.seed && style == o.style && sliders == o.sliders && size == o.size && mirror == o.mirror; }
 	bool operator!=(const RandomMapSettings2126 &o) const { return !(*this == o); }
 
 	/// The `mapOptions` handed to the map script
 	std::vector<std::pair<std::string, int32_t>> scriptOptions() const;
 
-	/// "seed,style,water,height,cliffs,oil,trees,scale" for savegames, replays and config
+	/// "seed,style,water,height,cliffs,oil,trees,scale,size,mirror" for savegames, replays and config
 	std::string toStorageString() const;
 	/// Parse toStorageString(); anything missing or invalid keeps the defaults
 	static RandomMapSettings2126 fromStorageString(const std::string &s);
 };
 
-/// Which random map a code is for
+/// Which Random map (tileset and player count) a code is for
 struct RandomMapIdentity2126
 {
-	int size = 0;
 	char tileset = 0; ///< 'A', 'U' or 'R'
 	int players = 0;
-	bool operator==(const RandomMapIdentity2126 &o) const { return size == o.size && tileset == o.tileset && players == o.players; }
+	bool operator==(const RandomMapIdentity2126 &o) const { return tileset == o.tileset && players == o.players; }
 };
 
-/// The identity of one of the generated random maps from its level name ("Random-512-Rockies") and
-/// player count, or nothing when it is not one of them
+/// The identity of one of the Random maps from its level name ("Random-Rockies-15") and player
+/// count, or nothing when it is not one of them
 optional<RandomMapIdentity2126> randomMapIdentity2126(const std::string &levelName, int players);
-/// The level name for an identity ("Random-512-Rockies")
+/// The level name for an identity ("Random-Rockies-15")
 std::string randomMapLevelName2126(const RandomMapIdentity2126 &identity);
+/// "Arizona", "Urban" or "Rockies"
+const char *randomMapTilesetName2126(char tileset);
+
+/// Map sizes offered in the lobby, smallest first
+const std::vector<int> &randomMapSizeChoices2126();
+/// The size used when the setting is 0 ("Auto"), and the smallest size that fits the players
+int randomMapDefaultSize2126(int players);
+int randomMapMinSize2126(int players);
+/// The size a map with these settings will have
+int randomMapResolvedSize2126(const RandomMapSettings2126 &settings, int players);
 
 std::string encodeRandomMapCode2126(const RandomMapIdentity2126 &identity, const RandomMapSettings2126 &settings);
 /// Parse a map code; nothing when it is not valid

@@ -104,6 +104,7 @@ private:
 	 * Initializes the right side box which usually contains the list of players. Handles opening difficulty
 	 * and ai choosers etc.
 	 */
+	friend bool lobbySwitchRandomMap2126(const std::string &levelName); // Warzone 2126
 	void addPlayerBox(bool addPlayerEntries);
 
 	void addGameOptions();

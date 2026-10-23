@@ -21,23 +21,22 @@ TILESET_DIR = os.path.join(ROOT, "data", "base", "tileset")
 LEV = os.path.join(ROOT, "data", "mp", "addon.lev")
 CORE = os.path.join(os.path.dirname(__file__), "random_map.js")
 
-# level name, size in tiles, players, tileset
-MAPS = [
-    ("Random-128-Arizona", 128, 2, "arizona"),
-    ("Random-192-Urban", 192, 4, "urban"),
-    ("Random-256-Rockies", 256, 4, "rockie"),
-    ("Random-256-Arizona", 256, 8, "arizona"),
-    ("Random-384-Rockies", 384, 8, "rockie"),
-    ("Random-512-Arizona", 512, 8, "arizona"),
-    ("Random-512-Urban", 512, 10, "urban"),
-    ("Random-512-Rockies", 512, 15, "rockie"),
-]
+# One map per tileset and player count. The size is chosen in the lobby (Random map settings);
+# this is the default ("Auto") size for each player count.
+PLAYER_COUNTS = [2, 4, 8, 10, 15]
+DEFAULT_SIZE = {2: 128, 4: 192, 8: 256, 10: 384, 15: 512}
+TILESET_ORDER = ["arizona", "urban", "rockie"]
 
 TILESETS = {
     "arizona": ("arizona", "MULTI_CAM_1", "Arizona"),
     "urban": ("urban", "MULTI_CAM_2", "Urban"),
     "rockie": ("rockie", "MULTI_CAM_3", "Rockies"),
 }
+# Level names must be unique, so they carry the player count ("Random-Arizona-8")
+MAPS = [("Random-%s-%d" % (TILESETS[ts][2], p), DEFAULT_SIZE[p], p, ts) for ts in TILESET_ORDER for p in PLAYER_COUNTS]
+# Folders from earlier versions (fixed sizes), removed when the maps are rebuilt
+OLD_FOLDERS = ["2c-Random-128-Arizona", "4c-Random-192-Urban", "4c-Random-256-Rockies", "8c-Random-256-Arizona",
+               "8c-Random-384-Rockies", "8c-Random-512-Arizona", "10c-Random-512-Urban", "15c-Random-512-Rockies"]
 
 FEATURE_STATS = os.path.join(ROOT, "data", "base", "stats", "features.json")
 
@@ -75,20 +74,27 @@ def write_ttypes(path, types):
 
 
 def write_gam(path, size):
+    # Scroll limits of 0 x 0 mean the whole map, whatever size the lobby picks
     data = bytearray(52)
     data[0:4] = b"game"
     struct.pack_into("<I", data, 4, 8)
-    struct.pack_into("<II", data, 24, size, size)
+    struct.pack_into("<II", data, 24, 0, 0)
     with open(path, "wb") as f:
         f.write(bytes(data))
 
 
 def main():
+    import shutil
+    for old in OLD_FOLDERS:
+        if os.path.isdir(os.path.join(MAPS_DIR, old)):
+            shutil.rmtree(os.path.join(MAPS_DIR, old))
+        if os.path.exists(os.path.join(MAPS_DIR, old + ".gam")):
+            os.remove(os.path.join(MAPS_DIR, old + ".gam"))
     core = open(CORE).read()
     lev_entries = []
     for name, size, players, ts in MAPS:
         tables, all_types = tileset_tables(ts)
-        folder = "%dc-%s" % (players, name)
+        folder = "%dc-Random-%s" % (players, TILESETS[ts][2])
         out_dir = os.path.join(MAPS_DIR, folder)
         os.makedirs(out_dir, exist_ok=True)
         header = (

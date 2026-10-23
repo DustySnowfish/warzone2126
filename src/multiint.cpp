@@ -811,7 +811,7 @@ static void loadMapPreview(bool hideInterface, std::string mapName, const Sha256
 	// load the map data
 	// Warzone 2126: preview the random map the game will actually generate (same seed and settings)
 	const bool useLobbySeed = randomMapUsesLobbySeed2126();
-	applyRandomMapScriptOptions2126(useLobbySeed ? game.randomMap : RandomMapSettings2126());
+	applyRandomMapScriptOptions2126(game.randomMap);
 	auto data = gameLoadDetails.getMap(useLobbySeed ? game.randomMap.seed : static_cast<uint32_t>(rand()));
 	if (!data)
 	{
@@ -7107,6 +7107,44 @@ void calcBackdropLayoutForMultiplayerOptionsTitleUI(WIDGET *psWidget)
 # pragma GCC diagnostic push
 # pragma GCC diagnostic ignored "-Wstringop-overflow" // Ignore on GCC 12+`
 #endif
+
+/// Warzone 2126: switch to another Random map with the same number of slots (the tileset choice in
+/// Random map settings), keeping the seed and settings. Host only.
+bool lobbySwitchRandomMap2126(const std::string &levelName)
+{
+	if (ingame.side != InGameSide::HOST_OR_SINGLEPLAYER)
+	{
+		return false;
+	}
+	Sha256 mapHash = levGetMapNameHash(levelName.c_str());
+	LEVEL_DATASET *mapData = levFindDataSet(levelName.c_str(), &mapHash);
+	if (mapData == nullptr || mapData->players != game.maxPlayers)
+	{
+		return false;
+	}
+	if (NetPlay.bComms && NetPlay.isHost && !canChangeMapOrRandomize())
+	{
+		return false;
+	}
+	const RandomMapSettings2126 keep = game.randomMap;
+	updateMapSettings(mapData);
+	game.randomMap = keep;
+	requestMapPreviewLoad(false);
+	// (The player settings stay: same number of slots, and the Random maps carry no player setup)
+	debug(LOG_INFO, "Switching map: %s", mapData->pName.c_str());
+	if (auto titleUI = currentMultiOptionsTitleUI.lock())
+	{
+		titleUI->addGameOptions();
+		titleUI->addPlayerBox(ingame.side != InGameSide::HOST_OR_SINGLEPLAYER);
+	}
+	if (NetPlay.isHost && NetPlay.bComms)
+	{
+		sendOptions();
+		NETsetLobbyOptField(game.map, NET_LOBBY_OPT_FIELD::MAPNAME);
+	}
+	wz_command_interface_output_room_status_json(true);
+	return true;
+}
 
 void WzMultiplayerOptionsTitleUI::start()
 {

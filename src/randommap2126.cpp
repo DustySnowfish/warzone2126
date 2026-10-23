@@ -28,7 +28,9 @@
 #include "movebench.h"
 #include <wzmaplib/map.h>
 
+#include <algorithm>
 #include <chrono>
+#include <cstdlib>
 #include <random>
 
 namespace
@@ -110,6 +112,19 @@ void RandomMapSettings2126::sanitise()
 	{
 		style = 0;
 	}
+	if (size != 0)
+	{
+		int best = 0;
+		for (int choice : randomMapSizeChoices2126())
+		{
+			if (best == 0 || std::abs(choice - static_cast<int>(size)) < std::abs(best - static_cast<int>(size)))
+			{
+				best = choice;
+			}
+		}
+		size = static_cast<uint16_t>(best);
+	}
+	mirror = mirror ? 1 : 0;
 	for (auto &v : sliders)
 	{
 		v = static_cast<uint8_t>(std::min<int>(100, (v + SLIDER_STEP / 2) / SLIDER_STEP * SLIDER_STEP));
@@ -126,6 +141,8 @@ std::vector<std::pair<std::string, int32_t>> RandomMapSettings2126::scriptOption
 		{ "oil", sliders[OIL] },
 		{ "trees", sliders[TREES] },
 		{ "scale", sliders[SCALE] },
+		{ "size", size },
+		{ "mirror", mirror },
 	};
 }
 
@@ -136,6 +153,7 @@ std::string RandomMapSettings2126::toStorageString() const
 	{
 		s += "," + std::to_string(v);
 	}
+	s += "," + std::to_string(size) + "," + std::to_string(mirror);
 	return s;
 }
 
@@ -163,9 +181,14 @@ RandomMapSettings2126 RandomMapSettings2126::fromStorageString(const std::string
 			return RandomMapSettings2126(); // malformed: defaults
 		}
 	}
-	if (values.size() != 2 + SLIDER_COUNT)
+	if (values.size() != 2 + SLIDER_COUNT && values.size() != 4 + SLIDER_COUNT)
 	{
 		return RandomMapSettings2126();
+	}
+	if (values.size() == 4 + SLIDER_COUNT)
+	{
+		r.size = static_cast<uint16_t>(std::min<uint64_t>(values[2 + SLIDER_COUNT], 512));
+		r.mirror = static_cast<uint8_t>(std::min<uint64_t>(values[3 + SLIDER_COUNT], 1));
 	}
 	r.seed = static_cast<uint32_t>(std::min<uint64_t>(values[0], UINT32_MAX));
 	r.style = static_cast<uint8_t>(std::min<uint64_t>(values[1], 255));
@@ -185,33 +208,23 @@ optional<RandomMapIdentity2126> randomMapIdentity2126(const std::string &levelNa
 	{
 		levelName.resize(levelName.size() - 3);
 	}
-	// "Random-<size>-<Tileset>"
+	// "Random-<Tileset>-<players>"
 	const std::string prefix = "Random-";
 	if (levelName.compare(0, prefix.size(), prefix) != 0)
 	{
 		return nullopt;
 	}
-	const size_t dash = levelName.find('-', prefix.size());
-	if (dash == std::string::npos)
+	const size_t dash = levelName.rfind('-');
+	if (dash == std::string::npos || dash < prefix.size() || std::to_string(players) != levelName.substr(dash + 1))
 	{
 		return nullopt;
 	}
-	int size = 0;
-	for (size_t i = prefix.size(); i < dash; ++i)
-	{
-		if (levelName[i] < '0' || levelName[i] > '9')
-		{
-			return nullopt;
-		}
-		size = size * 10 + (levelName[i] - '0');
-	}
-	const std::string tileset = levelName.substr(dash + 1);
+	const std::string tileset = levelName.substr(prefix.size(), dash - prefix.size());
 	for (const auto &t : kTilesets)
 	{
 		if (tileset == t.name)
 		{
 			RandomMapIdentity2126 id;
-			id.size = size;
 			id.tileset = t.letter;
 			id.players = players;
 			return id;
@@ -226,22 +239,56 @@ std::string randomMapLevelName2126(const RandomMapIdentity2126 &identity)
 	{
 		if (t.letter == identity.tileset)
 		{
-			return "Random-" + std::to_string(identity.size) + "-" + t.name;
+			return std::string("Random-") + t.name + "-" + std::to_string(identity.players);
 		}
 	}
 	return {};
+}
+
+const char *randomMapTilesetName2126(char tileset)
+{
+	for (const auto &t : kTilesets)
+	{
+		if (t.letter == tileset)
+		{
+			return t.name;
+		}
+	}
+	return "";
+}
+
+const std::vector<int> &randomMapSizeChoices2126()
+{
+	static const std::vector<int> sizes = { 128, 192, 256, 320, 384, 448, 512 };
+	return sizes;
+}
+
+int randomMapDefaultSize2126(int players)
+{
+	return players <= 2 ? 128 : players <= 4 ? 192 : players <= 8 ? 256 : players <= 10 ? 384 : 512;
+}
+
+int randomMapMinSize2126(int players)
+{
+	return players <= 4 ? 128 : players <= 8 ? 192 : players <= 10 ? 256 : 320;
+}
+
+int randomMapResolvedSize2126(const RandomMapSettings2126 &settings, int players)
+{
+	return settings.size ? std::max<int>(settings.size, randomMapMinSize2126(players)) : randomMapDefaultSize2126(players);
 }
 
 std::string encodeRandomMapCode2126(const RandomMapIdentity2126 &identity, const RandomMapSettings2126 &settingsIn)
 {
 	RandomMapSettings2126 settings = settingsIn;
 	settings.sanitise();
-	std::string code = std::to_string(identity.size) + identity.tileset + std::to_string(identity.players) + "-";
+	std::string code = std::to_string(randomMapResolvedSize2126(settings, identity.players)) + identity.tileset + std::to_string(identity.players) + "-";
 	code += kBase36[settings.style];
 	for (uint8_t v : settings.sliders)
 	{
 		code += kBase36[v / RandomMapSettings2126::SLIDER_STEP];
 	}
+	code += kBase36[settings.mirror];
 	code += "-" + toBase36(settings.seed);
 	return code;
 }
@@ -285,7 +332,7 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		return nullopt;
 	}
 	RandomMapIdentity2126 identity;
-	identity.size = std::stoi(mapPart.substr(0, letterPos));
+	const int codeSize = std::stoi(mapPart.substr(0, letterPos));
 	identity.tileset = mapPart[letterPos];
 	identity.players = std::stoi(mapPart.substr(letterPos + 1));
 	if (identity.tileset != 'A' && identity.tileset != 'U' && identity.tileset != 'R')
@@ -293,7 +340,8 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		return nullopt;
 	}
 
-	if (settingsPart.size() != 1 + RandomMapSettings2126::SLIDER_COUNT)
+	// Settings: style, six sliders, then (from the second version on) the terrain digit
+	if (settingsPart.size() != 1 + RandomMapSettings2126::SLIDER_COUNT && settingsPart.size() != 2 + RandomMapSettings2126::SLIDER_COUNT)
 	{
 		return nullopt;
 	}
@@ -313,6 +361,22 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		}
 		settings.sliders[i] = static_cast<uint8_t>(step * RandomMapSettings2126::SLIDER_STEP);
 	}
+	if (settingsPart.size() == 2 + RandomMapSettings2126::SLIDER_COUNT)
+	{
+		const int mirror = base36Digit(settingsPart[1 + RandomMapSettings2126::SLIDER_COUNT]);
+		if (mirror < 0 || mirror > 1)
+		{
+			return nullopt;
+		}
+		settings.mirror = static_cast<uint8_t>(mirror);
+	}
+	// Size: one of the choices, big enough for the players
+	const auto &choices = randomMapSizeChoices2126();
+	if (std::find(choices.begin(), choices.end(), codeSize) == choices.end() || codeSize < randomMapMinSize2126(identity.players))
+	{
+		return nullopt;
+	}
+	settings.size = static_cast<uint16_t>(codeSize);
 	auto seed = fromBase36(seedPart);
 	if (!seed.has_value() || seed.value() == 0)
 	{
@@ -335,7 +399,7 @@ uint32_t newRandomMapSeed2126()
 
 const char *randomMapStyleName2126(int style)
 {
-	static const char *names[] = { N_("Random"), N_("Rolling hills"), N_("Plateaus"), N_("Lakes"), N_("Canyons"), N_("Highlands") };
+	static const char *names[] = { N_("Random"), N_("Rolling hills"), N_("Plateaus"), N_("Lakes"), N_("Canyons"), N_("Highlands"), N_("Islands") };
 	return (style >= 0 && style < RandomMapSettings2126::STYLE_COUNT) ? names[style] : names[0];
 }
 
