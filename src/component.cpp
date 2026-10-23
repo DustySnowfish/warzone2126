@@ -1086,7 +1086,7 @@ glm::mat4 shipMotion(const DROID* psDroid)
 glm::mat4 hullSuspension(const DROID* psDroid)
 {
 	const PROPULSION_TYPE propulsion = psDroid->getPropulsionStats()->propulsionType;
-	if (!war_getHullSuspension() || psDroid->isFlying() || propulsion == PROPULSION_TYPE_LEGGED || psDroid->isTransporter())
+	if (!war_getHullSuspension() || psDroid->isFlying() || propulsion == PROPULSION_TYPE_LEGGED || psDroid->isFlightBasedTransporter())
 	{
 		return glm::mat4(1.f);
 	}
@@ -1152,7 +1152,7 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 	// slightly from the gameplay surface when terrain mesh smoothing is active
 	position.y += static_cast<int>(getTerrainVisualObjectHeightDelta(gameWorld.map, st.pos.x, st.pos.y, st.pos.z));
 
-	if (psDroid->isTransporter())
+	if (psDroid->isFlightBasedTransporter())
 	{
 		position.y += bobTransporterHeight();
 	}
@@ -1238,7 +1238,7 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 void destroyFXDroid(DROID *psDroid, unsigned impactTime, Vector3f &velocity)
 {
 	// Warzone 2126: vehicles break into physical pieces instead of the classic flying bits
-	if (wreck_physics::enabled() && !psDroid->isCyborg() && !psDroid->isTransporter() && psDroid->droidType != DROID_PERSON)
+	if (wreck_physics::enabled() && !psDroid->isCyborg() && !psDroid->isFlightBasedTransporter() && psDroid->droidType != DROID_PERSON)
 	{
 		wreck_physics::droidDestroyed(psDroid);
 		return;

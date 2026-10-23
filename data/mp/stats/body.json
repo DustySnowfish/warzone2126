@@ -1039,6 +1039,31 @@
 		"size": "LIGHT",
 		"weaponSlots": 1
 	},
+	"NavalLanding": {
+		"armourHeat": 10,
+		"armourKinetic": 16,
+		"buildPoints": 400,
+		"buildPower": 120,
+		"class": "Transports",
+		"droidType": "SUPERTRANSPORTER",
+		"hitpoints": 520,
+		"id": "NavalLanding",
+		"model": "drlbod01.pie",
+		"name": "Landing Craft Hull",
+		"naval": 1,
+		"powerOutput": 12000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval1.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval1.pie"
+			}
+		},
+		"size": "MEDIUM",
+		"weaponSlots": 0,
+		"weight": 1800
+	},
 	"NavalPatrol": {
 		"armourHeat": 8,
 		"armourKinetic": 12,

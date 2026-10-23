@@ -2763,6 +2763,14 @@
 			"Missile-A-T"
 		]
 	},
+	"Ship-LandingCraft": {
+		"available": true,
+		"body": "NavalLanding",
+		"id": "Ship-LandingCraft",
+		"name": "Landing Craft",
+		"propulsion": "NavalScrew",
+		"type": "SUPERTRANSPORTER"
+	},
 	"Ship-Patrol-HMG": {
 		"body": "NavalPatrol",
 		"id": "Ship-Patrol-HMG",

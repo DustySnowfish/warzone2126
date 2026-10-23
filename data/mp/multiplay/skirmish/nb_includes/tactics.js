@@ -568,9 +568,9 @@ _global.unsetTarget = function(player) {
 };
 
 _global.groupDroid = function(droid) {
-	if (isNavalDroid(droid))
+	if (isNavalDroid(droid) || isLandingPassenger(droid))
 	{
-		return; // Warzone 2126: ships are handled by naval.js
+		return; // Warzone 2126: ships and units boarding a landing craft are handled by naval.js
 	}
 
 	if (droid.droidType === DROID_WEAPON || droid.droidType === DROID_CYBORG)

@@ -16,6 +16,9 @@ const NAVAL_SHIPYARD = "A0Shipyard";
 const NAVAL_CHECK_PROP = "NavalScrew";
 const NAVAL_GATHER = 3; // ships waiting at home before the fleet sails
 const NAVAL_RETREAT = 40; // health percentage at which a ship goes for repairs
+const NAVAL_LANDING_BODY = "NavalLanding";
+const NAVAL_LANDING_RESEARCH = "R-Vehicle-Body-NavalLanding";
+const NAVAL_LANDING_CRAFT = 2; // landing craft kept
 const NAVAL_DEBUG = true; // log decisions (for tuning against real games)
 
 let navalTarget; // { id, type, player, wx, wy }: the object attacked and the water spot to attack it from
@@ -131,6 +134,15 @@ function iHaveShips()
 
 // Research: called for each idle lab before the usual choices
 _global.navalResearch = function(lab) {
+	if (iHaveShips() && navalWanted() && landingWanted() && !componentAvailable(NAVAL_LANDING_BODY) && withChance(30))
+	{
+		if (pursueResearch(lab, NAVAL_LANDING_RESEARCH))
+		{
+			navalDebug("researching Landing Craft");
+			return true;
+		}
+	}
+
 	if (iHaveShips() || gameTime < 4 * 60000 || !navalWanted() || !withChance(35))
 	{
 		return false;
@@ -146,9 +158,15 @@ _global.navalResearch = function(lab) {
 	return ok;
 };
 
+function isLandingCraft(droid)
+{
+	return isNavalDroid(droid) && droid.droidType === DROID_SUPERTRANSPORTER;
+}
+
+// Warships (not landing craft)
 function myShips()
 {
-	return enumDroid(me).filter(isNavalDroid);
+	return enumDroid(me).filter((d) => (isNavalDroid(d) && !isLandingCraft(d)));
 }
 
 function shipCap()
@@ -230,6 +248,16 @@ _global.checkShipProduction = function() {
 		return false;
 	}
 
+	if (landingWanted() && componentAvailable(NAVAL_LANDING_BODY) && enumDroid(me).filter(isLandingCraft).length < NAVAL_LANDING_CRAFT)
+	{
+		// (a landing craft has no weapon slots; buildDroid needs a turret name all the same)
+		if (buildDroid(yards[0], "Landing Craft", NAVAL_LANDING_BODY, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", "MG1Mk1"))
+		{
+			navalDebug("building a landing craft");
+			return true;
+		}
+	}
+
 	let bodies = filterBodyStatsByUsage(BODYUSAGE.NAVAL, chooseBodyClass());
 
 	if (bodies.length === 0)
@@ -296,9 +324,260 @@ function chooseNavalTarget(from, home)
 	return undefined;
 }
 
+// Landing craft: wanted when ships can reach an enemy that land units cannot
+function landingWanted()
+{
+	function uncached()
+	{
+		if (!navalWanted())
+		{
+			return false;
+		}
+
+		const ground = getPropulsionStatsComponents(PROPULSIONUSAGE.GROUND).last();
+
+		for (let i = 0; i < maxPlayers; ++i)
+		{
+			if (i !== me && isEnemy(i) && defined(startPositions[i]) && defined(ground)
+			    && !propulsionCanReach(ground, baseLocation.x, baseLocation.y, startPositions[i].x, startPositions[i].y))
+			{
+				return true;
+			}
+		}
+
+		return false;
+	}
+
+	return cached(uncached, 60000, "navalLandingWanted");
+}
+
+// The nearest enemy base that land units cannot reach from ours: where landings go
+function invasionTarget()
+{
+	function uncached()
+	{
+		const ground = getPropulsionStatsComponents(PROPULSIONUSAGE.GROUND).last();
+		let best;
+		let bestDist = Infinity;
+
+		for (let i = 0; i < maxPlayers; ++i)
+		{
+			if (i === me || !isEnemy(i) || !defined(startPositions[i]) || !defined(ground)
+			    || propulsionCanReach(ground, baseLocation.x, baseLocation.y, startPositions[i].x, startPositions[i].y))
+			{
+				continue;
+			}
+
+			const d = distance(startPositions[i], baseLocation);
+
+			if (d < bestDist)
+			{
+				bestDist = d;
+				best = { x: startPositions[i].x, y: startPositions[i].y, player: i };
+			}
+		}
+
+		return best;
+	}
+
+	return cached(uncached, 60000, "navalInvasionTarget");
+}
+
+// Land units at home that cannot reach the invasion target by land: passengers
+function strandedUnits()
+{
+	const target = invasionTarget();
+
+	if (!defined(target))
+	{
+		return [];
+	}
+
+	return enumDroid(me, DROID_WEAPON).concat(enumDroid(me, DROID_CYBORG)).filter((d) => (
+		!isNavalDroid(d) && !isVTOL(d) && d.order !== DORDER_EMBARK && distanceToBase(d) < baseScale * 2 &&
+		!droidCanReach(d, target.x, target.y)
+	));
+}
+
+// Whether land units from the base can walk to the shore next to this water tile
+function beachReachable(x, y)
+{
+	const ground = getPropulsionStatsComponents(PROPULSIONUSAGE.GROUND).last();
+
+	if (!defined(ground))
+	{
+		return false;
+	}
+
+	for (let dy = -1; dy <= 1; ++dy)
+	{
+		for (let dx = -1; dx <= 1; ++dx)
+		{
+			const tx = x + dx, ty = y + dy;
+
+			if (tx > 2 && ty > 2 && tx < mapWidth - 3 && ty < mapHeight - 3 && terrainType(tx, ty) !== TER_WATER && terrainType(tx, ty) !== TER_CLIFFFACE
+			    && propulsionCanReach(ground, baseLocation.x, baseLocation.y, tx, ty))
+			{
+				return true;
+			}
+		}
+	}
+
+	return false;
+}
+
+// Where landing craft wait to load: the water nearest the base that ships can reach from the
+// home waters (so right off a beach)
+function loadingBeach()
+{
+	function uncached()
+	{
+		const home = homeWater();
+
+		if (!defined(home))
+		{
+			return undefined;
+		}
+
+		for (let r = 1; r <= baseScale * 2; ++r)
+		{
+			for (let dy = -r; dy <= r; ++dy)
+			{
+				for (let dx = -r; dx <= r; ++dx)
+				{
+					if (Math.max(Math.abs(dx), Math.abs(dy)) !== r)
+					{
+						continue;
+					}
+
+					const x = baseLocation.x + dx, y = baseLocation.y + dy;
+
+					if (isWater(x, y) && propulsionCanReach(NAVAL_CHECK_PROP, home.x, home.y, x, y) && beachReachable(x, y))
+					{
+						return { x: x, y: y };
+					}
+				}
+			}
+		}
+
+		return home;
+	}
+
+	return cached(uncached, Infinity, "navalLoadingBeach");
+}
+
+let landingState = {}; // per craft id: { loading: game time loading started }
+let landingGroup; // passengers, kept away from NullBot's other groups while they board
+
+_global.isLandingPassenger = function(droid) {
+	return defined(landingGroup) && droid.group === landingGroup && droid.order === DORDER_EMBARK;
+};
+
+// Units put ashore (or that gave up boarding) go back to NullBot's attack groups
+function releasePassengers()
+{
+	if (defined(landingGroup))
+	{
+		enumGroup(landingGroup).filter((d) => (d.order !== DORDER_EMBARK)).forEach(groupDroid);
+	}
+}
+
+function landingTick()
+{
+	const crafts = enumDroid(me).filter(isLandingCraft);
+
+	if (crafts.length === 0)
+	{
+		return;
+	}
+
+	const home = homeWater();
+
+	crafts.forEach((craft) => {
+		const st = landingState[craft.id] || (landingState[craft.id] = { loading: 0, sailing: false });
+		const cargo = craft.cargoCount > 0 ? craft.cargoCount - 1 : 0; // (the group counts the craft itself)
+
+		if (craft.order === DORDER_DISEMBARK)
+		{
+			st.sailing = true;
+			return; // under way
+		}
+
+		if (st.sailing)
+		{
+			st.sailing = false;
+			releasePassengers();
+			navalDebug("landing craft " + (cargo === 0 ? "landed its units" : "could not land " + cargo + " units") + " at " + craft.x + "," + craft.y);
+		}
+
+		if (cargo === 0 && distanceToBase(craft) > baseScale * 2.5)
+		{
+			// Empty and away: come home
+			if (craft.order !== DORDER_MOVE && defined(home))
+			{
+				orderDroidLoc(craft, DORDER_MOVE, home.x, home.y);
+			}
+			st.loading = 0;
+			return;
+		}
+
+		const full = craft.cargoLeft < 2;
+		const waited = st.loading > 0 && gameTime - st.loading > 60000;
+
+		if (cargo > 0 && (full || waited))
+		{
+			// Sail and land the units at the enemy base across the water
+			const target = invasionTarget();
+
+			if (defined(target))
+			{
+				orderDroidLoc(craft, DORDER_DISEMBARK, target.x, target.y);
+				st.sailing = true;
+				navalDebug("landing craft sails with " + cargo + " units for player " + target.player + " at " + target.x + "," + target.y);
+			}
+			st.loading = 0;
+			return;
+		}
+
+		// Loading at home: wait off the beach and call stranded units aboard
+		const beach = loadingBeach();
+
+		if (defined(beach) && distance(craft, beach) > 2)
+		{
+			if (craft.order !== DORDER_MOVE)
+			{
+				orderDroidLoc(craft, DORDER_MOVE, beach.x, beach.y);
+			}
+			return;
+		}
+
+		const passengers = strandedUnits().filter((d) => (d.order !== DORDER_EMBARK));
+
+		if (passengers.length > 0)
+		{
+			if (st.loading === 0)
+			{
+				st.loading = gameTime;
+			}
+
+			if (!defined(landingGroup))
+			{
+				landingGroup = MAX_GROUPS + 8; // (NullBot numbers its groups itself; newGroup() would clash with them)
+			}
+
+			passengers.slice(0, 3).forEach((d) => {
+				groupAdd(landingGroup, d);
+				orderDroidObj(d, DORDER_EMBARK, craft);
+			});
+			navalDebug("calling " + Math.min(3, passengers.length) + " of " + passengers.length + " stranded units aboard the landing craft at " + craft.x + "," + craft.y);
+		}
+	});
+}
+
 // Tactics, every few seconds
 _global.navalTick = function() {
 	buildShipyard();
+	landingTick();
 
 	const home = homeWater();
 

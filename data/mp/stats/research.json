@@ -9319,6 +9319,21 @@
 		],
 		"statID": "NavalScrew"
 	},
+	"R-Vehicle-Body-NavalLanding": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalLanding",
+		"name": "Landing Craft",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Vehicle-Body05"
+		],
+		"researchPoints": 4800,
+		"researchPower": 150,
+		"resultComponents": [
+			"NavalLanding"
+		],
+		"statID": "NavalLanding"
+	},
 	"R-Vehicle-Body-NavalFrigate": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body-NavalFrigate",

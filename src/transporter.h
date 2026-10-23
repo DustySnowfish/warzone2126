@@ -34,6 +34,8 @@
 
 //defines how much space is on the Transporter
 #define TRANSPORTER_CAPACITY		10
+/// Warzone 2126: landing craft carry 6 light units (cyborgs), 3 medium or 2 heavy
+#define LANDING_CRAFT_CAPACITY		6
 
 /// how much cargo capacity a droid takes up
 int transporterSpaceRequired(const DROID *psDroid);
@@ -57,6 +59,8 @@ void transporterRemoveDroid(DROID *psTransport, DROID *psDroid, QUEUE_MODE mode)
 bool checkTransporterSpace(DROID const *psTransporter, DROID const *psAssigned, bool mayFlash = true);
 /*calculates how much space is remaining on the transporter - allows droids to take
 up different amount depending on their body size - currently all are set to one!*/
+/// How much a transporter (or landing craft) can carry
+int transporterCapacity(const DROID *psTransporter);
 int calcRemainingCapacity(const DROID *psTransporter);
 
 bool transporterIsEmpty(const DROID *psTransporter);

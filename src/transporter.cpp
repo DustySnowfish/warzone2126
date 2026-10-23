@@ -656,9 +656,14 @@ bool intAddDroidsAvailForm()
 
 /*calculates how much space is remaining on the transporter - allows droids to take
 up different amount depending on their body size - currently all are set to one!*/
+int transporterCapacity(const DROID *psTransporter)
+{
+	return (psTransporter != nullptr && psTransporter->isLandingCraft()) ? LANDING_CRAFT_CAPACITY : TRANSPORTER_CAPACITY;
+}
+
 int calcRemainingCapacity(const DROID *psTransporter)
 {
-	int capacity = TRANSPORTER_CAPACITY;
+	int capacity = transporterCapacity(psTransporter);
 
 	// If it's dead then just return 0.
 	if (isDead((const BASE_OBJECT *)psTransporter))
@@ -1127,7 +1132,7 @@ bool checkTransporterSpace(DROID const *psTransporter, DROID const *psAssigned, 
 	ASSERT_OR_RETURN(false, psTransporter->psGroup != nullptr, "transporter doesn't have a group");
 
 	//work out how much space is currently left
-	capacity = TRANSPORTER_CAPACITY;
+	capacity = transporterCapacity(psTransporter);
 	for (DROID* psDroid : psTransporter->psGroup->psList)
 	{
 		if (psDroid == psTransporter)
@@ -1406,6 +1411,11 @@ bool transporterFlying(const DROID *psTransporter)
 {
 	ASSERT_OR_RETURN(false, psTransporter != nullptr, "Invalid droid pointer");
 	ASSERT_OR_RETURN(false, psTransporter->isTransporter(), "Droid is not a Transporter");
+
+	if (psTransporter->isLandingCraft())
+	{
+		return false; // Warzone 2126: units board a landing craft whenever they reach it
+	}
 
 	return psTransporter->order.type == DORDER_TRANSPORTOUT ||
 	       psTransporter->order.type == DORDER_TRANSPORTIN ||

@@ -261,7 +261,7 @@ static bool moveDroidToBase(DROID *psDroid, UDWORD x, UDWORD y, bool bFormation,
 	CHECK_DROID(psDroid);
 
 	// in multiPlayer make Transporter move like the vtols
-	if (psDroid->isTransporter() && game.maxPlayers == 0)
+	if (psDroid->isFlightBasedTransporter() && game.maxPlayers == 0)
 	{
 		fpathSetDirectRoute(psDroid, x, y);
 		psDroid->sMove.Status = MOVENAVIGATE;
@@ -269,7 +269,7 @@ static bool moveDroidToBase(DROID *psDroid, UDWORD x, UDWORD y, bool bFormation,
 		return true;
 	}
 	// NOTE: While Vtols can fly, then can't go through things, like the transporter.
-	else if ((game.maxPlayers > 0 && psDroid->isTransporter()))
+	else if ((game.maxPlayers > 0 && psDroid->isFlightBasedTransporter()))
 	{
 		fpathSetDirectRoute(psDroid, x, y);
 		retVal = FPR_OK;
@@ -2351,7 +2351,7 @@ static void movePlayDroidMoveAudio(DROID *psDroid)
 		{
 			iAudioID = ID_SOUND_TREAD;
 		}
-		else if (psDroid->isTransporter())
+		else if (psDroid->isFlightBasedTransporter())
 		{
 			iAudioID = ID_SOUND_BLIMP_FLIGHT;
 		}
@@ -2418,7 +2418,7 @@ static void movePlayAudio(DROID *psDroid, bool bStarted, bool bStoppedBefore, SD
 			movePlayDroidMoveAudio(psDroid);
 			return;
 		}
-		else if (psDroid->isTransporter())
+		else if (psDroid->isFlightBasedTransporter())
 		{
 			iAudioID = ID_SOUND_BLIMP_TAKE_OFF;
 		}
@@ -2433,7 +2433,7 @@ static void movePlayAudio(DROID *psDroid, bool bStarted, bool bStoppedBefore, SD
 	         (psPropType->shutDownID != NO_SOUND))
 	{
 		/* play stop audio */
-		if (psDroid->isTransporter())
+		if (psDroid->isFlightBasedTransporter())
 		{
 			iAudioID = ID_SOUND_BLIMP_LAND;
 		}

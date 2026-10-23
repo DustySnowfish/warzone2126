@@ -133,6 +133,54 @@ struct RtrBestResult
 static bool secondaryCheckDamageLevelDeselect(DROID *psDroid, SECONDARY_STATE repairState);
 static RtrBestResult decideWhereToRepairAndBalance(DROID *psDroid);
 
+/// Warzone 2126: the water tile nearest to a spot ashore that a landing craft can reach (within
+/// 32 tiles of the spot), as a world position
+static optional<Vector2i> landingCraftApproach2126(const DROID *psCraft, Vector2i target)
+{
+	const int tx = map_coord(target.x);
+	const int ty = map_coord(target.y);
+	for (int r = 0; r <= 32; ++r)
+	{
+		optional<Vector2i> best;
+		int bestDist = INT32_MAX;
+		for (int dy = -r; dy <= r; ++dy)
+		{
+			for (int dx = -r; dx <= r; ++dx)
+			{
+				if (std::max(std::abs(dx), std::abs(dy)) != r)
+				{
+					continue;
+				}
+				const int x = tx + dx;
+				const int y = ty + dy;
+				if (!tileOnMap(gameWorld.map, x, y) || terrainType(mapTile(gameWorld.map, x, y)) != TER_WATER)
+				{
+					continue;
+				}
+				const Vector2i pos(world_coord(x) + TILE_UNITS / 2, world_coord(y) + TILE_UNITS / 2);
+				const int dist = dx * dx + dy * dy;
+				if (dist < bestDist && fpathCheck(gameWorld.map, psCraft->pos, Vector3i(pos, 0), PROPULSION_TYPE_PROPELLOR))
+				{
+					bestDist = dist;
+					best = pos;
+				}
+			}
+		}
+		if (best.has_value())
+		{
+			return best;
+		}
+	}
+	return nullopt;
+}
+
+/// Warzone 2126: how close a unit must get to board a transporter. A landing craft lies off the
+/// beach, so units board from the shore next to it.
+static int embarkRange2126(const DROID *psTransporter)
+{
+	return psTransporter->isLandingCraft() ? TILE_UNITS * 3 : TILE_UNITS;
+}
+
 /// Warzone 2126: ships go back to a shipyard for repairs
 static bool isShipyardObj2126(const BASE_OBJECT *psObj)
 {
@@ -979,8 +1027,8 @@ bool orderUpdateDroid(DROID *psDroid)
 					psDroid->order = DroidOrder(DORDER_NONE);
 					actionDroid(psDroid, DACTION_NONE);
 				}
-				else if (abs((SDWORD)psDroid->pos.x - (SDWORD)psDroid->order.psObj->pos.x) < TILE_UNITS
-				         && abs((SDWORD)psDroid->pos.y - (SDWORD)psDroid->order.psObj->pos.y) < TILE_UNITS)
+				else if (abs((SDWORD)psDroid->pos.x - (SDWORD)psDroid->order.psObj->pos.x) < embarkRange2126((const DROID *)psDroid->order.psObj)
+				         && abs((SDWORD)psDroid->pos.y - (SDWORD)psDroid->order.psObj->pos.y) < embarkRange2126((const DROID *)psDroid->order.psObj))
 				{
 					// save the target of current droid (the transporter)
 					DROID *transporter = (DROID *)psDroid->order.psObj;
@@ -1020,7 +1068,15 @@ bool orderUpdateDroid(DROID *psDroid)
 			{
 				/*once the Transporter has reached its destination (and landed),
 				get all the units to disembark*/
-				if (psDroid->action != DACTION_MOVE && psDroid->action != DACTION_MOVEFIRE &&
+				const Vector2i toGo = psDroid->order.pos - psDroid->pos.xy();
+				if (psDroid->isLandingCraft() && psDroid->action != DACTION_MOVE && psDroid->action != DACTION_MOVEFIRE && psDroid->sMove.Status == MOVEINACTIVE
+				    && dot(toGo, toGo) > (3 * TILE_UNITS) * (3 * TILE_UNITS))
+				{
+					// Warzone 2126: a landing craft held up on the way (other ships, a blocked
+					// channel) keeps going rather than trying to land its units at sea
+					actionDroid(psDroid, DACTION_MOVE, psDroid->order.pos.x, psDroid->order.pos.y);
+				}
+				else if (psDroid->action != DACTION_MOVE && psDroid->action != DACTION_MOVEFIRE &&
 				    psDroid->sMove.Status == MOVEINACTIVE && psDroid->sMove.iVertSpeed == 0)
 				{
 					unloadTransporter(psDroid, psDroid->pos.x, psDroid->pos.y);
@@ -1474,16 +1530,33 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 	UDWORD		iFactoryDistSq;
 	STRUCTURE	*psFactory;
 	const PROPULSION_STATS *psPropStats = psDroid->getPropulsionStats();
-	const Vector3i rPos(psOrder->pos, 0);
 	syncDebugDroid(psDroid, '-');
 	syncDebug("%d ordered %s", psDroid->id, getDroidOrderName(psOrder->type));
 
 	objTrace(psDroid->id, "base set order to %s (was %s)", getDroidOrderName(psOrder->type), getDroidOrderName(psDroid->order.type));
 
+	// Warzone 2126: a landing craft told to land units on a spot ashore sails to the nearest water
+	// it can reach and unloads onto the beach there
+	if (psOrder->type == DORDER_DISEMBARK && psDroid->isLandingCraft())
+	{
+		const optional<Vector2i> approach = landingCraftApproach2126(psDroid, psOrder->pos);
+		if (!approach.has_value())
+		{
+			objTrace(psDroid->id, "No water near (%d, %d) to land units from", psOrder->pos.x, psOrder->pos.y);
+			if (psDroid->player == selectedPlayer)
+			{
+				addConsoleMessage(_("The landing craft cannot reach a shore near there."), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+			}
+			syncDebugDroid(psDroid, '?');
+			return;
+		}
+		psOrder->pos = approach.value();
+	}
+
 	if (psOrder->type != DORDER_TRANSPORTIN         // transporters special
 	    && psOrder->psObj == nullptr			// location-type order
 	    && (validOrderForLoc(psOrder->type) || psOrder->type == DORDER_BUILD)
-	    && !fpathCheck(gameWorld.map, psDroid->pos, rPos, psPropStats->propulsionType))
+	    && !fpathCheck(gameWorld.map, psDroid->pos, Vector3i(psOrder->pos, 0), psPropStats->propulsionType)) // (the position may have changed above)
 	{
 		if (!isHumanPlayer(psDroid->player))
 		{
@@ -1577,7 +1650,7 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 		}
 		//in multiPlayer, cannot move Transporter to blocking tile either
 		if (game.type == LEVEL_TYPE::SKIRMISH
-		    && psDroid->isTransporter()
+		    && psDroid->isFlightBasedTransporter()
 		    && fpathBlockingTile(gameWorld.map, map_coord(psOrder->pos), psDroid->getPropulsionStats()->propulsionType))
 		{
 			break;
@@ -1796,7 +1869,7 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 
 				psDroid->order = *psOrder;
 				// Find a place to land for vtols. And Transporters in a multiPlay game.
-				if (psDroid->isVtol() || (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isTransporter()))
+				if (psDroid->isVtol() || (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isFlightBasedTransporter()))
 				{
 					actionVTOLLandingPos(psDroid, &pos);
 				}
@@ -1853,7 +1926,7 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 			psDroid->order.pos = psOrder->psObj->pos.xy();
 			/* If in multiPlayer, and the Transporter has been sent to be
 				* repaired, need to find a suitable location to drop down. */
-			if (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isTransporter())
+			if (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isFlightBasedTransporter())
 			{
 				Vector2i pos = psDroid->order.pos;
 				objTrace(psDroid->id, "Repair transport");
@@ -1899,7 +1972,7 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 				psDroid->order.pos = rtrData.psObj->pos.xy();
 				/* If in multiPlayer, and the Transporter has been sent to be
 					* repaired, need to find a suitable location to drop down. */
-				if (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isTransporter())
+				if (game.type == LEVEL_TYPE::SKIRMISH && psDroid->isFlightBasedTransporter())
 				{
 					Vector2i pos = psDroid->order.pos;
 
@@ -1922,7 +1995,7 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 				actionDroid(psDroid, DACTION_MOVE, psDroid->order.pos.x, psDroid->order.pos.y);
 			}
 			/* give repair order if repair droid found */
-			else if (rtrData.type == RTR_TYPE_DROID && !psDroid->isTransporter())
+			else if (rtrData.type == RTR_TYPE_DROID && !psDroid->isFlightBasedTransporter())
 			{
 				psDroid->order = DroidOrder(psOrder->type, Vector2i(rtrData.psObj->pos.x, rtrData.psObj->pos.y), RTR_TYPE_DROID);
 				psDroid->order.pos = rtrData.psObj->pos.xy();
@@ -1948,6 +2021,13 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 			    || embarkee == nullptr || !embarkee->isTransporter())  // nor can a transporter load another transporter
 			{
 				debug(LOG_ERROR, "Sorry, can only load things that aren't transporters into things that are.");
+				psDroid->order = DroidOrder(DORDER_NONE);
+				break;
+			}
+			// Warzone 2126: a landing craft carries land units only (no ships or aircraft)
+			if (embarkee->isLandingCraft() && (psDroid->isVtol()
+			    || psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR))
+			{
 				psDroid->order = DroidOrder(DORDER_NONE);
 				break;
 			}
@@ -2716,8 +2796,15 @@ DROID_ORDER chooseOrderLoc(DROID *psDroid, UDWORD x, UDWORD y, bool altOrder)
 		}
 	}
 
+	// Warzone 2126: a loaded landing craft sent to a spot on land sails to the nearest shore and
+	// lands its units there
+	if (psDroid->isLandingCraft() && game.type == LEVEL_TYPE::SKIRMISH && !transporterIsEmpty(psDroid)
+	    && terrainType(mapTile(gameWorld.map, map_coord(x), map_coord(y))) != TER_WATER)
+	{
+		order = DORDER_DISEMBARK;
+	}
 	// and now we want Transporters to fly! - in multiPlayer!!
-	if (psDroid->isTransporter() && game.type == LEVEL_TYPE::SKIRMISH)
+	else if (psDroid->isTransporter() && game.type == LEVEL_TYPE::SKIRMISH)
 	{
 		/* in MultiPlayer - if ALT-key is pressed then need to get the Transporter
 		 * to fly to location and all units disembark */

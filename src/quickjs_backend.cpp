@@ -1533,7 +1533,7 @@ JSValue convDroid(const DROID *psDroid, JSContext *ctx)
 	QuickJS_DefinePropertyValue(ctx, value, "bodySize", JS_NewInt32(ctx, psBodyStats->size), JS_PROP_ENUMERABLE);
 	if (psDroid->isTransporter())
 	{
-		QuickJS_DefinePropertyValue(ctx, value, "cargoCapacity", JS_NewInt32(ctx, TRANSPORTER_CAPACITY), JS_PROP_ENUMERABLE);
+		QuickJS_DefinePropertyValue(ctx, value, "cargoCapacity", JS_NewInt32(ctx, transporterCapacity(psDroid)), JS_PROP_ENUMERABLE);
 		QuickJS_DefinePropertyValue(ctx, value, "cargoLeft", JS_NewInt32(ctx, calcRemainingCapacity(psDroid)), JS_PROP_ENUMERABLE);
 		QuickJS_DefinePropertyValue(ctx, value, "cargoCount", JS_NewUint32(ctx, psDroid->psGroup != nullptr? psDroid->psGroup->getNumMembers() : 0), JS_PROP_ENUMERABLE);
 	}

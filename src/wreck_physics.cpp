@@ -189,7 +189,7 @@ const iIMDBaseShape* shipHullImd(const DROID* psDroid)
 
 void droidDestroyed(const DROID* psDroid)
 {
-	if (psDroid == nullptr || psDroid->isCyborg() || psDroid->isTransporter() || psDroid->droidType == DROID_PERSON
+	if (psDroid == nullptr || psDroid->isCyborg() || psDroid->isFlightBasedTransporter() || psDroid->droidType == DROID_PERSON
 	    || !psDroid->visibleForLocalDisplay())
 	{
 		return;

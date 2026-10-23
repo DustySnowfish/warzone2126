@@ -307,7 +307,7 @@ int32_t droidDamage(GameWorld& world, DROID *psDroid, PROJECTILE *psProjectile, 
 	CHECK_DROID(psDroid);
 
 	// VTOLs (and transporters in MP) on the ground take triple damage
-	if ((psDroid->isVtol() || (psDroid->isTransporter() && bMultiPlayer)) && (psDroid->sMove.Status == MOVEINACTIVE))
+	if ((psDroid->isVtol() || (psDroid->isFlightBasedTransporter() && bMultiPlayer)) && (psDroid->sMove.Status == MOVEINACTIVE))
 	{
 		damage *= 3;
 	}
@@ -1975,8 +1975,8 @@ DROID *reallyBuildDroid(GameWorld& world, const DROID_TEMPLATE *pTemplate, Posit
 		visTilesUpdate(&droid, world.map);
 	}
 
-	/* transporter-specific stuff */
-	if (droid.isTransporter())
+	/* transporter-specific stuff (Warzone 2126: not for landing craft, which sail) */
+	if (droid.isFlightBasedTransporter())
 	{
 		//add transporter launch button if selected player and not a reinforcable situation
 		if (player == selectedPlayer && !missionCanReEnforce())
@@ -3143,6 +3143,11 @@ bool DROID::isTransporter() const
 bool isTransporter(DROID_TEMPLATE const *psTemplate)
 {
 	return isTransporter(psTemplate->droidType);
+}
+
+bool DROID::isLandingCraft() const
+{
+	return isTransporter() && getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR;
 }
 
 bool DROID::isFlightBasedTransporter() const

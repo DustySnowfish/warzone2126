@@ -1911,7 +1911,8 @@ void unloadTransporter(DROID *psTransporter, UDWORD x, UDWORD y)
 			//starting point...based around the value passed in
 			droidX = map_coord(x);
 			droidY = map_coord(y);
-			if (!pickATileGen(gameWorld, &droidX, &droidY, LOOK_FOR_EMPTY_TILE, zonedPAT))
+			// Warzone 2126: a landing craft puts its units on the beach next to it, not anywhere
+			if (!pickATileGen(gameWorld, &droidX, &droidY, psTransporter->isLandingCraft() ? 4 : LOOK_FOR_EMPTY_TILE, zonedPAT))
 			{
 				if (!bMultiPlayer)
 				{
@@ -1954,6 +1955,11 @@ void unloadTransporter(DROID *psTransporter, UDWORD x, UDWORD y)
 			}
 
 			disembarkedDroids.push_back(psDroid);
+		}
+
+		if (psTransporter->isLandingCraft() && disembarkedDroids.empty() && psTransporter->player == selectedPlayer)
+		{
+			addConsoleMessage(_("No beach in reach: take the landing craft closer to the shore."), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
 		}
 
 		if (!bMultiPlayer || !disembarkedDroids.empty())
