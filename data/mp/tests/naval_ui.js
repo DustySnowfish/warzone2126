@@ -37,6 +37,7 @@ function eventStartLevel()
 	completeResearch("R-Vehicle-Prop-NavalScrew", 0, true);
 	completeResearch("R-Vehicle-Body-NavalFrigate", 0, true);
 	completeResearch("R-Vehicle-Prop-NavalJet", 0, true);
+	completeResearch("R-Vehicle-Body-NavalLanding", 0, true);
 	var s = startPositions[0];
 	var w = findWaterNear(s.x, s.y);
 	if (w)

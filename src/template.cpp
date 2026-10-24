@@ -1037,7 +1037,8 @@ std::vector<DROID_TEMPLATE *> fillTemplateList(STRUCTURE *psFactory)
 		}
 
 		//check the factory can cope with this sized body
-		if (psCurr->getBodyStats()->size <= iCapacity)
+		// (Warzone 2126: a Shipyard builds every ship hull; its modules only speed it up)
+		if (psCurr->getBodyStats()->size <= iCapacity || psFactory->pStructureType->isShipyard)
 		{
 			pList.push_back(psCurr);
 		}
