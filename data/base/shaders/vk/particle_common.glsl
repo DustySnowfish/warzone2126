@@ -12,6 +12,7 @@ vec3 wzParticleCorner(vec2 corner, vec4 positionSize, vec4 params, vec4 velocity
 	vec3 axisX = right;
 	vec3 axisY = up;
 	float lengthScale = 1.0;
+	vec3 shift = vec3(0.0);
 	if (params.w > 1.5)
 	{
 		// Lies flat on the ground (render y is up), turned by its rotation
@@ -28,7 +29,9 @@ vec3 wzParticleCorner(vec2 corner, vec4 positionSize, vec4 params, vec4 velocity
 		{
 			axisX = v / vl;
 			axisY = normalize(cross(forward, axisX));
-			lengthScale = 1.0 + params.z * vl;
+			lengthScale = min(1.0 + params.z * vl, 5.0); // (Warzone 2126: capped, long streaks read as lines at odd angles)
+			// The spark is at the head of its streak, which trails behind it
+			shift = -axisX * (size * (lengthScale - 1.0) * 0.5);
 		}
 	}
 	else
@@ -38,7 +41,7 @@ vec3 wzParticleCorner(vec2 corner, vec4 positionSize, vec4 params, vec4 velocity
 		axisX = right * c + up * s;
 		axisY = up * c - right * s;
 	}
-	return positionSize.xyz + axisX * (corner.x * size * lengthScale) + axisY * (corner.y * size);
+	return positionSize.xyz + shift + axisX * (corner.x * size * lengthScale) + axisY * (corner.y * size);
 }
 
 vec2 wzParticleUV(vec2 corner, float frame, vec2 atlasSize)

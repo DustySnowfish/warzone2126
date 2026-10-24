@@ -1184,18 +1184,36 @@ void WzMultiLobbyOptionsImpl::initialize(bool _isChallenge, const std::shared_pt
 
 	// Random map settings (Warzone 2126): landscape, sliders and the shareable map code
 	randomMapChoice = std::make_shared<LobbyMultiOptionsChoiceWidget>(matchOptionsEditMode);
-	randomMapChoice->setLabel(_("Random map"));
+	randomMapChoice->setLabel(_("Map generator"));
 	{
 		const int bw = iV_GetImageWidth(FrontImages, IMAGE_POWLO);
 		const int bh = iV_GetImageHeight(FrontImages, IMAGE_POWLO);
 		randomMapButton = std::make_shared<WzLobbyTextOptionButton>();
-		randomMapButton->setLabelText(_("Settings"));
-		randomMapButton->setTip(_("Landscape, water, height, cliffs, oil, trees and feature size, and the map code to share this map"));
+		const bool onRandomMap = randomMapIdentity2126(game.map, game.maxPlayers).has_value();
+		randomMapButton->setLabelText(onRandomMap ? _("Settings") : _("Generate"));
+		randomMapButton->setTip(_("Generate a random map: players, tileset, size, landscape, water, height, cliffs, oil, trees and feature size, and a map code to share it"));
 		randomMapButton->setGeometry(0, 0, bw * 3 + 8, bh);
 		randomMapChoice->addButton(0, randomMapButton);
 		randomMapButton->addOnClickHandler([psWeakMultiLobbyOptions](W_BUTTON& button) {
 			auto strongOptions = psWeakMultiLobbyOptions.lock();
 			ASSERT_OR_RETURN(, strongOptions != nullptr, "No options form?");
+			// Not on a Random map yet: switch to one for (at least) this many players first, so the
+			// generator's settings apply straight away
+			if (!randomMapIdentity2126(game.map, game.maxPlayers).has_value() && ingame.side == InGameSide::HOST_OR_SINGLEPLAYER)
+			{
+				RandomMapIdentity2126 target;
+				target.tileset = 'A';
+				target.players = 15;
+				for (int n : { 2, 4, 8, 10, 15 })
+				{
+					if (n >= game.maxPlayers)
+					{
+						target.players = n;
+						break;
+					}
+				}
+				lobbySwitchRandomMap2126(randomMapLevelName2126(target));
+			}
 			strongOptions->displayRandomMapSettings2126(button.shared_from_this());
 		});
 	}
@@ -1361,6 +1379,10 @@ void WzMultiLobbyOptionsImpl::refreshData()
 		buttonUpdateFunc();
 	}
 	setShowTotalOptionVotesImpl(getShowTotalOptionVotes());
+	if (randomMapButton)
+	{
+		randomMapButton->setLabelText(randomMapIdentity2126(game.map, game.maxPlayers).has_value() ? _("Settings") : _("Generate"));
+	}
 
 	// update limit icons
 	limitIconsWidget->clearButtons();

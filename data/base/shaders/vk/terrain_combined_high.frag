@@ -112,7 +112,9 @@ vec4 doBumpMapping(BumpData b, vec3 groundLightDir, vec3 groundHalfVec) {
 	vec3 c = normalize(cameraPos.xyz);
 	float inscatter = 0.007; // in-scattering
 	float extinction = 0.001; // extinction
-	float murkyFactor = exp(-c.y * extinction) * (1.0 - exp( -(frag.posModelSpace.y+40.0) * c2p.y * extinction)) / (-c2p.y * extinction);
+	// (Warzone 2126: the denominator is kept away from zero; a view ray exactly level with the ground divided 0 by 0)
+	float c2pY = (c2p.y < 0.0) ? min(c2p.y, -1e-4) : max(c2p.y, 1e-4);
+	float murkyFactor = exp(-c.y * extinction) * (1.0 - exp( -(frag.posModelSpace.y+40.0) * c2pY * extinction)) / (-c2pY * extinction);
 	float murkiness = inscatter * murkyFactor;
 	float waterDeep = 0.003 * murkyFactor;
 	murkiness = clamp(murkiness, 0.0, 1.0);

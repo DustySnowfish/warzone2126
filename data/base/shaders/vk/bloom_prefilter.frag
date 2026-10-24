@@ -15,7 +15,10 @@ layout(location = 0) out vec4 FragColor;
 vec3 fetchBright(vec2 uv)
 {
 	uv = clamp(uv, vec2(0.0), uvScaleClamp.zw);
-	return wzBloomBrightPass(wzHdrDecode(texture(sceneTexture, uv).rgb), params.x, params.y);
+	vec3 c = texture(sceneTexture, uv).rgb;
+	// Warzone 2126: a stray NaN or infinity would otherwise smear into a black square across the bloom chain
+	c = (any(isnan(c)) || any(isinf(c))) ? vec3(0.0) : c;
+	return wzBloomBrightPass(wzHdrDecode(c), params.x, params.y);
 }
 
 void main()

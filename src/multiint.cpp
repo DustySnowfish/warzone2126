@@ -7108,8 +7108,8 @@ void calcBackdropLayoutForMultiplayerOptionsTitleUI(WIDGET *psWidget)
 # pragma GCC diagnostic ignored "-Wstringop-overflow" // Ignore on GCC 12+`
 #endif
 
-/// Warzone 2126: switch to another Random map with the same number of slots (the tileset choice in
-/// Random map settings), keeping the seed and settings. Host only.
+/// Warzone 2126: switch to another Random map (another tileset or number of players), keeping
+/// the seed and settings. Host only. Online, the number of slots can only grow.
 bool lobbySwitchRandomMap2126(const std::string &levelName)
 {
 	if (ingame.side != InGameSide::HOST_OR_SINGLEPLAYER)
@@ -7118,19 +7118,41 @@ bool lobbySwitchRandomMap2126(const std::string &levelName)
 	}
 	Sha256 mapHash = levGetMapNameHash(levelName.c_str());
 	LEVEL_DATASET *mapData = levFindDataSet(levelName.c_str(), &mapHash);
-	if (mapData == nullptr || mapData->players != game.maxPlayers)
+	if (mapData == nullptr)
 	{
 		return false;
 	}
-	if (NetPlay.bComms && NetPlay.isHost && !canChangeMapOrRandomize())
+	if (NetPlay.bComms && NetPlay.isHost)
 	{
-		return false;
+		if (NET_numHumanPlayers() > mapData->players || mapData->players < game.maxPlayers || !canChangeMapOrRandomize())
+		{
+			return false;
+		}
 	}
+	const bool slotsChange = mapData->players != game.maxPlayers;
+	const uint8_t oldMaxPlayers = game.maxPlayers;
 	const RandomMapSettings2126 keep = game.randomMap;
 	updateMapSettings(mapData);
 	game.randomMap = keep;
 	requestMapPreviewLoad(false);
-	// (The player settings stay: same number of slots, and the Random maps carry no player setup)
+	if (slotsChange)
+	{
+		// A different number of players: set the slots up as choosing the map from the list would
+		loadMapChallengeAndPlayerSettings();
+		game.randomMap = keep;
+		if (NetPlay.isHost && NetPlay.bComms && oldMaxPlayers > game.maxPlayers)
+		{
+			resetPlayerPositions();
+			repositionHumanSlots();
+			const std::vector<uint8_t>& humans = NET_getHumanPlayers();
+			size_t playerInc = 0;
+			for (uint8_t slotInc = 0; slotInc < game.maxPlayers && playerInc < humans.size(); ++slotInc)
+			{
+				changePosition(humans[playerInc], slotInc, realSelectedPlayer);
+				++playerInc;
+			}
+		}
+	}
 	debug(LOG_INFO, "Switching map: %s", mapData->pName.c_str());
 	if (auto titleUI = currentMultiOptionsTitleUI.lock())
 	{

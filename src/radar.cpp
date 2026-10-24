@@ -61,6 +61,8 @@
 
 #define HIT_NOTIFICATION	(GAME_TICKS_PER_SEC * 2)
 #define RADAR_FRAME_SKIP	10
+#define RADAR_TILE_SLICES	8      ///< Warzone 2126: frames over which the terrain is redrawn
+#define RADAR_REFRESH_MS	100    ///< Warzone 2126: minimum real time between minimap refreshes
 
 static void applyMinimapOverlay();
 
@@ -199,7 +201,7 @@ PIELIGHT inline applyAlpha(PIELIGHT color, float alpha)
 	return ret;
 }
 
-static void DrawRadarTiles(WorldMapState& mapState);
+static void DrawRadarTiles(WorldMapState& mapState, int rowBegin, int rowEnd);
 static void DrawRadarObjects(GameWorld& world);
 static void DrawRadarExtras(const glm::mat4 &modelViewProjectionMatrix);
 static void DrawNorth(const glm::mat4 &modelViewProjectionMatrix);
@@ -374,15 +376,38 @@ void drawRadar(GameWorld& world)
 	setViewingWindow(world.map);
 	playerpos = playerPos.p; // cache position
 
-	if (frameSkip <= 0)
+	// Warzone 2126: the terrain is redrawn a slice of rows per frame, and the minimap is refreshed
+	// (units, overlay, texture upload) when a whole pass is done, at most ten times a second. Drawing
+	// it all in one frame every 10 frames cost a 512 x 512 map about 8 ms every tenth frame (the
+	// worst-1% frame times in the big-map benchmark).
 	{
-		DrawRadarTiles(world.map);
-		DrawRadarObjects(world);
-		applyMinimapOverlay();
-		pie_DownLoadRadar(radarBitmap);
-		frameSkip = RADAR_FRAME_SKIP;
+		static int sliceRow = 0;
+		static uint32_t lastRefresh = 0;
+		const int rows = std::max(1, world.map.scroll.maxY - world.map.scroll.minY);
+		const int sliceRows = std::max(16, rows / RADAR_TILE_SLICES);
+		if (frameSkip <= 0)
+		{
+			// first draw (or reset): the whole map at once
+			DrawRadarTiles(world.map, world.map.scroll.minY, world.map.scroll.maxY);
+			sliceRow = rows;
+			frameSkip = 1;
+		}
+		else if (sliceRow < rows)
+		{
+			const int from = world.map.scroll.minY + sliceRow;
+			const int to = std::min(world.map.scroll.maxY, from + sliceRows);
+			DrawRadarTiles(world.map, from, to);
+			sliceRow += sliceRows;
+		}
+		if (sliceRow >= rows && realTime - lastRefresh >= RADAR_REFRESH_MS)
+		{
+			DrawRadarObjects(world);
+			applyMinimapOverlay();
+			pie_DownLoadRadar(radarBitmap);
+			lastRefresh = realTime;
+			sliceRow = 0;
+		}
 	}
-	frameSkip--;
 	glm::mat4 radarMatrix = glm::translate(glm::vec3(radarCenterX, radarCenterY, 0));
 	glm::mat4 orthoMatrix = glm::ortho(0.f, static_cast<float>(pie_GetVideoBufferWidth()), static_cast<float>(pie_GetVideoBufferHeight()), 0.f);
 	if (rotateRadar)
@@ -495,15 +520,16 @@ static PIELIGHT inline appliedRadarColour(RADAR_DRAW_MODE drawMode, MAPTILE *WTi
 }
 
 /** Draw the map tiles on the radar. */
-static void DrawRadarTiles(WorldMapState& mapState)
+static void DrawRadarTiles(WorldMapState& mapState, int rowBegin, int rowEnd)
 {
 	SDWORD	x, y;
 	size_t radarBufferSize2 = radarBitmap.size_in_bytes();
 	unsigned char* pRaderBuffer = radarBitmap.bmp_w();
 
-	for (x = mapState.scroll.minX; x < mapState.scroll.maxX; x++)
+	// (rows outer: the buffer and the map are both row-major)
+	for (y = std::max(rowBegin, mapState.scroll.minY); y < std::min(rowEnd, mapState.scroll.maxY); y++)
 	{
-		for (y = mapState.scroll.minY; y < mapState.scroll.maxY; y++)
+		for (x = mapState.scroll.minX; x < mapState.scroll.maxX; x++)
 		{
 			MAPTILE	*psTile = mapTile(mapState, x, y);
 			size_t pixelStartPos = (radarTexWidth * (y - mapState.scroll.minY) + (x - mapState.scroll.minX)) * 4;

@@ -1328,7 +1328,7 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 			}
 
 			// Warzone 2126 particle impact (display only)
-			particles::weaponImpact(psStats, Vector3f(psObj->pos.x, psObj->pos.y, psObj->pos.z), particles::ImpactKind::Hit);
+			particles::weaponImpact(psStats, Vector3f(psObj->pos.x, psObj->pos.y, psObj->pos.z), particles::ImpactKind::Hit, Vector3f(psObj->dst - psObj->src));
 			if (!particles::replacesClassicImpact(psStats))
 			{
 				addMultiEffect(&position, &scatter, EFFECT_EXPLOSION, facing, true, (imd) ? imd->displayModel() : nullptr, psStats->numExplosions, psStats->lightWorld, psStats->effectSize, psObj->time);

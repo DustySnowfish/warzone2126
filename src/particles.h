@@ -74,7 +74,9 @@ enum class ImpactKind { Hit, Miss, Water };
 /// "propulsion" block of weapon_vfx.json (wheeled, tracked, half-tracked, hover, legged).
 /// Emits dust (or spray over water) behind it while it moves.
 void vehicleMoving(uint32_t id, const char* propulsion, const Vector3f& position, float speed, bool overWater, float scale = 1.f);
-void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind);
+/// travel: the direction the shot was going (map coordinates); hit sparks glance back off the
+/// target, away from it and up
+void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind, const Vector3f& travel = Vector3f(0.f, 0.f, 0.f));
 
 /// True when a weapon has effects that replace its classic sprite effect for this event.
 bool replacesClassicMuzzle(const WEAPON_STATS* weapon);

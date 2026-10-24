@@ -40,8 +40,12 @@ namespace terrainSurface
 // Sharpness fade for steep non-cliff steps, in height units (TILE_MAX_HEIGHT = 510):
 // corner-height deltas up to SHARPNESS_DELTA_SMOOTH stay fully smooth, deltas of
 // SHARPNESS_DELTA_SHARP and above stay on the legacy linear geometry. Tunable.
-static constexpr float SHARPNESS_DELTA_SMOOTH = 48.f;
-static constexpr float SHARPNESS_DELTA_SHARP = 128.f;
+// (Warzone 2126: raised from 48 / 128. The random maps' hills are steeper than the classic maps',
+// and at the old values most hillsides kept the faceted legacy geometry, which testers found blocky.)
+static constexpr float SHARPNESS_DELTA_SMOOTH = 144.f;
+static constexpr float SHARPNESS_DELTA_SHARP = 384.f;
+// Cliff corners: partly smoothed, so cliff faces keep their edge without looking low-poly
+static constexpr float CLIFF_SHARPNESS = 0.55f;
 
 float cornerHeight(const WorldMapState& mapState, int x, int y, HeightMode mode)
 {
@@ -68,7 +72,7 @@ static float computeCornerSharpness(const WorldMapState& mapState, int x, int y)
 		{
 			if (tileOnMap(mapState, x + dx, y + dy) && terrainType(mapTile(mapState, x + dx, y + dy)) == TER_CLIFFFACE)
 			{
-				return 1.f;
+				return CLIFF_SHARPNESS;
 			}
 		}
 	}

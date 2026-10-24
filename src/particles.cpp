@@ -988,7 +988,7 @@ void weaponTrail(const WEAPON_STATS* weapon, uint32_t id, const Vector3f& positi
 	t.seenFrame = s.frameCounter;
 }
 
-void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind)
+void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind, const Vector3f& travel)
 {
 	const WeaponVfx* vfx = weaponVfx(weapon);
 	if (vfx == nullptr)
@@ -996,7 +996,19 @@ void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKi
 		return;
 	}
 	const std::string& name = kind == ImpactKind::Hit ? vfx->hit : kind == ImpactKind::Water && !vfx->water.empty() ? vfx->water : vfx->miss;
-	spawnNamed(name, toRender(position), glm::vec3(0.f, 1.f, 0.f), vfx->scale);
+	glm::vec3 axis(0.f, 1.f, 0.f);
+	glm::vec3 at = toRender(position);
+	// Map (x, y, height) to render (x, height, -y)
+	const glm::vec3 dir(travel.x, travel.z, -travel.y);
+	const float len = glm::length(dir);
+	if (kind == ImpactKind::Hit && len > 1e-3f)
+	{
+		// Sparks glance off the armour back towards the shooter and upwards, from the face the shot struck
+		const glm::vec3 back = -dir / len;
+		axis = glm::normalize(glm::vec3(back.x, std::max(back.y, 0.f) + 0.75f, back.z));
+		at += back * 12.f;
+	}
+	spawnNamed(name, at, axis, vfx->scale);
 }
 
 bool replacesClassicMuzzle(const WEAPON_STATS* weapon)

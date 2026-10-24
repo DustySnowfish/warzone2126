@@ -122,6 +122,7 @@ void fillDropdown(DropdownWidget &dropdown, const std::vector<std::string> &item
 }
 
 const char kTilesetLetters[] = { 'A', 'U', 'R' };
+const std::array<int, 5> kPlayerChoices = { 2, 4, 8, 10, 15 };
 
 std::shared_ptr<W_LABEL> makeLabel(const WzString &text, iV_fonts font, PIELIGHT colour)
 {
@@ -219,6 +220,55 @@ public:
 			});
 		});
 		tilesetDropdown->setTip(_("The ground, plants and buildings. The size and number of players stay the same."));
+
+		// Players: switches to the Random map with that many slots
+		playersLabel = makeLabel(_("Players"), font_regular, hud2126::text());
+		attach(playersLabel);
+		playersDropdown = std::make_shared<DropdownWidget>();
+		attach(playersDropdown);
+		playersDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
+		{
+			std::vector<std::string> names;
+			for (int n : kPlayerChoices)
+			{
+				names.push_back(astringf(_("%d players"), n));
+			}
+			fillDropdown(*playersDropdown, names);
+		}
+		playersDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
+		playersDropdown->setOnChange([weakSelf](DropdownWidget &dropdown) {
+			auto self = weakSelf.lock();
+			auto index = dropdown.getSelectedIndex();
+			if (!self || !index.has_value() || index.value() >= kPlayerChoices.size() || !canEdit())
+			{
+				return;
+			}
+			auto identity = randomMapIdentity2126(game.map, game.maxPlayers);
+			RandomMapIdentity2126 target;
+			target.tileset = identity.has_value() ? identity->tileset : 'A';
+			target.players = kPlayerChoices[index.value()];
+			if (identity.has_value() && identity->players == target.players)
+			{
+				return;
+			}
+			widgScheduleTask([weakSelf, target]() {
+				auto strongSelf = weakSelf.lock();
+				const bool ok = lobbySwitchRandomMap2126(randomMapLevelName2126(target));
+				if (strongSelf)
+				{
+					if (!ok)
+					{
+						strongSelf->setMessage(_("The number of players cannot be changed now"), true);
+					}
+					strongSelf->syncFromGame(true);
+					if (ok && strongSelf->onChanged)
+					{
+						strongSelf->onChanged();
+					}
+				}
+			});
+		});
+		playersDropdown->setTip(_("How many players the map is made for. Online, it can only go up."));
 
 		// Map size (choices depend on the number of players; filled in syncFromGame)
 		sizeLabel = makeLabel(_("Map size"), font_regular, hud2126::text());
@@ -387,7 +437,7 @@ public:
 	int32_t idealWidth() override { return kPanelW; }
 	int32_t idealHeight() override
 	{
-		return kPad + 22 + 18 + 10 + kRowH * (4 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + kPad;
+		return kPad + 22 + 18 + 10 + kRowH * (5 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + kPad;
 	}
 
 	void geometryChanged() override
@@ -404,7 +454,7 @@ public:
 		styleDropdown->setGeometry(controlX, y, controlW, kControlH);
 		y += kRowH;
 		const std::pair<std::shared_ptr<W_LABEL>, std::shared_ptr<DropdownWidget>> extraRows[] = {
-			{ tilesetLabel, tilesetDropdown }, { sizeLabel, sizeDropdown }, { terrainLabel, terrainDropdown } };
+			{ tilesetLabel, tilesetDropdown }, { playersLabel, playersDropdown }, { sizeLabel, sizeDropdown }, { terrainLabel, terrainDropdown } };
 		for (const auto &row : extraRows)
 		{
 			row.first->setGeometry(kPad, y + (kControlH - row.first->height()) / 2, kLabelW, row.first->height());
@@ -448,7 +498,7 @@ public:
 		pie_UniTransBoxFill(x0, y0, x0 + width(), y0 + height(), pal_RGBA(14, 19, 24, 245));
 		iV_Box(x0, y0, x0 + width() - 1, y0 + height() - 1, hud2126::accent());
 		// The dropdowns' boxes and arrows (the dropdown itself only draws its items)
-		for (const auto &dropdown : { styleDropdown, tilesetDropdown, sizeDropdown, terrainDropdown })
+		for (const auto &dropdown : { styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown })
 		{
 			const int dx0 = x0 + dropdown->x(), dy0 = y0 + dropdown->y();
 			const int dx1 = dx0 + dropdown->width(), dy1 = dy0 + dropdown->height();
@@ -580,6 +630,13 @@ private:
 					tilesetDropdown->setSelectedIndex(t);
 				}
 			}
+			for (size_t k = 0; k < kPlayerChoices.size(); ++k)
+			{
+				if (kPlayerChoices[k] == currentIdentity->players && playersDropdown->getSelectedIndex().value_or(99) != k)
+				{
+					playersDropdown->setSelectedIndex(k);
+				}
+			}
 			// Size choices for this number of players
 			if (sizeForPlayers != currentIdentity->players)
 			{
@@ -630,8 +687,8 @@ private:
 
 	std::function<void()> onChanged;
 	std::shared_ptr<W_LABEL> title, subtitle, styleLabel, codeLabel, message;
-	std::shared_ptr<DropdownWidget> styleDropdown, tilesetDropdown, sizeDropdown, terrainDropdown;
-	std::shared_ptr<W_LABEL> tilesetLabel, sizeLabel, terrainLabel;
+	std::shared_ptr<DropdownWidget> styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown;
+	std::shared_ptr<W_LABEL> tilesetLabel, playersLabel, sizeLabel, terrainLabel;
 	std::vector<int> sizeValues;
 	int sizeForPlayers = -1;
 	std::array<std::shared_ptr<W_LABEL>, RandomMapSettings2126::SLIDER_COUNT> sliderLabels;

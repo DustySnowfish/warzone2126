@@ -36,7 +36,7 @@
 	"bullet_hit": {
 		"layers": [
 			{"texture": "core", "blend": "additive", "count": 1, "life": [40, 70], "size": [24.0, 12.0], "speed": 0, "colour": [{"rgb": [1.0, 0.85, 0.6], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.5, 0.2], "intensity": 1, "alpha": 0}]},
-			{"texture": "spark", "blend": "additive", "count": [6, 12], "life": [120, 300], "size": [12.0, 6.0], "speed": [200, 500], "direction": "hemisphere", "stretch": 2.4, "gravity": 700, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 4, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]}
+			{"texture": "spark", "blend": "additive", "count": [6, 12], "life": [120, 260], "size": [10.0, 5.0], "speed": [180, 420], "direction": "emitter", "spread": 50, "stretch": 1.2, "gravity": 700, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 4, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]}
 		]
 	},
 	"bullet_dirt": {
@@ -49,7 +49,7 @@
 		"layers": [
 			{"texture": "core", "blend": "additive", "count": 1, "life": [62, 91], "size": [38.7, 17.6], "speed": 0, "colour": [{"rgb": [1.0, 0.9, 0.7], "intensity": 3.6, "alpha": 1}, {"rgb": [1.0, 0.5, 0.15], "intensity": 0.9, "alpha": 0}]},
 			{"texture": "fire", "blend": "alpha", "lit": false, "count": [10, 14], "life": [200, 380], "size": [24.0, 51.0], "speed": [16.0, 121.00000000000001], "direction": "hemisphere", "drag": 4, "rise": 32.0, "spin": [20, 90], "colour": [{"rgb": [1.0, 0.82, 0.45], "intensity": 3.0, "alpha": 0.95}, {"t": 0.3, "rgb": [1.0, 0.5, 0.15], "intensity": 2.0, "alpha": 0.85}, {"t": 0.65, "rgb": [0.45, 0.2, 0.08], "intensity": 1.0, "alpha": 0.6}, {"rgb": [0.2, 0.15, 0.12], "intensity": 1.0, "alpha": 0.0}], "offset": 18, "sizeJitter": 0.45},
-			{"texture": "spark", "blend": "additive", "count": [12, 21], "life": [200, 500], "size": [15.0, 6.0], "speed": [250, 650], "direction": "hemisphere", "stretch": 2.4, "gravity": 800, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [12, 21], "life": [180, 420], "size": [13.0, 6.0], "speed": [220, 560], "direction": "emitter", "spread": 55, "stretch": 1.2, "gravity": 800, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
 			{"texture": "smoke", "blend": "alpha", "count": [3, 5], "life": [1500, 2600], "size": [48.0, 160.0], "speed": [20, 60], "direction": "hemisphere", "rise": 30, "drag": 1.5, "offset": 8, "spin": [5, 25], "colour": [{"rgb": [0.4, 0.37, 0.34], "alpha": 0.0}, {"t": 0.1, "rgb": [0.4, 0.37, 0.34], "alpha": 0.84}, {"rgb": [0.55, 0.52, 0.5], "alpha": 0}]},
 			{"texture": "debris", "blend": "alpha", "count": [3, 6], "life": [1600, 2600], "size": [8.0, 8.0], "speed": [200, 420], "direction": "up", "spread": 55, "gravity": 1000, "spin": [180, 720], "colour": [{"rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"t": 0.88, "rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"rgb": [0.2, 0.19, 0.18], "alpha": 0}], "bounce": 0.35},
 			{"texture": "dust", "blend": "alpha", "lit": true, "count": [4, 6], "life": [900, 1600], "size": [18.0, 78.0], "speed": [138.0, 349.6], "direction": "up", "spread": 30, "gravity": 380, "drag": 1.4, "offset": 12, "spin": [10, 40], "colour": [{"rgb": [0.36, 0.28, 0.2], "alpha": 0.0}, {"t": 0.08, "rgb": [0.36, 0.28, 0.2], "alpha": 0.8}, {"rgb": [0.45, 0.38, 0.3], "alpha": 0.0}]}
@@ -169,6 +169,18 @@
 			{"texture": "dust", "blend": "alpha", "count": 2, "life": [600, 1000], "size": [30, 140], "speed": [60, 120], "direction": "sphere", "rise": 6, "drag": 3, "offset": 16, "spin": [10, 40], "colour": [{"rgb": [0.72, 0.58, 0.45], "alpha": 0}, {"t": 0.15, "rgb": [0.72, 0.58, 0.45], "alpha": 0.3}, {"rgb": [0.75, 0.63, 0.52], "alpha": 0}]}
 		]
 	},
+	"earthwork_dust": {
+		"layers": [
+			{"texture": "dust", "blend": "alpha", "lit": true, "count": [2, 3], "life": [1400, 2400], "size": [40, 190], "speed": [30, 90], "direction": "hemisphere", "rise": 40, "drag": 1.8, "offset": 30, "spin": [5, 25], "colour": [{"rgb": [0.66, 0.53, 0.4], "alpha": 0}, {"t": 0.12, "rgb": [0.66, 0.53, 0.4], "alpha": 0.6}, {"rgb": [0.72, 0.6, 0.48], "alpha": 0}]},
+			{"texture": "debris", "blend": "alpha", "lit": true, "count": [1, 3], "life": [500, 900], "size": [6, 5], "speed": [90, 200], "direction": "up", "spread": 40, "gravity": 900, "bounce": 0.2, "colour": [{"rgb": [0.32, 0.25, 0.18], "alpha": 1}, {"t": 0.85, "rgb": [0.32, 0.25, 0.18], "alpha": 1}, {"rgb": [0.32, 0.25, 0.18], "alpha": 0}]}
+		]
+	},
+	"earthwork_dig": {
+		"layers": [
+			{"texture": "dust", "blend": "alpha", "lit": true, "count": [1, 2], "life": [1200, 2000], "size": [36, 160], "speed": [20, 70], "direction": "hemisphere", "rise": 30, "drag": 2, "offset": 30, "spin": [5, 25], "colour": [{"rgb": [0.55, 0.43, 0.32], "alpha": 0}, {"t": 0.12, "rgb": [0.55, 0.43, 0.32], "alpha": 0.55}, {"rgb": [0.62, 0.52, 0.42], "alpha": 0}]},
+			{"texture": "debris", "blend": "alpha", "lit": true, "count": [2, 4], "life": [500, 900], "size": [6, 5], "speed": [120, 260], "direction": "up", "spread": 50, "gravity": 900, "bounce": 0.2, "colour": [{"rgb": [0.28, 0.21, 0.15], "alpha": 1}, {"t": 0.85, "rgb": [0.28, 0.21, 0.15], "alpha": 1}, {"rgb": [0.28, 0.21, 0.15], "alpha": 0}]}
+		]
+	},
 	"wake_ship": {
 		"layers": [
 			{"texture": "dust", "blend": "alpha", "orient": "ground", "lit": true, "count": 1, "life": [5000, 7000], "size": [44, 170], "speed": 0, "rotation": [0, 360], "colour": [{"rgb": [0.92, 0.95, 0.97], "alpha": 0}, {"t": 0.05, "rgb": [0.92, 0.95, 0.97], "alpha": 0.55}, {"t": 0.5, "rgb": [0.88, 0.92, 0.95], "alpha": 0.28}, {"rgb": [0.85, 0.9, 0.93], "alpha": 0}]},
@@ -192,7 +204,7 @@
 		"layers": [
 			{"texture": "core", "blend": "additive", "count": 1, "life": [62, 91], "size": [44.0, 20.0], "speed": 0, "colour": [{"rgb": [1.0, 0.9, 0.7], "intensity": 4.0, "alpha": 1}, {"rgb": [1.0, 0.5, 0.15], "intensity": 1.0, "alpha": 0}]},
 			{"texture": "fire", "blend": "alpha", "lit": false, "count": [10, 14], "life": [200, 380], "size": [24.0, 51.0], "speed": [16.0, 121.00000000000001], "direction": "hemisphere", "drag": 4, "rise": 32.0, "spin": [20, 90], "colour": [{"rgb": [1.0, 0.82, 0.45], "intensity": 3.0, "alpha": 0.95}, {"t": 0.3, "rgb": [1.0, 0.5, 0.15], "intensity": 2.0, "alpha": 0.85}, {"t": 0.65, "rgb": [0.45, 0.2, 0.08], "intensity": 1.0, "alpha": 0.6}, {"rgb": [0.2, 0.15, 0.12], "intensity": 1.0, "alpha": 0.0}], "offset": 18, "sizeJitter": 0.45},
-			{"texture": "spark", "blend": "additive", "count": [12, 21], "life": [200, 500], "size": [15.0, 6.0], "speed": [250, 650], "direction": "hemisphere", "stretch": 2.4, "gravity": 800, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [12, 21], "life": [180, 420], "size": [13.0, 6.0], "speed": [220, 560], "direction": "emitter", "spread": 55, "stretch": 1.2, "gravity": 800, "drag": 1, "colour": [{"rgb": [1.0, 0.85, 0.5], "intensity": 5, "alpha": 1}, {"rgb": [1.0, 0.4, 0.1], "intensity": 1, "alpha": 0}]},
 			{"texture": "smoke", "blend": "alpha", "count": [3, 5], "life": [1500, 2600], "size": [48.0, 160.0], "speed": [20, 60], "direction": "hemisphere", "rise": 30, "drag": 1.5, "offset": 8, "spin": [5, 25], "colour": [{"rgb": [0.4, 0.37, 0.34], "alpha": 0.0}, {"t": 0.1, "rgb": [0.4, 0.37, 0.34], "alpha": 0.84}, {"rgb": [0.55, 0.52, 0.5], "alpha": 0}]},
 			{"texture": "debris", "blend": "alpha", "count": [3, 6], "life": [1600, 2600], "size": [8.0, 8.0], "speed": [200, 420], "direction": "up", "spread": 55, "gravity": 1000, "spin": [180, 720], "colour": [{"rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"t": 0.88, "rgb": [0.2, 0.19, 0.18], "alpha": 1}, {"rgb": [0.2, 0.19, 0.18], "alpha": 0}], "bounce": 0.35},
 			{"texture": "scorch", "blend": "alpha", "orient": "ground", "lit": false, "count": 1, "life": [25000, 35000], "size": [70, 75.60000000000001], "sizeJitter": 0.15, "speed": 0, "colour": [{"rgb": [0.05, 0.04, 0.035], "alpha": 0.8}, {"t": 0.75, "rgb": [0.06, 0.05, 0.045], "alpha": 0.68}, {"rgb": [0.07, 0.06, 0.05], "alpha": 0}]},

@@ -38,9 +38,12 @@
 #include "map.h"
 #include "stats.h"
 #include "statsdef.h"
+#include "particles.h"
+#include "wrappers.h"
 
 #include <algorithm>
 #include <cstdint>
+#include <random>
 #include <vector>
 
 namespace terrain_deform
@@ -333,6 +336,31 @@ bool earthworkStep(GameWorld& world, DROID* psDroid)
 	return earthworkApply(world, order.pos, order.pos2, static_cast<int>(order.direction));
 }
 
+/// Display only: dust and clods thrown up from a few of the ground points that just moved.
+/// Uses its own random numbers, so it cannot affect the game state.
+static void earthworkDust(const WorldMapState& map, const std::vector<Vector2i>& corners, bool lower)
+{
+	static std::minstd_rand rng(4126u);
+	if (corners.empty() || headlessGameMode())
+	{
+		return;
+	}
+	const int puffs = std::min<int>(3, 1 + static_cast<int>(corners.size()) / 12);
+	for (int i = 0; i < puffs; ++i)
+	{
+		const Vector2i c = corners[rng() % corners.size()];
+		if (!TEST_TILE_VISIBLE_TO_SELECTEDPLAYER(const_cast<MAPTILE *>(mapTile(map, std::min(c.x, map.width - 1), std::min(c.y, map.height - 1)))))
+		{
+			continue;
+		}
+		const int jx = static_cast<int>(rng() % TILE_UNITS) - TILE_UNITS / 2;
+		const int jy = static_cast<int>(rng() % TILE_UNITS) - TILE_UNITS / 2;
+		const int x = std::max(0, std::min(world_coord(c.x) + jx, world_coord(map.width) - 1));
+		const int y = std::max(0, std::min(world_coord(c.y) + jy, world_coord(map.height) - 1));
+		particles::spawn(lower ? "earthwork_dig" : "earthwork_dust", Vector3f(static_cast<float>(x), static_cast<float>(y), static_cast<float>(map_Height(map, x, y)) + 4.f), Vector3f(0.f, 0.f, 1.f), 1.f);
+	}
+}
+
 bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 {
 	const bool lower = mode == EARTHWORK_LOWER;
@@ -346,6 +374,8 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 	bool finished = true;
 	bool changed = false;
 	int64_t heightSum = 0;
+	static std::vector<Vector2i> movedCorners; // for the dust effect (display only)
+	movedCorners.clear();
 	// Level: every corner of the area moves towards the area's current average height
 	int levelTarget = 0;
 	if (level)
@@ -395,6 +425,7 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 			setTileHeight(map, tx, ty, next);
 			++s.changes;
 			changed = true;
+			movedCorners.push_back(Vector2i(tx, ty));
 			heightSum += next * (tx + 1) + ty;
 			if (next != target)
 			{
@@ -405,6 +436,7 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 	syncDebug("Earthwork (%d,%d)-(%d,%d) %s sum%d done%d", tx0, ty0, tx1, ty1, level ? "level" : lower ? "lower" : "raise", static_cast<int>(heightSum & 0x7fffffff), finished ? 1 : 0);
 	if (changed)
 	{
+		earthworkDust(map, movedCorners, lower);
 		const int cx = world_coord(tx0 + tx1) / 2;
 		const int cy = world_coord(ty0 + ty1) / 2;
 		resettleObjects(world, cx, cy, world_coord(std::max(tx1 - tx0, ty1 - ty0)) + 2 * TILE_UNITS);
