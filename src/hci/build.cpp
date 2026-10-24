@@ -605,6 +605,17 @@ public:
 		pie_BoxFill(x0, y0, x0 + w, y0 + h, highlight ? pal_RGBA(70, 70, 110, 220) : pal_RGBA(30, 30, 60, 200));
 		iV_Box(x0, y0, x0 + w - 1, y0 + h - 1, highlight ? WZCOL_WHITE : pal_RGBA(120, 120, 170, 255));
 		const PIELIGHT ground = pal_RGBA(200, 150, 90, 255);
+		if (mode == 3)
+		{
+			// Slope: low ground, a ramp, high ground, with an arrow up the ramp
+			const int lowY = y0 + h * 3 / 4, highY = y0 + h / 3;
+			const int x1 = x0 + w / 4, x2 = x0 + w * 3 / 4;
+			iV_Lines({ glm::ivec4(x0 + 3, lowY, x1, lowY), glm::ivec4(x1, lowY, x2, highY), glm::ivec4(x2, highY, x0 + w - 4, highY) }, ground);
+			const PIELIGHT violet = pal_RGBA(220, 130, 255, 255);
+			const int ax = (x1 + x2) / 2 - 2, ay = (lowY + highY) / 2 - 4;
+			iV_Lines({ glm::ivec4(ax - 4, ay + 4, ax + 3, ay - 3), glm::ivec4(ax + 3, ay - 3, ax - 1, ay - 3), glm::ivec4(ax + 3, ay - 3, ax + 3, ay + 1) }, violet);
+			return;
+		}
 		if (mode == 2)
 		{
 			// Level: a flat line with arrows pressing down and up onto it
@@ -677,13 +688,14 @@ private:
 	{
 		const int w = AtlasImage(IntImages, IMAGE_FDP_UP).width();
 		const int h = AtlasImage(IntImages, IMAGE_FDP_UP).height();
-		for (int i = 0; i < 3; ++i)
+		for (int i = 0; i < 4; ++i)
 		{
 			auto button = std::make_shared<EarthworkButton>(i);
 			attach(button);
-			// After the obsolete and favourite toggles (each one image wide), narrower so all three fit the panel
-			button->setGeometry(4 * 3 + w * 3 + 6 + i * (w - 5), STAT_SLDY, w - 7, h);
-			button->setTip(i == 1 ? _("Lower Ground: click a tile or drag an area for the selected trucks to dig ( ] )")
+			// After the obsolete and favourite toggles (each one image wide), narrower so all four fit the panel
+			button->setGeometry(4 * 3 + w * 3 + 6 + i * (w - 7), STAT_SLDY, w - 9, h);
+			button->setTip(i == 3 ? _("Slope Ground: drag from low ground to high ground (or back) for the selected trucks to cut a ramp, at least 3 tiles wide ( ' )")
+			               : i == 1 ? _("Lower Ground: click a tile or drag an area for the selected trucks to dig ( ] )")
 			               : i == 2 ? _("Level Ground: click a tile or drag an area for the selected trucks to flatten ( \\ )")
 			               : _("Raise Ground: click a tile or drag an area for the selected trucks to build up ( [ )"));
 			button->addOnClickHandler([i](W_BUTTON &) {

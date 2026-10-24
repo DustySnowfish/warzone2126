@@ -64,7 +64,11 @@ bool earthworkStep(GameWorld& world, DROID* psDroid);
 
 /// One work step on the tile rectangle with world corners a and b (no cadence check).
 /// Earthwork modes (the order's direction field): raise, lower, or level to the area's average height.
-enum EarthworkMode : int { EARTHWORK_RAISE = 0, EARTHWORK_LOWER = 1, EARTHWORK_LEVEL = 2 };
+enum EarthworkMode : int { EARTHWORK_RAISE = 0, EARTHWORK_LOWER = 1, EARTHWORK_LEVEL = 2, EARTHWORK_SLOPE = 3 };
+constexpr int kEarthworkModeCount = 4;
+/// Slope (ramp) area for an order dragged from tile a to tile b: it runs along the longer axis of the
+/// drag, from a's tile to b's, and is at least 3 tiles wide across. Tiles, inclusive.
+void earthworkSlopeArea(Vector2i aTile, Vector2i bTile, Vector2i& lo, Vector2i& hi);
 
 bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode);
 

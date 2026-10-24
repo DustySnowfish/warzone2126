@@ -5647,6 +5647,7 @@ foundDroid:
 			objTrace(psDroid->id, "weapon %d, nStat %d", j, psDroid->asWeaps[j].nStat);
 			getIniBaseObject(ini, "actionTarget/" + WzString::number(j), psDroid->psActionTarget[j]);
 		}
+		psDroid->carrierId2126 = static_cast<uint32_t>(ini.value("carrier2126", 0).toInt()); // Warzone 2126
 		if (ini.contains("baseStruct/id"))
 		{
 			int tid = ini.value("baseStruct/id", -1).toInt();
@@ -6295,6 +6296,10 @@ static nlohmann::json writeDroid(const DROID *psCurr, bool onMission, int &count
 	droidObj["action/pos"] = psCurr->actionPos;
 	droidObj["actionStarted"] = psCurr->actionStarted;
 	droidObj["actionPoints"] = psCurr->actionPoints;
+	if (psCurr->carrierId2126 != 0)
+	{
+		droidObj["carrier2126"] = psCurr->carrierId2126; // Warzone 2126
+	}
 	if (psCurr->psBaseStruct != nullptr)
 	{
 		droidObj["baseStruct/id"] = psCurr->psBaseStruct->id;

@@ -4307,9 +4307,23 @@ static void queueEarthworkPreview()
 	{
 		return;
 	}
-	// Amber raise, blue lower, green level
-	const glm::vec3 rgb = mode == 1 ? glm::vec3(0.35f, 0.7f, 1.6f) : mode == 2 ? glm::vec3(0.4f, 1.5f, 0.45f) : glm::vec3(1.6f, 0.95f, 0.25f);
+	// Amber raise, blue lower, green level, violet slope
+	const glm::vec3 rgb = mode == 1 ? glm::vec3(0.35f, 0.7f, 1.6f) : mode == 2 ? glm::vec3(0.4f, 1.5f, 0.45f) : mode == 3 ? glm::vec3(1.3f, 0.5f, 1.7f) : glm::vec3(1.6f, 0.95f, 0.25f);
 	const float pulse = 0.6f + 0.3f * std::sin(static_cast<float>(realTime) * 0.006f);
+	// Slope: a line of growing rings from the start of the drag to its end shows which way the ramp runs
+	Vector2i from, to;
+	if (mode == 3 && earthworkSlopeDrag(from, to))
+	{
+		const glm::vec2 a(static_cast<float>(world_coord(from.x) + TILE_UNITS / 2), static_cast<float>(world_coord(from.y) + TILE_UNITS / 2));
+		const glm::vec2 b(static_cast<float>(world_coord(to.x) + TILE_UNITS / 2), static_cast<float>(world_coord(to.y) + TILE_UNITS / 2));
+		const int dots = std::max(2, static_cast<int>(glm::length(b - a) / (TILE_UNITS * 0.5f)));
+		for (int i = 0; i <= dots; ++i)
+		{
+			const float t = static_cast<float>(i) / static_cast<float>(dots);
+			const glm::vec2 p = glm::mix(a, b, t);
+			particles::frameRing(Vector3f(p.x, p.y, 0.f), 22.f + 40.f * t, glm::vec3(1.8f, 1.6f, 1.9f), pulse);
+		}
+	}
 	// Corner markers on every tile corner of the area, a bigger one on the outer corners
 	for (int ty = lo.y; ty <= hi.y + 1; ++ty)
 	{

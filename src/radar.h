@@ -68,6 +68,8 @@ void radarInitVars();			///< Recalculate minimap variables. For initialization c
 
 std::shared_ptr<WIDGET> getRadarWidget();
 bool isMouseOverRadar();
+/// Warzone 2126: screen y of the top of the minimap (for panels placed above it)
+int radarTopY2126();
 bool isRadarDragging();
 
 extern PIELIGHT clanColours[];

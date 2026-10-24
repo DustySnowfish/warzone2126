@@ -96,5 +96,47 @@ def main():
 		print(name, "mounts", mounts, "deck height", height)
 
 
+def box(points, polys, x0, x1, y0, y1, z0, z1, uv):
+	"""Append a box (all six faces) to the point and polygon lists; uv is one flat texture patch."""
+	base = len(points)
+	for y in (y0, y1):
+		for z in (z0, z1):
+			for x in (x0, x1):
+				points.append((x, y, z))
+	# corner index: x bit 0, z bit 1, y bit 2
+	quads = [(4, 5, 7, 6), (0, 2, 3, 1), (0, 1, 5, 4), (2, 6, 7, 3), (0, 4, 6, 2), (1, 3, 7, 5)]
+	u0, v0, u1, v1 = uv
+	for a, b, c, d in quads:
+		polys.append("\t200 3 %d %d %d %f %f %f %f %f %f\n" % (base + a, base + b, base + c, u0, v0, u1, v0, u1, v1))
+		polys.append("\t200 3 %d %d %d %f %f %f %f %f %f\n" % (base + a, base + c, base + d, u0, v0, u1, v1, u0, v1))
+
+
+def make_carrier():
+	"""Carrier: the battleship hull, a long flat flight deck, and an island on the starboard side."""
+	hull = scale_points(open(HULL_SRC).readlines(), 1.9, 1.5, 2.7)
+	with open(os.path.join(ROOT, "prop", "prhnaval_carrier.pie"), "w") as f:
+		f.writelines(hull)
+	points, polys = [], []
+	grey = (0.840, 0.802, 0.860, 0.830)
+	dark = (0.742, 0.802, 0.760, 0.830)
+	box(points, polys, -40, 40, 16, 46, -180, 140, grey)     # superstructure under the deck
+	box(points, polys, -60, 60, 46, 52, -200, 160, dark)     # flight deck
+	box(points, polys, 40, 58, 52, 96, -30, 40, grey)        # island
+	box(points, polys, 44, 54, 96, 112, -10, 20, dark)       # bridge and mast
+	lines = ["PIE 3\n", "TYPE 200\n", "TEXTURE 0 page-14-droid-hubs.png 0 0\n", "LEVELS 1\n", "LEVEL 1\n"]
+	lines.append("POINTS %d\n" % len(points))
+	lines += ["\t%d %d %d\n" % p for p in points]
+	lines.append("POLYGONS %d\n" % len(polys))
+	lines += polys
+	# Two light anti-aircraft mounts: on the island and at the stern (x, forward, height)
+	lines.append("CONNECTORS 2\n")
+	lines.append("\t49 5 112\n")
+	lines.append("\t-48 -185 52\n")
+	with open(os.path.join(ROOT, "bodies", "drnaval_carrier.pie"), "w") as f:
+		f.writelines(lines)
+	print("carrier: deck height 52, 2 mounts")
+
+
 if __name__ == "__main__":
 	main()
+	make_carrier()

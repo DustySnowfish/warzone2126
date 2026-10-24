@@ -468,7 +468,8 @@ function vtolReady(droid)
 		return true;
 	}
 
-	if (droid.order !== DORDER_REARM)
+	// (Warzone 2126: a VTOL on its way to, or aboard, an aircraft carrier is rearming there)
+	if (droid.order !== DORDER_REARM && (typeof DORDER_CARRIER === "undefined" || droid.order !== DORDER_CARRIER))
 	{
 		orderDroid(droid, DORDER_REARM);
 		buildVtols(); // actually pads

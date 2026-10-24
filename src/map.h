@@ -562,6 +562,7 @@ bool readVisibilityData(const char *fileName, WorldMapState& mapState);
 bool writeVisibilityData(const char *fileName, const WorldMapState& mapState);
 
 void mapFloodFillContinents(WorldMapState& mapState);
+void mapConvertCliffTile2126(WorldMapState& mapState, int x, int y, uint16_t texture);
 
 /// Rebuild the game-authoritative derived map state (aux/block maps, blocking bits, continents)
 /// for a world whose tiles + static terrain (texture/height/water) have just been restored from a

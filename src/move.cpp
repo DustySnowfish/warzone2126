@@ -33,6 +33,7 @@
 #include "lib/ivis_opengl/ivisdef.h"
 #include "console.h"
 
+#include "carrier2126.h"
 #include "move.h"
 
 #include "objects.h"
@@ -1358,6 +1359,10 @@ static void moveCalcDroidSlide(DROID *psDroid, int *pmx, int *pmy)
 				// ignore transporters
 				continue;
 			}
+			if (carrier2126::isDocked(psObjcast))
+			{
+				continue; // Warzone 2126: parked on a carrier's deck, above the water
+			}
 			objR = moveObjRadius(psObj);
 			const bool objFlying = psObjcast->isFlying();
 			if ((!selfFlying && objFlying && psObjcast->pos.z > (selfZ + droidR)) ||
@@ -2043,6 +2048,14 @@ static void moveUpdateShipModel(DROID *psDroid, SDWORD speed, uint16_t direction
 		{
 			speed = std::max<int>(speed * 35 / 100, speed - int64_t(speed) * (absDiff - DEG(45)) / DEG(180));
 		}
+		// Close to the end of the route with the bow well off it: slow right down and pivot, or a big
+		// hull would circle the destination for ever (its turning circle is wider than the stopping radius)
+		const int64_t toEndX = psDroid->sMove.destination.x - psDroid->pos.x;
+		const int64_t toEndY = psDroid->sMove.destination.y - psDroid->pos.y;
+		if (absDiff > DEG(60) && toEndX * toEndX + toEndY * toEndY < int64_t(TILE_UNITS * 6) * (TILE_UNITS * 6))
+		{
+			speed = 0;
+		}
 		// Rudder authority grows with the speed through the water
 		const int maxSpeed = std::max<int>(1, psDroid->baseSpeed);
 		const int currentSpeed = std::min<int>(std::abs(psDroid->sMove.speed), maxSpeed);
@@ -2575,6 +2588,12 @@ void moveUpdateDroid(DROID *psDroid)
 
 	psPropStats = psDroid->getPropulsionStats();
 	ASSERT_OR_RETURN(, psPropStats != nullptr, "Invalid propulsion stats pointer");
+
+	// Warzone 2126: a VTOL parked on a carrier rides on its deck
+	if (carrier2126::holdOnDeck(psDroid))
+	{
+		return;
+	}
 
 	// If the droid has been attacked by an EMP weapon, it is temporarily disabled
 	if (psDroid->lastHitWeapon == WSC_EMP)

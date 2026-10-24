@@ -1106,13 +1106,13 @@ std::shared_ptr<OptionsForm> makeControlsOptionsForm()
 	// Mouse:
 	result->addSection(OptionsSection(N_("Mouse"), ""), true);
 	{
-		auto optionInfo = OptionInfo("controls.mouse.rightClickOrders", N_("Right-Click Orders"), N_("By default, Warzone 2100 uses left-click for both selection and ordering / targeting. If you prefer modern RTS mouse input, set this to On. If you are using a trackpad or touch input, you may want to set this to Off."));
+		auto optionInfo = OptionInfo("controls.mouse.rightClickOrders", N_("Right-Click Orders"), N_("On (the default): left-click selects, left-click on empty ground deselects, right-click moves, attacks and gives other orders. Off: the classic Warzone 2100 scheme, where left-click both selects and orders. If you are using a trackpad or touch input, you may want to set this to Off."));
 		auto valueChanger = OptionsDropdown<bool>::make(
 			[]() {
 				OptionChoices<bool> result;
 				result.choices = {
-					{ _("Off"), _("Use left-click for both selection and ordering / targeting. (The classic Warzone 2100 default.)"), false },
-					{ _("On"), _("Order units to move or target with right-click. Select units with left-click. (Matches other common RTS game defaults.)"), true },
+					{ _("Off"), _("Use left-click for both selection and ordering / targeting. (The classic Warzone 2100 scheme.)"), false },
+					{ _("On"), _("Order units to move or target with right-click. Select units with left-click. (The Warzone 2126 default, as in most RTS games.)"), true },
 				};
 				result.setCurrentIdxForValue(getRightClickOrders());
 				return result;

@@ -877,6 +877,40 @@ static bool mapSetGroundTypes(WorldMapState& mapState)
 	return true;
 }
 
+/// Warzone 2126: an earthwork has turned a cliff tile into passable ground. Gives it the new
+/// texture, refreshes the ground types and decals of the corners around it, and unblocks it.
+/// Continents are not refreshed here (the caller does it once for all converted tiles).
+void mapConvertCliffTile2126(WorldMapState& mapState, int x, int y, uint16_t texture)
+{
+	if (!tileOnMap(mapState, x, y))
+	{
+		return;
+	}
+	MAPTILE *psTile = mapTile(mapState, x, y);
+	psTile->texture = texture;
+	for (int j = std::max(0, y - 1); j <= std::min(mapState.height - 1, y + 1); ++j)
+	{
+		for (int i = std::max(0, x - 1); i <= std::min(mapState.width - 1, x + 1); ++i)
+		{
+			MAPTILE *psCorner = mapTile(mapState, i, j);
+			psCorner->ground = determineGroundType(mapState, i, j);
+			if (hasDecals(mapState, i, j))
+			{
+				SET_TILE_DECAL(psCorner);
+			}
+			else
+			{
+				CLEAR_TILE_DECAL(psCorner);
+			}
+			markTileDirty(i, j);
+		}
+	}
+	if (!TileHasFeature(psTile) && !TileHasStructure(psTile) && terrainType(psTile) != TER_CLIFFFACE)
+	{
+		auxClearBlocking(mapState, x, y, FEATURE_BLOCKED);
+	}
+}
+
 bool mapReloadGroundTypes()
 {
 	if (!texTilesetTexturesLoaded())

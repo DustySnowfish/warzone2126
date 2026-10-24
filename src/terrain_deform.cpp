@@ -64,6 +64,8 @@ constexpr int kRimHeight1024 = 230;
 constexpr int kEarthworkHeight = 96;        // world units (3 m)
 constexpr int kEarthworkStep = 1;           // world units per truck per work step (tester: 2 per 250 ms was too fast)
 constexpr unsigned kEarthworkStepMs = 300;  // game time between work steps
+// Slope: a cliff tile in a ramp becomes open ground once its corners are within this height of each other
+constexpr int kSlopeGroundSpread = 80;
 // Hull-down: ground this far (world units) above a unit's base, between it and the shooter
 constexpr int kHullDownFull = 24;           // about 0.75 m: hull covered
 constexpr int kHullDownPartial = 12;        // about 0.4 m: partly covered
@@ -361,8 +363,168 @@ static void earthworkDust(const WorldMapState& map, const std::vector<Vector2i>&
 	}
 }
 
+void earthworkSlopeArea(Vector2i aTile, Vector2i bTile, Vector2i& lo, Vector2i& hi)
+{
+	const bool alongX = std::abs(bTile.x - aTile.x) >= std::abs(bTile.y - aTile.y);
+	lo = Vector2i(std::min(aTile.x, bTile.x), std::min(aTile.y, bTile.y));
+	hi = Vector2i(std::max(aTile.x, bTile.x), std::max(aTile.y, bTile.y));
+	// At least 3 tiles across, centred on the drag
+	if (alongX && hi.y - lo.y < 2)
+	{
+		const int c = (lo.y + hi.y) / 2;
+		lo.y = c - 1;
+		hi.y = c + 1;
+	}
+	else if (!alongX && hi.x - lo.x < 2)
+	{
+		const int c = (lo.x + hi.x) / 2;
+		lo.x = c - 1;
+		hi.x = c + 1;
+	}
+}
+
+/// Slope: the ground across the area becomes an even ramp from the height at the start edge (where
+/// the drag began) to the height at the far edge. Both edge heights are read each step, so the
+/// edges themselves only even out across the ramp's width.
+static bool earthworkSlopeApply(GameWorld& world, Vector2i a, Vector2i b)
+{
+	WorldMapState& map = world.map;
+	const Vector2i aTile(map_coord(a.x), map_coord(a.y));
+	const Vector2i bTile(map_coord(b.x), map_coord(b.y));
+	Vector2i lo, hi;
+	earthworkSlopeArea(aTile, bTile, lo, hi);
+	const bool alongX = std::abs(bTile.x - aTile.x) >= std::abs(bTile.y - aTile.y);
+	const bool forward = alongX ? bTile.x >= aTile.x : bTile.y >= aTile.y;
+	const int tx0 = std::max(0, lo.x), ty0 = std::max(0, lo.y);
+	const int tx1 = std::min(map.width - 1, hi.x + 1), ty1 = std::min(map.height - 1, hi.y + 1);
+	if (tx1 <= tx0 || ty1 <= ty0)
+	{
+		return true;
+	}
+	// Corner lines at the two ends of the ramp (columns when it runs along x, rows otherwise)
+	const int along0 = alongX ? tx0 : ty0, along1 = alongX ? tx1 : ty1;
+	const int across0 = alongX ? ty0 : tx0, across1 = alongX ? ty1 : tx1;
+	const int startLine = forward ? along0 : along1;
+	const int endLine = forward ? along1 : along0;
+	const int length = along1 - along0;
+	auto cornerAt = [&](int along, int across) { return alongX ? Vector2i(along, across) : Vector2i(across, along); };
+	auto lineHeight = [&](int line) {
+		int64_t sum = 0;
+		for (int c = across0; c <= across1; ++c)
+		{
+			const Vector2i v = cornerAt(line, c);
+			sum += map_TileHeight(map, v.x, v.y);
+		}
+		return static_cast<int>(sum / (across1 - across0 + 1));
+	};
+	const int hStart = lineHeight(startLine);
+	const int hEnd = lineHeight(endLine);
+	bool finished = true;
+	bool changed = false;
+	int64_t heightSum = 0;
+	static std::vector<Vector2i> movedCorners; // for the dust effect (display only)
+	movedCorners.clear();
+	for (int along = along0; along <= along1; ++along)
+	{
+		const int distance = std::abs(along - startLine);
+		const int target = hStart + (hEnd - hStart) * distance / length;
+		for (int across = across0; across <= across1; ++across)
+		{
+			const Vector2i v = cornerAt(along, across);
+			if (!cornerMovable(map, v.x, v.y))
+			{
+				continue;
+			}
+			const int current = map_TileHeight(map, v.x, v.y);
+			if (current == target)
+			{
+				continue;
+			}
+			const int next = current < target ? std::min(target, current + kEarthworkStep) : std::max(target, current - kEarthworkStep);
+			setTileHeight(map, v.x, v.y, next);
+			++s.changes;
+			changed = true;
+			movedCorners.push_back(v);
+			heightSum += next * (v.x + 1) + v.y;
+			if (next != target)
+			{
+				finished = false;
+			}
+		}
+	}
+	// Cliff tiles inside the ramp that are now gentle enough become passable ground, textured like
+	// the nearest open ground tile
+	int converted = 0;
+	for (int ty = std::max(1, lo.y); ty <= std::min(map.height - 2, hi.y); ++ty)
+	{
+		for (int tx = std::max(1, lo.x); tx <= std::min(map.width - 2, hi.x); ++tx)
+		{
+			const MAPTILE* tile = mapTile(map, tx, ty);
+			if (terrainType(tile) != TER_CLIFFFACE)
+			{
+				continue;
+			}
+			const int h00 = map_TileHeight(map, tx, ty), h10 = map_TileHeight(map, tx + 1, ty);
+			const int h01 = map_TileHeight(map, tx, ty + 1), h11 = map_TileHeight(map, tx + 1, ty + 1);
+			const int spread = std::max(std::max(h00, h10), std::max(h01, h11)) - std::min(std::min(h00, h10), std::min(h01, h11));
+			if (spread > kSlopeGroundSpread)
+			{
+				continue;
+			}
+			bool found = false;
+			uint16_t texture = 0;
+			for (int r = 1; r <= 4 && !found; ++r)
+			{
+				for (int dy = -r; dy <= r && !found; ++dy)
+				{
+					for (int dx = -r; dx <= r; ++dx)
+					{
+						if (std::max(std::abs(dx), std::abs(dy)) != r || !tileOnMap(map, tx + dx, ty + dy))
+						{
+							continue;
+						}
+						const MAPTILE* other = mapTile(map, tx + dx, ty + dy);
+						if (terrainType(other) != TER_CLIFFFACE && terrainType(other) != TER_WATER)
+						{
+							texture = other->texture;
+							found = true;
+							break;
+						}
+					}
+				}
+			}
+			if (found)
+			{
+				mapConvertCliffTile2126(map, tx, ty, texture);
+				++converted;
+				++s.changes;
+			}
+		}
+	}
+	if (converted > 0)
+	{
+		mapFloodFillContinents(map);
+	}
+	syncDebug("Earthwork (%d,%d)-(%d,%d) slope %d->%d sum%d done%d cliffs%d", aTile.x, aTile.y, bTile.x, bTile.y, hStart, hEnd, static_cast<int>(heightSum & 0x7fffffff), finished ? 1 : 0, converted);
+	if (changed)
+	{
+		earthworkDust(map, movedCorners, hEnd < hStart);
+		const int cx = world_coord(tx0 + tx1) / 2;
+		const int cy = world_coord(ty0 + ty1) / 2;
+		resettleObjects(world, cx, cy, world_coord(std::max(tx1 - tx0, ty1 - ty0)) + 2 * TILE_UNITS);
+		initLighting(map, static_cast<UDWORD>(std::max(0, tx0 - 2)), static_cast<UDWORD>(std::max(0, ty0 - 2)),
+		             static_cast<UDWORD>(std::min(map.width, tx1 + 3)), static_cast<UDWORD>(std::min(map.height, ty1 + 3)));
+	}
+	return finished;
+}
+
 bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 {
+	if (mode == EARTHWORK_SLOPE)
+	{
+		ensureOriginal(world.map);
+		return earthworkSlopeApply(world, a, b);
+	}
 	const bool lower = mode == EARTHWORK_LOWER;
 	const bool level = mode == EARTHWORK_LEVEL;
 	WorldMapState& map = world.map;

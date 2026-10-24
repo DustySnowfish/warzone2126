@@ -164,6 +164,7 @@ struct DROID : public BASE_OBJECT
 	// The group the droid belongs to
 	DROID_GROUP    *psGroup;
 	STRUCTURE      *psBaseStruct;                   ///< a structure that this droid might be associated with. For VTOLs this is the rearming pad
+	uint32_t        carrierId2126 = 0;              ///< Warzone 2126: the aircraft carrier this VTOL is assigned to (0 = none)
 	// queued orders
 	SDWORD          listSize;                       ///< Gives the number of synchronised orders. Orders from listSize to the real end of the list may not affect game state.
 	OrderList       asOrderList;                    ///< The range [0; listSize - 1] corresponds to synchronised orders, and the range [listPendingBegin; listPendingEnd - 1] corresponds to the orders that will remain, once all orders are synchronised.

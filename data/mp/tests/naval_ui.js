@@ -39,6 +39,8 @@ function eventStartLevel()
 	completeResearch("R-Vehicle-Prop-NavalJet", 0, true);
 	completeResearch("R-Vehicle-Body-NavalLanding", 0, true);
 	completeResearch("R-Vehicle-Body-NavalSuperBattleship", 0, true); // (and the hulls before it)
+	completeResearch("R-Vehicle-Body-NavalCarrier", 0, true); // (with VTOL propulsion and the rearming pad)
+	completeResearch("R-Wpn-AAGun03", 0, true);
 	var s = startPositions[0];
 	var w = findWaterNear(s.x, s.y);
 	if (w)
@@ -48,6 +50,7 @@ function eventStartLevel()
 		addDroid(0, w.x, w.y + 1, "Frigate", "NavalFrigate", "NavalScrew", "", "", "Cannon1Mk1", "Cannon1Mk1");
 		addDroid(0, w.x + 3, w.y + 3, "Super Battleship", "NavalSuperBattleship", "NavalScrew", "", "", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1", "Cannon2A-TMk1");
 		addDroid(0, w.x - 3, w.y + 3, "Cruiser", "NavalCruiser", "NavalJet", "", "", "Rocket-MRL", "Rocket-MRL", "Rocket-MRL", "Rocket-MRL", "Rocket-MRL");
+		addDroid(0, w.x, w.y + 6, "Carrier", "NavalCarrier", "NavalScrew", "", "", "QuadMg1AAGun", "QuadMg1AAGun");
 		centreView(w.x, w.y);
 		// A truck builds a Shipyard on the nearest valid coast (tests the half-land, half-water rule)
 		var trucks = enumDroid(0, DROID_CONSTRUCT);

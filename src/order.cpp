@@ -35,6 +35,7 @@
 #include "objects.h"
 #include "order.h"
 #include "terrain_deform.h"
+#include "carrier2126.h"
 #include "tunnels.h"
 #include "ordersource.h"
 #include "action.h"
@@ -639,6 +640,13 @@ bool orderUpdateDroid(DROID *psDroid)
 		if (psDroid->action == DACTION_NONE || psDroid->action == DACTION_ATTACK)
 		{
 			psDroid->order = DroidOrder(DORDER_NONE);
+		}
+		break;
+	case DORDER_CARRIER:
+		// Warzone 2126: fly to the carrier, land on its deck, rearm and repair there
+		if (!carrier2126::orderUpdate(psDroid))
+		{
+			return false; // went down with its carrier
 		}
 		break;
 	case DORDER_TUNNEL:
@@ -1733,6 +1741,9 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 	case DORDER_TUNNEL:
 		tunnels::orderStart(psDroid, psOrder);
 		break;
+	case DORDER_CARRIER:
+		carrier2126::orderStart(psDroid, psOrder);
+		break;
 	case DORDER_EARTHWORK:
 		// Warzone 2126: go to the area, then raise or lower the ground there (see orderUpdateDroid)
 		if (!psDroid->isConstructionDroid() || !worldOnMap(gameWorld.map, psOrder->pos) || !worldOnMap(gameWorld.map, psOrder->pos2))
@@ -2208,8 +2219,10 @@ void orderDroidLoc(DROID *psDroid, DROID_ORDER order, UDWORD x, UDWORD y, QUEUE_
 void orderSelectedEarthwork(uint32_t player, Vector2i a, Vector2i b, int mode, bool add)
 {
 	ASSERT_PLAYER_OR_RETURN(, player);
-	const Vector2i lo(std::min(a.x, b.x), std::min(a.y, b.y));
-	const Vector2i hi(std::max(a.x, b.x), std::max(a.y, b.y));
+	// A slope keeps its direction (from a to b); the other modes use the rectangle's corners
+	const bool slope = mode == terrain_deform::EARTHWORK_SLOPE;
+	const Vector2i lo = slope ? a : Vector2i(std::min(a.x, b.x), std::min(a.y, b.y));
+	const Vector2i hi = slope ? b : Vector2i(std::max(a.x, b.x), std::max(a.y, b.y));
 	for (DROID* psCurr : gameWorld.objects.droids[player])
 	{
 		if (psCurr->selected && psCurr->isConstructionDroid())
@@ -2262,6 +2275,7 @@ bool validTargetForOrder(DROID_ORDER order, BASE_OBJECT const *psObj)
 	case DORDER_DROIDREPAIR:
 	case DORDER_COMMANDERSUPPORT:
 	case DORDER_EMBARK:
+	case DORDER_CARRIER:
 		return psObj != nullptr && psObj->type == OBJ_DROID;
 	case DORDER_ATTACK:
 	case DORDER_ATTACKTARGET:
@@ -2314,7 +2328,8 @@ bool validOrderForObj(DROID_ORDER order)
 	       order == DORDER_FIRESUPPORT || order == DORDER_RTR || order == DORDER_EMBARK ||
 	       order == DORDER_ATTACKTARGET || order == DORDER_COMMANDERSUPPORT || order == DORDER_BUILDMODULE ||
 	       order == DORDER_GUARD || order == DORDER_DROIDREPAIR || order == DORDER_RESTORE ||
-	       order == DORDER_REARM || order == DORDER_RECOVER || order == DORDER_RTR_SPECIFIED || order == DORDER_TUNNEL;
+	       order == DORDER_REARM || order == DORDER_RECOVER || order == DORDER_RTR_SPECIFIED || order == DORDER_TUNNEL ||
+	       order == DORDER_CARRIER;
 }
 
 
@@ -2630,6 +2645,7 @@ bool orderDroidList(DROID *psDroid)
 		case DORDER_BUILDMODULE:
 		case DORDER_RECOVER:
 		case DORDER_TUNNEL:
+		case DORDER_CARRIER:
 			ASSERT(sOrder.psStats == nullptr, "Extra %s parameters.", getDroidOrderName(sOrder.type));
 			sOrder.psStats = nullptr;
 			break;
@@ -2952,8 +2968,13 @@ DroidOrder chooseOrderObj(DROID *psDroid, BASE_OBJECT *psObj, bool altOrder)
 			return DroidOrder(DORDER_ATTACK, psObj);
 		}
 	}
+	// Warzone 2126: VTOLs land on their own carriers
+	if (carrier2126::canUse(psDroid, psObj))
+	{
+		order = DroidOrder(DORDER_CARRIER, psObj);
+	}
 	//check for transporters first
-	if (psObj->type == OBJ_DROID && ((DROID*)psObj)->isTransporter() && psObj->player == psDroid->player)
+	else if (psObj->type == OBJ_DROID && ((DROID*)psObj)->isTransporter() && psObj->player == psDroid->player)
 	{
 		order = DroidOrder(DORDER_EMBARK, psObj);
 	}
@@ -4566,7 +4587,7 @@ const char *getDroidOrderName(DROID_ORDER order)
 	case DORDER_DROIDREPAIR:              return "DORDER_DROIDREPAIR";
 	case DORDER_RESTORE:                  return "DORDER_RESTORE";
 	case DORDER_SCOUT:                    return "DORDER_SCOUT";
-	case DORDER_UNUSED_3:                 return "DORDER_UNUSED_3";
+	case DORDER_CARRIER:                  return "DORDER_CARRIER";
 	case DORDER_UNUSED:                   return "DORDER_UNUSED";
 	case DORDER_PATROL:                   return "DORDER_PATROL";
 	case DORDER_REARM:                    return "DORDER_REARM";
@@ -4615,7 +4636,7 @@ const char *getDroidOrderKey(DROID_ORDER order)
 	case DORDER_DROIDREPAIR:              return "DR";
 	case DORDER_RESTORE:                  return "RES";
 	case DORDER_SCOUT:                    return "S";
-	case DORDER_UNUSED_3:                 return "Err";
+	case DORDER_CARRIER:                  return "CAR";
 	case DORDER_UNUSED:                   return "Err";
 	case DORDER_PATROL:                   return "P";
 	case DORDER_REARM:                    return "RE";

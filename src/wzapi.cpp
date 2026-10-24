@@ -76,6 +76,7 @@
 #include "ai.h"
 #include "advvis.h"
 #include "loadsave.h"
+#include "carrier2126.h"
 #include "wzapi.h"
 #include "terrain_deform.h"
 #include "ordersource.h"
@@ -435,7 +436,11 @@ bool wzapi::orderDroid(WZAPI_PARAMS(DROID* psDroid, int order))
 	}
 	if (order == DORDER_REARM)
 	{
-		if (STRUCTURE *psStruct = findNearestReArmPad(psDroid, psDroid->psBaseStruct, false))
+		if (carrier2126::returnToCarrier(psDroid, ModeQueue))
+		{
+			// Warzone 2126: back to its aircraft carrier, which is nearer than any pad
+		}
+		else if (STRUCTURE *psStruct = findNearestReArmPad(psDroid, psDroid->psBaseStruct, false))
 		{
 			orderDroidObj(psDroid, (DROID_ORDER)order, psStruct, ModeQueue);
 		}
@@ -1600,7 +1605,8 @@ bool wzapi::orderDroidLoc(WZAPI_PARAMS(DROID *psDroid, int order_, int x, int y)
 //--
 //-- Warzone 2126: order a truck to raise (```lower``` false or 0) or lower (```lower``` true or 1) the ground,
 //-- or level it to the area's average height (```lower``` 2), in the tile rectangle from (x1, y1) to (x2, y2), inclusive. The rectangle may be at most 8 tiles
-//-- on each side. Earthworks cost no power, only the truck's time.
+//-- on each side. With ```lower``` 3 it cuts a slope (ramp) from tile (x1, y1) to tile (x2, y2), at least 3 tiles wide.
+//-- Earthworks cost no power, only the truck's time.
 //--
 bool wzapi::orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int x2, int y2, int mode))
 {
@@ -1611,7 +1617,10 @@ bool wzapi::orderDroidEarthwork(WZAPI_PARAMS(DROID *psDroid, int x1, int y1, int
 	const Vector2i lo(std::min(x1, x2), std::min(y1, y2));
 	const Vector2i hi(std::max(x1, x2), std::max(y1, y2));
 	SCRIPT_ASSERT(false, context, world_coord(hi.x - lo.x + 1) <= terrain_deform::kEarthworkMaxSize && world_coord(hi.y - lo.y + 1) <= terrain_deform::kEarthworkMaxSize, "Earthwork area too large");
-	sendDroidInfo(psDroid, DroidOrder(DORDER_EARTHWORK, nullptr, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), static_cast<uint16_t>(std::max(0, std::min(mode, 2)))), false, currentOrderSource());
+	const int safeMode = std::max(0, std::min(mode, terrain_deform::kEarthworkModeCount - 1));
+	const Vector2i first = safeMode == terrain_deform::EARTHWORK_SLOPE ? Vector2i(x1, y1) : lo;
+	const Vector2i second = safeMode == terrain_deform::EARTHWORK_SLOPE ? Vector2i(x2, y2) : hi;
+	sendDroidInfo(psDroid, DroidOrder(DORDER_EARTHWORK, nullptr, Vector2i(world_coord(first.x), world_coord(first.y)), Vector2i(world_coord(second.x), world_coord(second.y)), static_cast<uint16_t>(safeMode)), false, currentOrderSource());
 	return true;
 }
 
@@ -2037,7 +2046,8 @@ bool wzapi::buildDroid(WZAPI_PARAMS(STRUCTURE *psFactory, std::string templateNa
 	                        || psStruct->pStructureType->type == REF_VTOL_FACTORY), "Structure %s is not a factory", objInfo(psStruct));
 	int player = psStruct->player;
 	SCRIPT_ASSERT_PLAYER(false, context, player);
-	const int capacity = psStruct->capacity; // body size limit
+	// body size limit (Warzone 2126: Shipyards build every hull, whatever their modules, as in the design list)
+	const int capacity = psStruct->pStructureType->isShipyard ? static_cast<int>(SIZE_SUPER_HEAVY) : psStruct->capacity;
 	SCRIPT_ASSERT(false, context, !turrets.va_list.empty() && !turrets.va_list[0].strings.empty(), "No turrets provided");
 	SCRIPT_ASSERT(false, context, templateName.size() <= MAX_TEMPLATE_NAME_LENGTH, "Template name is longer than %zu bytes: %s", MAX_TEMPLATE_NAME_LENGTH, templateName.c_str());
 	std::unique_ptr<DROID_TEMPLATE> psTemplate = ::makeTemplate(player, templateName, body, propulsion, turrets, capacity, true);
@@ -4884,6 +4894,7 @@ nlohmann::json wzapi::getUsefulConstants()
 	constants["DORDER_LINEBUILD"] = DORDER_LINEBUILD;
 	constants["DORDER_EARTHWORK"] = DORDER_EARTHWORK; // Warzone 2126
 	constants["DORDER_TUNNEL"] = DORDER_TUNNEL; // Warzone 2126
+	constants["DORDER_CARRIER"] = DORDER_CARRIER; // Warzone 2126
 	constants["DORDER_DEMOLISH"] = DORDER_DEMOLISH;
 	constants["DORDER_REPAIR"] = DORDER_REPAIR;
 	constants["DORDER_OBSERVE"] = DORDER_OBSERVE;

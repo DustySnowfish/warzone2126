@@ -154,6 +154,7 @@ void kf_ToggleShakeStatus();
 void kf_EarthworkRaise();
 void kf_EarthworkLower();
 void kf_EarthworkLevel();
+void kf_EarthworkSlope();
 void kf_EarthworkRaiseQueued();
 void kf_EarthworkLowerQueued();
 void kf_ToggleMouseInvert();

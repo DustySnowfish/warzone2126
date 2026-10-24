@@ -31,6 +31,7 @@
 #include "lib/sound/audio_id.h"
 #include "lib/netplay/netplay.h"
 
+#include "carrier2126.h"
 #include "action.h"
 #include "combat.h"
 #include "formation.h"
@@ -2787,6 +2788,12 @@ void moveToRearm(DROID *psDroid)
 
 	//if droid is already returning - ignore
 	if (psDroid->isVtolRearming())
+	{
+		return;
+	}
+
+	// Warzone 2126: VTOLs assigned to a carrier go back to it when it is nearer than any pad
+	if (carrier2126::returnToCarrier(psDroid))
 	{
 		return;
 	}

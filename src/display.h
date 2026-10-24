@@ -92,6 +92,7 @@ bool	getCameraAccel();
 /// Warzone 2126: enter earthwork placement for the selected trucks (raise, or lower when `lower`)
 void	startEarthworkPlacement(int mode); ///< terrain_deform::EarthworkMode
 /// Warzone 2126: the earthwork area being placed (tile corners), if placement is active
+bool	earthworkSlopeDrag(Vector2i& startTile, Vector2i& endTile);
 bool	earthworkPlacementPreview(Vector2i& loTile, Vector2i& hiTile, int& mode);
 /// Warzone 2126: tilt the camera with zoom (flatter close in, more top-down far out)
 bool	getCameraZoomTilt();

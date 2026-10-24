@@ -2426,6 +2426,11 @@ void kf_EarthworkLevel()
 	startEarthworkPlacement(2);
 }
 
+void kf_EarthworkSlope()
+{
+	startEarthworkPlacement(3);
+}
+
 void kf_EarthworkRaiseQueued()
 {
 	earthworkAtMouse(0, true);

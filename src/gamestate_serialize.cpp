@@ -2092,6 +2092,7 @@ static nlohmann::ordered_json writeDroid(const DROID *d, bool onMission)
 	}
 	j["actionTarget"] = std::move(actionTarget);
 	j["baseStruct"] = writeObjRef(d->psBaseStruct);
+	j["carrier2126"] = d->carrierId2126;
 
 	nlohmann::ordered_json mv = nlohmann::ordered_json::object();
 	mv["status"] = static_cast<int>(d->sMove.Status);
@@ -2478,6 +2479,7 @@ static void readDroidPass2(const nlohmann::ordered_json &j, std::unordered_map<u
 		d->psActionTarget[w] = readObjRef(actionTarget[w]);
 	}
 
+	d->carrierId2126 = j.value("carrier2126", 0u);
 	BASE_OBJECT *base = readObjRef(j.at("baseStruct"));
 	if (base != nullptr && base->type == OBJ_STRUCTURE)
 	{

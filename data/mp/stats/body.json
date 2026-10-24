@@ -1164,6 +1164,32 @@
 		"weaponSlots": 6,
 		"weight": 8200
 	},
+	"NavalCarrier": {
+		"armourHeat": 36,
+		"armourKinetic": 50,
+		"buildPoints": 3000,
+		"buildPower": 800,
+		"carrierCapacity": 6,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 3200,
+		"id": "NavalCarrier",
+		"model": "drnaval_carrier.pie",
+		"name": "Aircraft Carrier Hull",
+		"naval": 1,
+		"powerOutput": 100000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_carrier.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_carrier.pie"
+			}
+		},
+		"size": "SUPER HEAVY",
+		"weaponSlots": 2,
+		"weight": 11000
+	},
 	"NavalSuperBattleship": {
 		"armourHeat": 50,
 		"armourKinetic": 72,

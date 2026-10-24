@@ -20,6 +20,12 @@ const NAVAL_LANDING_BODY = "NavalLanding";
 const NAVAL_LANDING_RESEARCH = "R-Vehicle-Body-NavalLanding";
 const NAVAL_LANDING_CRAFT = 2; // landing craft kept
 const NAVAL_DEBUG = true; // log decisions (for tuning against real games)
+const NAVAL_CARRIER_BODY = "NavalCarrier";
+const NAVAL_CARRIER_RESEARCH = "R-Vehicle-Body-NavalCarrier";
+const NAVAL_CARRIER_SLOTS = 6;
+// Anti-aircraft guns for the carrier's two mounts, best first
+const NAVAL_CARRIER_AA = ["Missile-HvySAM", "AAGunLaser", "QuadRotAAGun", "Missile-LtSAM", "AAGun2Mk1", "QuadMg1AAGun"];
+let carrierAssign = {}; // VTOL id -> carrier id
 
 let navalTarget; // { id, type, player, wx, wy }: the object attacked and the water spot to attack it from
 
@@ -143,6 +149,16 @@ _global.navalResearch = function(lab) {
 		}
 	}
 
+	// An aircraft carrier once both ships and VTOLs are in use
+	if (iHaveShips() && navalWanted() && myVtols().length > 0 && !componentAvailable(NAVAL_CARRIER_BODY) && withChance(25))
+	{
+		if (pursueResearch(lab, NAVAL_CARRIER_RESEARCH))
+		{
+			navalDebug("researching the Aircraft Carrier");
+			return true;
+		}
+	}
+
 	// Bigger hulls once ships are in use (the research tree leads from Frigate to Super Battleship)
 	if (iHaveShips() && navalWanted() && withChance(25))
 	{
@@ -173,6 +189,23 @@ _global.navalResearch = function(lab) {
 function isLandingCraft(droid)
 {
 	return isNavalDroid(droid) && droid.droidType === DROID_SUPERTRANSPORTER;
+}
+
+function isCarrier(droid)
+{
+	return isNavalDroid(droid) && droid.body === NAVAL_CARRIER_BODY;
+}
+
+function myVtols()
+{
+	return enumDroid(me).filter((d) => (isVTOL(d)));
+}
+
+function carriersWanted()
+{
+	const vtols = myVtols().length;
+
+	return vtols >= 3 ? Math.min(2, Math.ceil(vtols / NAVAL_CARRIER_SLOTS)) : 0;
 }
 
 // Warships (not landing craft)
@@ -266,6 +299,19 @@ _global.checkShipProduction = function() {
 		if (buildDroid(yards[0], "Landing Craft", NAVAL_LANDING_BODY, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", "MG1Mk1"))
 		{
 			navalDebug("building a landing craft");
+			return true;
+		}
+	}
+
+	if (componentAvailable(NAVAL_CARRIER_BODY) && enumDroid(me).filter(isCarrier).length < carriersWanted())
+	{
+		const aa = NAVAL_CARRIER_AA.filter((w) => (componentAvailable(w)));
+		const fallback = (chooseShipWeapon() || []).map((w) => (w.stat)).filter((w) => (componentAvailable(w)));
+		const gun = aa.length > 0 ? aa[0] : fallback[0];
+
+		if (defined(gun) && buildDroid(yards[0], "Carrier", NAVAL_CARRIER_BODY, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", gun, gun))
+		{
+			navalDebug("building an aircraft carrier");
 			return true;
 		}
 	}
@@ -587,6 +633,66 @@ function landingTick()
 	});
 }
 
+// Carriers keep behind the fleet (between home and the fleet's target) and take idle VTOLs aboard
+function carrierTick(home)
+{
+	const carriers = enumDroid(me).filter(isCarrier);
+
+	if (carriers.length === 0)
+	{
+		return;
+	}
+
+	let station = home;
+
+	if (defined(navalTarget) && targetAlive())
+	{
+		const mid = { x: Math.round(home.x + (navalTarget.wx - home.x) * 0.4), y: Math.round(home.y + (navalTarget.wy - home.y) * 0.4) };
+		const spot = waterSpots(mid.x, mid.y, 8, 2).filter((w) => (propulsionCanReach(NAVAL_CHECK_PROP, home.x, home.y, w.x, w.y)))[0];
+
+		if (defined(spot))
+		{
+			station = spot;
+		}
+	}
+
+	carriers.forEach((c) => {
+		if (c.order !== DORDER_RTR && distance(c, station) > 4 && (c.order !== DORDER_MOVE || c.health >= NAVAL_RETREAT))
+		{
+			if (c.health < NAVAL_RETREAT)
+			{
+				orderDroid(c, DORDER_RTR);
+			}
+			else
+			{
+				orderDroidLoc(c, DORDER_MOVE, station.x, station.y);
+			}
+		}
+	});
+
+	// Assignments: drop dead VTOLs and carriers, then fill free places with idle VTOLs
+	const alive = {};
+
+	enumDroid(me).forEach((d) => { alive[d.id] = true; });
+	Object.keys(carrierAssign).forEach((v) => {
+		if (!alive[v] || !alive[carrierAssign[v]])
+		{
+			delete carrierAssign[v];
+		}
+	});
+	carriers.forEach((c) => {
+		let count = Object.keys(carrierAssign).filter((v) => (carrierAssign[v] === c.id)).length;
+		const idle = myVtols().filter((v) => (!defined(carrierAssign[v.id]) && (v.order === DORDER_NONE || v.order === DORDER_REARM)));
+
+		for (let i = 0; i < idle.length && count < NAVAL_CARRIER_SLOTS; ++i, ++count)
+		{
+			carrierAssign[idle[i].id] = c.id;
+			orderDroidObj(idle[i], DORDER_CARRIER, c);
+			navalDebug("VTOL " + idle[i].id + " assigned to carrier " + c.id);
+		}
+	});
+}
+
 // Tactics, every few seconds
 _global.navalTick = function() {
 	buildShipyard();
@@ -599,7 +705,12 @@ _global.navalTick = function() {
 		return;
 	}
 
-	const ships = myShips();
+	if (typeof DORDER_CARRIER !== "undefined")
+	{
+		carrierTick(home);
+	}
+
+	const ships = myShips().filter((d) => (!isCarrier(d)));
 
 	if (ships.length === 0)
 	{

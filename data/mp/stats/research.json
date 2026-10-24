@@ -9364,6 +9364,21 @@
 		],
 		"statID": "NavalCruiser"
 	},
+	"R-Vehicle-Body-NavalCarrier": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalCarrier",
+		"name": "Aircraft Carrier Hull",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalCruiser",
+			"R-Struc-VTOLPad"
+		],
+		"researchPoints": 14000,
+		"researchPower": 350,
+		"resultComponents": [
+			"NavalCarrier"
+		],
+		"statID": "NavalCarrier"
+	},
 	"R-Vehicle-Body-NavalBattleship": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body-NavalBattleship",

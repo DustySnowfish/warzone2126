@@ -56,6 +56,7 @@
 #include "edit3d.h"
 #include "game.h"
 #include "hci.h"
+#include "hci/infopanel2126.h"
 #include "hci/unitbar2126.h"
 #include "randommap2126.h"
 #include "hci/hud2126_style.h"
@@ -1015,6 +1016,7 @@ void interfaceShutDown()
 {
 	intRemoveIntelMapNoAnim(); // always call to ensure overlay screen is destroyed
 	unitBar2126Remove();
+	infoPanel2126Remove();
 
 	if (replayOverlayScreen)
 	{
@@ -1431,6 +1433,7 @@ INT_RETVAL intRunWidgets()
 	bool			quitting = false;
 
 	unitBar2126Update(); // Warzone 2126 interface: the selected-units bar follows the selection
+	infoPanel2126Update(); // Warzone 2126: details of a single selected unit or building
 	announceRandomMapCode2126();
 
 	if (quitToMainMenuRequested)
@@ -2426,6 +2429,7 @@ void intRemoveReticule()
 		widgDelete(psWScreen, IDHUD2126_TABBAR);
 		widgDelete(psWScreen, IDHUD2126_STATUS);
 		unitBar2126Remove();
+		infoPanel2126Remove();
 		ReticuleUp = false;
 	}
 }
@@ -2788,6 +2792,7 @@ void intApplyInterfaceStyle2126()
 		widgDelete(psWScreen, IDHUD2126_TABBAR);
 		widgDelete(psWScreen, IDHUD2126_STATUS);
 		unitBar2126Remove();
+		infoPanel2126Remove();
 		if (auto orderForm = widgGetFromID(psWScreen, IDORDER_FORM))
 		{
 			orderForm->show();

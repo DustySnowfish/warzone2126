@@ -444,7 +444,9 @@ bool loadConfig()
 	setDrawShadows(iniGetBool("shadows", true).value());
 	war_setSoundEnabled(iniGetBool("sound", true).value());
 	setInvertMouseStatus(iniGetBool("mouseflip", true).value());
-	setRightClickOrders(iniGetBool("RightClickOrders", false).value());
+	// Warzone 2126: classic RTS mouse (left selects, right orders) by default. A new key, so settings
+	// saved under the old default (off) pick up the new one; the player can still turn it off.
+	setRightClickOrders(iniGetBool("RightClickOrders2126", true).value());
 	setPanMouseKey(iniGetMouseKeyCode("mouseKeyPan", getPanMouseKey()));
 	if (!createdConfigFile && configVersion < 3)
 	{
@@ -458,7 +460,11 @@ bool loadConfig()
 	}
 	else
 	{
-		setRotateMouseKey(iniGetMouseKeyCode("mouseKeyRotate", getRotateMouseKey()));
+		if (!setRotateMouseKey(iniGetMouseKeyCode("mouseKeyRotate", getRotateMouseKey())))
+		{
+			// Warzone 2126: a saved right-button rotate clashes with right-click orders
+			setRotateMouseKey(MOUSE_MMB);
+		}
 	}
 	setPinchToZoomTouchGesture(iniGetBool("pinchToZoom", getPinchToZoomTouchGesture()).value());
 	setPanTouchGesture(iniGetBool("touchPan", getPanTouchGesture()).value());
@@ -1022,7 +1028,7 @@ bool saveConfig()
 	iniSetInteger("mouseflip", (int)(getInvertMouseStatus()));	// flipmouse
 	iniSetInteger("nomousewarp", (int)getMouseWarp());		// mouse warp
 	iniSetInteger("coloredCursor", (int)war_GetColouredCursor());
-	iniSetInteger("RightClickOrders", (int)(getRightClickOrders()));
+	iniSetInteger("RightClickOrders2126", (int)(getRightClickOrders()));
 	iniSetMouseKeyOpt("mouseKeyPan", getPanMouseKey());
 	iniSetMouseKeyOpt("mouseKeyRotate", getRotateMouseKey());
 	iniSetInteger("pinchToZoom", (int)(getPinchToZoomTouchGesture()));

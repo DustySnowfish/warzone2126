@@ -40,6 +40,7 @@
 
 #include "action.h"
 #include "display.h"
+#include "terrain_deform.h"
 #include "tunnels.h"
 #include "ordersource.h"
 #include "droid.h"
@@ -122,11 +123,11 @@ static bool vtolDroidSelected(const WorldObjectState& objState, UDWORD player);
 static bool	anyDroidSelected(const WorldObjectState& objState, UDWORD player);
 static bool cyborgDroidSelected(const WorldObjectState& objState, UDWORD player);
 static bool bInvertMouse = true;
-static bool bRightClickOrders = false;
+static bool bRightClickOrders = true; // Warzone 2126: classic RTS mouse by default
 // The click semantics actually in effect. Gamepad clicks always use
 // select-on-left / order-on-right, regardless of the stored mouse option
 static bool bEffectiveRightClickOrders = false;
-optional<MOUSE_KEY_CODE> rotateMouseKey = MOUSE_RMB;
+optional<MOUSE_KEY_CODE> rotateMouseKey = MOUSE_MMB; // Warzone 2126: right button gives orders
 optional<MOUSE_KEY_CODE> panMouseKey = nullopt;
 static bool bPinchToZoomTouchGesture = true;
 static bool bPanTouchGesture = true;
@@ -887,6 +888,13 @@ void earthworkCurrentRect(Vector2i& lo, Vector2i& hi)
 		return;
 	}
 	const Vector2i s = earthworkPlacement.startTile;
+	if (earthworkPlacement.mode == terrain_deform::EARTHWORK_SLOPE)
+	{
+		const Vector2i e(s.x + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.x - s.x, kEarthworkMaxTiles - 1)),
+		                 s.y + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.y - s.y, kEarthworkMaxTiles - 1)));
+		terrain_deform::earthworkSlopeArea(s, e, lo, hi);
+		return;
+	}
 	// Limit the far corner so the area stays within the largest allowed size
 	const Vector2i e(s.x + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.x - s.x, kEarthworkMaxTiles - 1)),
 	                 s.y + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.y - s.y, kEarthworkMaxTiles - 1)));
@@ -914,6 +922,20 @@ void startEarthworkPlacement(int mode)
 	earthworkPlacement.active = true;
 	earthworkPlacement.mode = mode;
 	earthworkPlacement.dragging = false;
+}
+
+/// Warzone 2126: the drag of a slope placement, from its start tile to the (limited) end tile
+bool earthworkSlopeDrag(Vector2i& startTile, Vector2i& endTile)
+{
+	if (!earthworkPlacement.active || !earthworkPlacement.dragging || earthworkPlacement.mode != terrain_deform::EARTHWORK_SLOPE)
+	{
+		return false;
+	}
+	startTile = earthworkPlacement.startTile;
+	const Vector2i mouse(mouseTileX, mouseTileY);
+	endTile = Vector2i(startTile.x + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.x - startTile.x, kEarthworkMaxTiles - 1)),
+	                   startTile.y + std::max(-(kEarthworkMaxTiles - 1), std::min(mouse.y - startTile.y, kEarthworkMaxTiles - 1)));
+	return startTile != endTile;
 }
 
 bool earthworkPlacementPreview(Vector2i& loTile, Vector2i& hiTile, int& mode)
@@ -950,7 +972,22 @@ static bool processEarthworkPlacement()
 		earthworkCurrentRect(lo, hi);
 		const bool queue = keyDown(KEY_LSHIFT) || keyDown(KEY_RSHIFT);
 		OrderSourceScope orderScope(pointerOrderSource());
-		orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), earthworkPlacement.mode, queue);
+		if (earthworkPlacement.mode == terrain_deform::EARTHWORK_SLOPE)
+		{
+			// A slope runs from where the drag began to where it ended
+			Vector2i from, to;
+			if (!earthworkSlopeDrag(from, to))
+			{
+				CONPRINTF("%s", _("Slope: drag from one level to the other (the ramp runs along the drag)"));
+				earthworkPlacement.dragging = false;
+				return true;
+			}
+			orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(from.x), world_coord(from.y)), Vector2i(world_coord(to.x), world_coord(to.y)), earthworkPlacement.mode, queue);
+		}
+		else
+		{
+			orderSelectedEarthwork(selectedPlayer, Vector2i(world_coord(lo.x), world_coord(lo.y)), Vector2i(world_coord(hi.x), world_coord(hi.y)), earthworkPlacement.mode, queue);
+		}
 		audio_PlayTrack(ID_SOUND_SELECT);
 		earthworkPlacement.dragging = false;
 		if (!queue)

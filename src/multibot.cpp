@@ -31,6 +31,7 @@
 #include "droiddef.h"
 #include "stats.h"
 #include "move.h"						// for ordering droids
+#include "carrier2126.h"
 #include "terrain_deform.h"
 #include "tunnels.h"
 #include "objmem.h"
@@ -660,7 +661,7 @@ static bool validDroidInfoOrderData(QueuedDroidInfo const &info, DROID_ORDER_DAT
 	{
 		return false;
 	}
-	if (info.order == DORDER_EARTHWORK && (!worldOnMap(gameWorld.map, sOrder.pos) || !worldOnMap(gameWorld.map, sOrder.pos2) || sOrder.direction > 2
+	if (info.order == DORDER_EARTHWORK && (!worldOnMap(gameWorld.map, sOrder.pos) || !worldOnMap(gameWorld.map, sOrder.pos2) || sOrder.direction >= terrain_deform::kEarthworkModeCount
 	                                       || std::abs(sOrder.pos2.x - sOrder.pos.x) > terrain_deform::kEarthworkMaxSize || std::abs(sOrder.pos2.y - sOrder.pos.y) > terrain_deform::kEarthworkMaxSize))
 	{
 		return false;
@@ -679,6 +680,8 @@ static bool validDroidInfoOrderData(QueuedDroidInfo const &info, DROID_ORDER_DAT
 			return getModuleStat(static_cast<const STRUCTURE *>(sOrder.psObj)) != nullptr;
 		case DORDER_TUNNEL:
 			return sOrder.psObj->type == OBJ_STRUCTURE && tunnels::isEntrance(static_cast<const STRUCTURE *>(sOrder.psObj));
+		case DORDER_CARRIER:
+			return carrier2126::isCarrier(sOrder.psObj);
 		default:
 			break;
 		}
@@ -700,6 +703,7 @@ static bool droidInfoOrderTargetApplies(QueuedDroidInfo const &info, DROID_ORDER
 	case DORDER_EMBARK:
 	case DORDER_COMMANDERSUPPORT:
 	case DORDER_TUNNEL:
+	case DORDER_CARRIER:
 		return sOrder.psObj->player == info.player;
 	case DORDER_ATTACK:
 	case DORDER_ATTACKTARGET:

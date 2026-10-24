@@ -663,6 +663,7 @@ bool loadBodyStats(WzConfig &ini)
 		psStats->weaponSlots = std::clamp(ini.value("weaponSlots").toInt(), 0, static_cast<int>(MAX_WEAPONS));
 		psStats->bodyClass = ini.value("class").toWzString();
 		psStats->isNaval = ini.value("naval", 0).toInt() != 0;
+		psStats->carrierCapacity2126 = static_cast<unsigned>(std::clamp(ini.value("carrierCapacity", 0).toInt(), 0, 8)); // Warzone 2126: VTOL deck slots
 		psStats->base.thermal = ini.value("armourHeat").toInt();
 		psStats->base.armour = ini.value("armourKinetic").toInt();
 		psStats->base.power = ini.value("powerOutput").toInt();
