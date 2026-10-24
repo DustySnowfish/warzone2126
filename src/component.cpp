@@ -96,15 +96,37 @@ static glm::mat4 setMatrix(const Vector3i *Position, const Vector3i *Rotation, i
 		glm::scale(glm::vec3(scale / 100.f));
 }
 
-UDWORD getComponentDroidRadius(const DROID *)
+/// Warzone 2126: display radius for droid buttons and the design view. Ordinary units keep the
+/// classic fixed 100; the big warships are much larger and are drawn smaller to fit.
+static UDWORD bigHullDisplayRadius2126(unsigned bodyIndex, unsigned propIndex)
 {
-	return 100;
+	if (bodyIndex >= asBodyStats.size() || propIndex >= asPropulsionStats.size())
+	{
+		return 100;
+	}
+	const BODY_STATS &body = asBodyStats[bodyIndex];
+	int radius = 0;
+	if (body.pIMD && body.pIMD->displayModel())
+	{
+		radius = std::max(radius, body.pIMD->displayModel()->radius);
+	}
+	const iIMDBaseShape *hull = body.ppIMDList.size() > propIndex * NUM_PROP_SIDES + LEFT_PROP ? body.ppIMDList[propIndex * NUM_PROP_SIDES + LEFT_PROP] : nullptr;
+	if (hull && hull->displayModel())
+	{
+		radius = std::max(radius, hull->displayModel()->radius);
+	}
+	return static_cast<UDWORD>(std::max(100, radius * 8 / 5));
+}
+
+UDWORD getComponentDroidRadius(const DROID *psDroid)
+{
+	return psDroid ? bigHullDisplayRadius2126(psDroid->asBits[COMP_BODY], psDroid->asBits[COMP_PROPULSION]) : 100;
 }
 
 
-UDWORD getComponentDroidTemplateRadius(const DROID_TEMPLATE *)
+UDWORD getComponentDroidTemplateRadius(const DROID_TEMPLATE *psTemplate)
 {
-	return 100;
+	return psTemplate ? bigHullDisplayRadius2126(psTemplate->asParts[COMP_BODY], psTemplate->asParts[COMP_PROPULSION]) : 100;
 }
 
 
@@ -1070,7 +1092,7 @@ glm::mat4 shipMotion(const DROID* psDroid)
 		m.lastTime = graphicsTime;
 	}
 	const BODY_SIZE size = psDroid->getBodyStats()->size;
-	const float swell = size == SIZE_LIGHT ? 1.3f : (size >= SIZE_HEAVY ? 0.7f : 1.f);
+	const float swell = size == SIZE_LIGHT ? 1.3f : (size >= SIZE_SUPER_HEAVY ? 0.45f : (size >= SIZE_HEAVY ? 0.7f : 1.f));
 	const float t = static_cast<float>(graphicsTime) / 1000.f;
 	const float phase = static_cast<float>(psDroid->id % 997) * 0.618f;
 	const float speedFrac = std::min(1.f, std::abs(static_cast<float>(psDroid->sMove.speed)) / std::max(1.f, static_cast<float>(psDroid->baseSpeed)));

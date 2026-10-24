@@ -120,6 +120,10 @@ const bodyStats = [
 	// Warzone 2126 ship hulls (also count as kinetic for guessing enemy armour)
 	{ res: "R-Vehicle-Prop-NavalScrew", stat: "NavalPatrol", weight: WEIGHT.LIGHT, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
 	{ res: "R-Vehicle-Body-NavalFrigate", stat: "NavalFrigate", weight: WEIGHT.HEAVY, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
+	{ res: "R-Vehicle-Body-NavalDestroyer", stat: "NavalDestroyer", weight: WEIGHT.MEDIUM, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
+	{ res: "R-Vehicle-Body-NavalCruiser", stat: "NavalCruiser", weight: WEIGHT.HEAVY, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
+	{ res: "R-Vehicle-Body-NavalBattleship", stat: "NavalBattleship", weight: WEIGHT.HEAVY, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
+	{ res: "R-Vehicle-Body-NavalSuperBattleship", stat: "NavalSuperBattleship", weight: WEIGHT.ULTRAHEAVY, usage: BODYUSAGE.NAVAL, armor: BODYCLASS.KINETIC },
 ];
 
 const classResearch = {

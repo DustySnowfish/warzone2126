@@ -2048,7 +2048,10 @@ static void moveUpdateShipModel(DROID *psDroid, SDWORD speed, uint16_t direction
 		const int currentSpeed = std::min<int>(std::abs(psDroid->sMove.speed), maxSpeed);
 		const int slowRate = DEG(std::max<int>(1, psPropStats->spinSpeed));
 		const int fastRate = DEG(std::max<int>(1, psPropStats->turnSpeed));
-		const int turnRate = slowRate + int64_t(fastRate - slowRate) * currentSpeed / maxSpeed;
+		// Bigger hulls answer the helm more slowly (a wider turning circle)
+		static const int kHullTurnPercent[] = { 100, 85, 70, 55 }; // light, medium, heavy, super heavy
+		const int sizeIndex = std::min<int>(std::max<int>(static_cast<int>(psDroid->getBodyStats()->size), 0), 3);
+		const int turnRate = (slowRate + int64_t(fastRate - slowRate) * currentSpeed / maxSpeed) * kHullTurnPercent[sizeIndex] / 100;
 		const int maxChange = std::max(1, gameTimeAdjustedAverage(turnRate));
 		iDroidDir += clip(diff, -maxChange, maxChange);
 	}

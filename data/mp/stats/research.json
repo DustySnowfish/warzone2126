@@ -9334,6 +9334,66 @@
 		],
 		"statID": "NavalLanding"
 	},
+	"R-Vehicle-Body-NavalDestroyer": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalDestroyer",
+		"name": "Destroyer Hull",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalFrigate",
+			"R-Vehicle-Body11"
+		],
+		"researchPoints": 9000,
+		"researchPower": 250,
+		"resultComponents": [
+			"NavalDestroyer"
+		],
+		"statID": "NavalDestroyer"
+	},
+	"R-Vehicle-Body-NavalCruiser": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalCruiser",
+		"name": "Cruiser Hull",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalDestroyer",
+			"R-Vehicle-Body09"
+		],
+		"researchPoints": 12000,
+		"researchPower": 300,
+		"resultComponents": [
+			"NavalCruiser"
+		],
+		"statID": "NavalCruiser"
+	},
+	"R-Vehicle-Body-NavalBattleship": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalBattleship",
+		"name": "Battleship Hull",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalCruiser",
+			"R-Vehicle-Body10"
+		],
+		"researchPoints": 16000,
+		"researchPower": 375,
+		"resultComponents": [
+			"NavalBattleship"
+		],
+		"statID": "NavalBattleship"
+	},
+	"R-Vehicle-Body-NavalSuperBattleship": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalSuperBattleship",
+		"name": "Super Battleship Hull",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalBattleship",
+			"R-Vehicle-Body14"
+		],
+		"researchPoints": 22000,
+		"researchPower": 450,
+		"resultComponents": [
+			"NavalSuperBattleship"
+		],
+		"statID": "NavalSuperBattleship"
+	},
 	"R-Vehicle-Body-NavalFrigate": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body-NavalFrigate",

@@ -74,7 +74,9 @@ struct SIMPLE_OBJECT
 	uint32_t        time;                           ///< Game time of given space-time position.
 };
 
-#define MAX_WEAPONS 3
+/// Warzone 2126: 8 (was 3), for the big warships' turret mounts. A body's weaponSlots still
+/// limits each design; every other unit keeps its 1 to 3 mounts.
+#define MAX_WEAPONS 8
 
 enum OBJECT_FLAG
 {

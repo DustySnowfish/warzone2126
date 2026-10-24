@@ -1063,8 +1063,8 @@ void IntFancyButton::displayIMD(AtlasImage image, ImdObject imdObject, int xOffs
 			Radius = getComponentDroidTemplateRadius((const DROID_TEMPLATE *)Object);
 		}
 
-		model.scale = DROID_BUT_SCALE;
-		ASSERT(Radius <= 128, "create PIE button big component found");
+		// (Warzone 2126: big warships report a larger radius and are drawn smaller to fit the button)
+		model.scale = DROID_BUT_SCALE * 100 / std::max<int>(100, Radius);
 
 		displayClear(xOffset, yOffset);
 

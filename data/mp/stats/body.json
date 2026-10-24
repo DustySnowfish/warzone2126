@@ -1089,6 +1089,106 @@
 		"weaponSlots": 1,
 		"weight": 1400
 	},
+	"NavalDestroyer": {
+		"armourHeat": 20,
+		"armourKinetic": 30,
+		"buildPoints": 900,
+		"buildPower": 220,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 950,
+		"id": "NavalDestroyer",
+		"model": "drnaval_destroyer.pie",
+		"name": "Destroyer Hull",
+		"naval": 1,
+		"powerOutput": 30000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_destroyer.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_destroyer.pie"
+			}
+		},
+		"size": "MEDIUM",
+		"weaponSlots": 3,
+		"weight": 3200
+	},
+	"NavalCruiser": {
+		"armourHeat": 28,
+		"armourKinetic": 42,
+		"buildPoints": 1500,
+		"buildPower": 380,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 1700,
+		"id": "NavalCruiser",
+		"model": "drnaval_cruiser.pie",
+		"name": "Cruiser Hull",
+		"naval": 1,
+		"powerOutput": 46000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_cruiser.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_cruiser.pie"
+			}
+		},
+		"size": "HEAVY",
+		"weaponSlots": 5,
+		"weight": 5400
+	},
+	"NavalBattleship": {
+		"armourHeat": 38,
+		"armourKinetic": 56,
+		"buildPoints": 2400,
+		"buildPower": 600,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 2700,
+		"id": "NavalBattleship",
+		"model": "drnaval_battleship.pie",
+		"name": "Battleship Hull",
+		"naval": 1,
+		"powerOutput": 70000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_battleship.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_battleship.pie"
+			}
+		},
+		"size": "HEAVY",
+		"weaponSlots": 6,
+		"weight": 8200
+	},
+	"NavalSuperBattleship": {
+		"armourHeat": 50,
+		"armourKinetic": 72,
+		"buildPoints": 3800,
+		"buildPower": 950,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 4300,
+		"id": "NavalSuperBattleship",
+		"model": "drnaval_superbattle.pie",
+		"name": "Super Battleship Hull",
+		"naval": 1,
+		"powerOutput": 110000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_superbattle.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_superbattle.pie"
+			}
+		},
+		"size": "SUPER HEAVY",
+		"weaponSlots": 8,
+		"weight": 12500
+	},
 	"NavalFrigate": {
 		"armourHeat": 20,
 		"armourKinetic": 30,

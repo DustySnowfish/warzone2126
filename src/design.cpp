@@ -119,7 +119,41 @@ enum DES_COMPMODE
 	IDES_NOCOMPONENT,	// No system has been selected
 	IDES_TURRET_A,		// The 2nd turret
 	IDES_TURRET_B,		// The 3rd turret
+	IDES_TURRET_C,		// Warzone 2126: 4th to 8th turrets (big warships)
+	IDES_TURRET_D,
+	IDES_TURRET_E,
+	IDES_TURRET_F,
+	IDES_TURRET_G,
 };
+
+/// Warzone 2126: weapon slot edited in a turret mode (0 for IDES_TURRET), or -1
+static int turretSlotForMode(int mode)
+{
+	switch (mode)
+	{
+	case IDES_TURRET: return 0;
+	case IDES_TURRET_A: return 1;
+	case IDES_TURRET_B: return 2;
+	case IDES_TURRET_C: return 3;
+	case IDES_TURRET_D: return 4;
+	case IDES_TURRET_E: return 5;
+	case IDES_TURRET_F: return 6;
+	case IDES_TURRET_G: return 7;
+	default: return -1;
+	}
+}
+
+static DES_COMPMODE turretModeForSlot(int slot)
+{
+	static const DES_COMPMODE modes[] = { IDES_TURRET, IDES_TURRET_A, IDES_TURRET_B, IDES_TURRET_C, IDES_TURRET_D, IDES_TURRET_E, IDES_TURRET_F, IDES_TURRET_G };
+	return (slot >= 0 && slot < 8) ? modes[slot] : IDES_TURRET;
+}
+
+/// Warzone 2126: bodies with more than 3 weapon slots (big warships) pick their mounts with a grid
+/// of small numbered buttons instead of the turret / turret A / turret B buttons
+#define IDDES_MOUNTBUTTON0		5910
+static void updateMountButtons2126();
+static void displayMountButton2126(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 static DES_COMPMODE desCompMode;
 
 /* Which type of propulsion is being selected */
@@ -798,6 +832,32 @@ bool intAddDesign(bool bShowCentreScreen)
 		return false;
 	}
 
+	// Warzone 2126: turret mount buttons for big warships (a 2 x 4 grid where the turret buttons
+	// are; shown instead of them for bodies with more than 3 weapon slots)
+	{
+		const int top = iV_GetImageHeight(IntImages, IMAGE_DES_PROPULSION) + iV_GetImageHeight(IntImages, IMAGE_DES_BODY) + 3 * DES_PARTSEPARATIONY;
+		const int cellW = (iV_GetImageWidth(IntImages, IMAGE_DES_TURRET) - 3) / 2;
+		const int cellH = 18;
+		for (int i = 0; i < MAX_WEAPONS; ++i)
+		{
+			W_BUTINIT mountInit;
+			mountInit.formID = IDDES_PARTFORM;
+			mountInit.id = IDDES_MOUNTBUTTON0 + i;
+			mountInit.x = static_cast<int16_t>(DES_PARTSEPARATIONX + (i % 2) * (cellW + 3));
+			mountInit.y = static_cast<int16_t>(top + (i / 2) * (cellH + 3));
+			mountInit.width = static_cast<uint16_t>(cellW);
+			mountInit.height = static_cast<uint16_t>(cellH);
+			mountInit.pTip = _("Turret mount");
+			mountInit.pDisplay = displayMountButton2126;
+			mountInit.UserData = static_cast<UDWORD>(i);
+			if (!widgAddButton(psWScreen, &mountInit))
+			{
+				return false;
+			}
+			widgHide(psWScreen, IDDES_MOUNTBUTTON0 + i);
+		}
+	}
+
 	/* add the delete button */
 	sButInit.formID = IDDES_PARTFORM;
 	sButInit.id = IDDES_BIN;
@@ -1146,6 +1206,59 @@ static bool intAddTemplateButtons(ListTabWidget *templList, DROID_TEMPLATE *psSe
  * component lists
  * added case IDES_TURRET_A,IDES_TURRET_B
  */
+/// Warzone 2126: a turret mount button (numbered; lit when selected, flashing when it is the next
+/// mount to fill)
+static void displayMountButton2126(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
+{
+	const int x0 = xOffset + psWidget->x();
+	const int y0 = yOffset + psWidget->y();
+	const int slot = static_cast<int>(psWidget->UserData);
+	const bool selected = turretSlotForMode(desCompMode) == slot;
+	const bool filled = slot < sCurrDesign.numWeaps;
+	const bool next = slot == sCurrDesign.numWeaps && (realTime / 250) % 2 == 0;
+	const bool hover = psWidget->isMouseOverWidget();
+	PIELIGHT fill = selected ? pal_RGBA(40, 120, 160, 255) : next ? pal_RGBA(90, 90, 30, 255) : filled ? pal_RGBA(30, 60, 80, 255) : pal_RGBA(16, 24, 32, 255);
+	pie_UniTransBoxFill(x0, y0, x0 + psWidget->width(), y0 + psWidget->height(), fill);
+	iV_Box(x0, y0, x0 + psWidget->width() - 1, y0 + psWidget->height() - 1, hover || selected ? pal_RGBA(140, 210, 255, 255) : pal_RGBA(70, 100, 120, 255));
+	char label[4];
+	ssprintf(label, "%d", slot + 1);
+	iV_DrawText(label, x0 + psWidget->width() / 2 - 3, y0 + psWidget->height() - 4, font_small);
+}
+
+static void updateMountButtons2126()
+{
+	if (widgGetFromID(psWScreen, IDDES_MOUNTBUTTON0) == nullptr)
+	{
+		return;
+	}
+	const BODY_STATS *body = sCurrDesign.asParts[COMP_BODY] != 0 ? sCurrDesign.getBodyStats() : nullptr;
+	const bool bigShip = body != nullptr && body->weaponSlots > 3 && sCurrDesign.asParts[COMP_BRAIN] == 0
+		&& widgGetFromID(psWScreen, IDDES_BODYBUTTON) != nullptr && widgGetFromID(psWScreen, IDDES_BODYBUTTON)->visible();
+	for (int i = 0; i < MAX_WEAPONS; ++i)
+	{
+		WIDGET *button = widgGetFromID(psWScreen, IDDES_MOUNTBUTTON0 + i);
+		// Mounts up to the next empty one are offered, in order
+		const bool show = bigShip && i < static_cast<int>(body->weaponSlots) && i <= sCurrDesign.numWeaps
+			&& widgGetFromID(psWScreen, IDDES_PROPBUTTON)->visible();
+		button->show(show);
+	}
+	static bool wasBigShip = false;
+	if (bigShip)
+	{
+		widgHide(psWScreen, IDDES_SYSTEMBUTTON);
+		widgHide(psWScreen, IDDES_WPABUTTON);
+		widgHide(psWScreen, IDDES_WPBBUTTON);
+	}
+	else if (wasBigShip && body != nullptr)
+	{
+		// Back from a big warship to an ordinary body: the turret buttons are the way in again
+		widgReveal(psWScreen, IDDES_SYSTEMBUTTON);
+		widgGetFromID(psWScreen, IDDES_WPABUTTON)->show(body->weaponSlots > 1 && sCurrDesign.numWeaps >= 1);
+		widgGetFromID(psWScreen, IDDES_WPBBUTTON)->show(body->weaponSlots > 2 && sCurrDesign.numWeaps >= 2);
+	}
+	wasBigShip = bigShip;
+}
+
 static void intSetDesignMode(DES_COMPMODE newCompMode, bool forceRefresh)
 {
 	UDWORD	weaponIndex;
@@ -1244,7 +1357,24 @@ static void intSetDesignMode(DES_COMPMODE newCompMode, bool forceRefresh)
 		// Stop the button flashing
 		intSetButtonFlash(IDDES_WPBBUTTON,   false);
 		break;
+	case IDES_TURRET_C:
+	case IDES_TURRET_D:
+	case IDES_TURRET_E:
+	case IDES_TURRET_F:
+	case IDES_TURRET_G:
+	{
+		const int slot = turretSlotForMode(desCompMode);
+		compList = intAddComponentForm();
+		weaponIndex = (sCurrDesign.numWeaps > slot) ? sCurrDesign.asWeaps[slot] : 0;
+		intAddComponentButtons(compList, weaponIterator(), weaponIndex, true);
+		intAddSystemButtons(desCompMode);
+		widgSetButtonState(psWScreen, IDDES_SYSTEMFORM, WBUT_LOCK);
+		widgReveal(psWScreen, IDDES_SYSTEMFORM);
+		intSetSystemForm(sCurrDesign.getWeaponStats(slot));
+		break;
 	}
+	}
+	updateMountButtons2126();
 }
 
 static COMPONENT_STATS *
@@ -1972,7 +2102,7 @@ static bool intAddSystemButtons(DES_COMPMODE mode)
 
 	// if currently got a VTOL proplusion attached then don't add the system buttons
 	// don't add the system button if mode is IDES_TURRET_A or IDES_TURRET_B
-	if (!checkTemplateIsVtol(&sCurrDesign) && mode != IDES_TURRET_A && mode != IDES_TURRET_B)
+	if (!checkTemplateIsVtol(&sCurrDesign) && turretSlotForMode(mode) <= 0)
 	{
 		// add the system button
 		sButInit.formID = IDDES_RIGHTBASE;
@@ -2000,6 +2130,11 @@ static bool intAddSystemButtons(DES_COMPMODE mode)
 	case IDES_TURRET:
 	case IDES_TURRET_A:
 	case IDES_TURRET_B:
+	case IDES_TURRET_C:
+	case IDES_TURRET_D:
+	case IDES_TURRET_E:
+	case IDES_TURRET_F:
+	case IDES_TURRET_G:
 		widgSetButtonState(psWScreen, IDDES_WEAPONS, WBUT_LOCK);
 		break;
 	case IDES_SYSTEM:
@@ -2579,7 +2714,7 @@ static void setTemplateStat(DROID_TEMPLATE *psTemplate, COMPONENT_STATS *psStats
 		break;
 	case COMP_WEAPON: {
 		clearNonWeapons();
-		int i = desCompMode == IDES_TURRET_A? 1 : desCompMode == IDES_TURRET_B? 2 : 0;
+		int i = std::max(0, turretSlotForMode(desCompMode));
 		psTemplate->asWeaps[i] = (WEAPON_STATS *)psStats - asWeaponStats.data();
 		psTemplate->numWeaps = std::max<int>(psTemplate->numWeaps, i + 1);
 		break;
@@ -3025,7 +3160,28 @@ static DROID_TEMPLATE *templateFromButtonId(unsigned buttonId, bool allowBlankTe
 }
 
 /* Process return codes from the design screen */
+static void intProcessDesign2126(UDWORD id);
+
 void intProcessDesign(UDWORD id)
+{
+	if (id >= IDDES_MOUNTBUTTON0 && id < IDDES_MOUNTBUTTON0 + MAX_WEAPONS)
+	{
+		// Warzone 2126: a big warship's turret mount
+		desCompID = 0;
+		intSetDesignMode(turretModeForSlot(static_cast<int>(id - IDDES_MOUNTBUTTON0)));
+		widgReveal(psWScreen, IDDES_STATSFORM);
+		widgReveal(psWScreen, IDDES_RIGHTBASE);
+		widgReveal(psWScreen, IDDES_SYSTEMFORM);
+		widgHide(psWScreen, IDDES_BODYFORM);
+		widgHide(psWScreen, IDDES_PROPFORM);
+		updateMountButtons2126();
+		return;
+	}
+	intProcessDesign2126(id);
+	updateMountButtons2126();
+}
+
+static void intProcessDesign2126(UDWORD id)
 {
 	/* check template button pressed */
 	if (id >= IDDES_TEMPLSTART && id <= IDDES_TEMPLEND)
@@ -3205,6 +3361,15 @@ void intProcessDesign(UDWORD id)
 			// Stop the button flashing
 			intSetButtonFlash(IDDES_WPBBUTTON,   false);
 
+			triggerEvent(TRIGGER_DESIGN_WEAPON);
+			break;
+		case IDES_TURRET_C:
+		case IDES_TURRET_D:
+		case IDES_TURRET_E:
+		case IDES_TURRET_F:
+		case IDES_TURRET_G:
+			setTemplateStat(&sCurrDesign, apsComponentList[id - IDDES_COMPSTART]);
+			intSetSystemForm(apsComponentList[id - IDDES_COMPSTART]);
 			triggerEvent(TRIGGER_DESIGN_WEAPON);
 			break;
 		case IDES_BODY: {
@@ -3593,6 +3758,11 @@ void intProcessDesign(UDWORD id)
 		// reveals SYSTEMFORM
 		case IDES_TURRET_A:
 		case IDES_TURRET_B:
+		case IDES_TURRET_C:
+		case IDES_TURRET_D:
+		case IDES_TURRET_E:
+		case IDES_TURRET_F:
+		case IDES_TURRET_G:
 			widgHide(psWScreen, IDDES_BODYFORM);
 			widgHide(psWScreen, IDDES_PROPFORM);
 			widgReveal(psWScreen, IDDES_SYSTEMFORM);
@@ -3646,8 +3816,19 @@ void intProcessDesign(UDWORD id)
 				}
 				break;
 			case IDES_TURRET_B:
-				debug(LOG_GUI, "intProcessDesign: Third weapon selected, is final.");
+			case IDES_TURRET_C:
+			case IDES_TURRET_D:
+			case IDES_TURRET_E:
+			case IDES_TURRET_F:
+			{
+				// Warzone 2126: on to the next mount of a big warship
+				const int slot = turretSlotForMode(desCompMode);
+				if (static_cast<int>(sCurrDesign.getBodyStats()->weaponSlots) > slot + 1 && sCurrDesign.numWeaps == slot + 1)
+				{
+					intSetDesignMode(turretModeForSlot(slot + 1));
+				}
 				break;
+			}
 			default:
 				break;
 			}
@@ -3711,6 +3892,11 @@ void intRunDesign()
 		case IDES_TURRET:
 		case IDES_TURRET_A:
 		case IDES_TURRET_B:
+		case IDES_TURRET_C:
+		case IDES_TURRET_D:
+		case IDES_TURRET_E:
+		case IDES_TURRET_F:
+		case IDES_TURRET_G:
 			intSetBodyShadowStats(nullptr);
 			intSetPropulsionShadowStats(nullptr);
 			intSetSystemShadowStats(psStats);

@@ -143,6 +143,18 @@ _global.navalResearch = function(lab) {
 		}
 	}
 
+	// Bigger hulls once ships are in use (the research tree leads from Frigate to Super Battleship)
+	if (iHaveShips() && navalWanted() && withChance(25))
+	{
+		const hulls = bodyStats.filter((b) => (b.usage === BODYUSAGE.NAVAL)).map((b) => (b.res));
+
+		if (pursueResearch(lab, hulls.reverse()))
+		{
+			navalDebug("researching bigger hulls");
+			return true;
+		}
+	}
+
 	if (iHaveShips() || gameTime < 4 * 60000 || !navalWanted() || !withChance(35))
 	{
 		return false;
@@ -273,7 +285,8 @@ _global.checkShipProduction = function() {
 
 		if (defined(bwPair))
 		{
-			success = buildDroid(yard, "Warship", bwPair.b, propulsions, "", "", bwPair.w, bwPair.w, bwPair.w) || success;
+			// (every mount gets the chosen weapon; a hull takes as many as it has mounts, up to 8)
+			success = buildDroid(yard, "Warship", bwPair.b, propulsions, "", "", bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w) || success;
 		}
 	});
 
