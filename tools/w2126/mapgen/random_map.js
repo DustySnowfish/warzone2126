@@ -208,11 +208,32 @@ function terrace(e, levels) {
 	const f = t - k;
 	return clamp((k + f * 0.18) / levels, 0, 1);
 }
+// Polish: a small blur of a noise field, so contours drawn on it follow smooth curves instead of
+// one-tile notches and spurs
+function blurField(src, radius) {
+	const tmp = new Array(AREA), out = new Array(AREA);
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			let s = 0, n = 0;
+			for (let d = -radius; d <= radius; ++d) { const xx = x + d; if (xx >= 0 && xx < N) { const w = radius + 1 - Math.abs(d); s += src[idx(xx, y)] * w; n += w; } }
+			tmp[idx(x, y)] = s / n;
+		}
+	}
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			let s = 0, n = 0;
+			for (let d = -radius; d <= radius; ++d) { const yy = y + d; if (yy >= 0 && yy < N) { const w = radius + 1 - Math.abs(d); s += tmp[idx(x, yy)] * w; n += w; } }
+			out[idx(x, y)] = s / n;
+		}
+	}
+	return out;
+}
 function buildElevation() {
+	const smoothBase = (style.terraces > 0 || style.ridged) ? blurField(nBase, 2) : nBase;
 	for (let i = 0; i < AREA; ++i) {
 		// Large shapes only here; the detail noise is added after terracing, so it roughens the
 		// ground without breaking cliffs into specks
-		let e = style.terraces > 0 || style.ridged ? nBase[i] / 1000 : (nBase[i] * 0.82 + nDetail[i] * 0.18) / 1000;
+		let e = style.terraces > 0 || style.ridged ? smoothBase[i] / 1000 : (nBase[i] * 0.82 + nDetail[i] * 0.18) / 1000;
 		e = clamp((e - 0.12) / 0.76, 0, 1);
 		if (style.ridged) {
 			// Valleys along the mid contour: canyons winding across the map
@@ -488,6 +509,68 @@ for (let i = 0; i < AREA; ++i) {
 	hgt[i] = clamp(Math.round(minH + e * reliefH), 0, 510);
 }
 
+// Polish: soften open ground. Edge-preserving smoothing removes tile-sized facets without
+// touching cliff steps or shores, then a fine rolling layer adds small hummocks and hollows.
+// Fine rolling noise from the tile hash (no extra noise field: the script has a memory cap)
+const microSalt = rand(1 << 30);
+// Lattice values for two octaves (7 and 3 tiles), looked up instead of hashed per tile
+const microGrid = [7, 3].map((cell, o) => {
+	const W = Math.floor(N / cell) + 2;
+	const g = new Array(W * W);
+	for (let gy = 0; gy < W; ++gy) { for (let gx = 0; gx < W; ++gx) { g[gy * W + gx] = hash01(gx, gy, microSalt + o) - 0.5; } }
+	return { cell: cell, W: W, g: g, amp: o ? 0.36 : 0.65 };
+});
+function microNoise(x, y) {
+	let v = 0;
+	for (const m of microGrid) {
+		const gx = Math.floor(x / m.cell), gy = Math.floor(y / m.cell);
+		let fx = x / m.cell - gx, fy = y / m.cell - gy;
+		fx = fx * fx * (3 - 2 * fx); fy = fy * fy * (3 - 2 * fy);
+		const k = gy * m.W + gx, g = m.g;
+		const top = g[k] + (g[k + 1] - g[k]) * fx, bot = g[k + m.W] + (g[k + m.W + 1] - g[k + m.W]) * fx;
+		v += (top + (bot - top) * fy) * m.amp;
+	}
+	return v; // about -0.5..0.5
+}
+const polishBuf = new Array(AREA);
+{
+	const stepLimit = Math.max(12, Math.round(style.cliff * 0.45));
+	const out = polishBuf;
+	// Separable 1-2-1 passes (along rows, then columns); a neighbour across a step or in water
+	// does not count
+	for (let pass = 0; pass < 2; ++pass) {
+		for (const step of [1, N]) {
+			for (let i = 0; i < AREA; ++i) { out[i] = hgt[i]; }
+			for (let y = 1; y < N - 1; ++y) {
+				let i = y * N;
+				for (let x = 1; x < N - 1; ++x) {
+					++i;
+					if (water[i]) { continue; }
+					const h = hgt[i], a = hgt[i - step], b = hgt[i + step];
+					let s = h * 2, w = 2;
+					if (a - h <= stepLimit && h - a <= stepLimit && !water[i - step]) { s += a; ++w; }
+					if (b - h <= stepLimit && h - b <= stepLimit && !water[i + step]) { s += b; ++w; }
+					if (w > 2) { out[i] = Math.round(s / w); }
+				}
+			}
+			for (let i = 0; i < AREA; ++i) { hgt[i] = out[i]; }
+		}
+	}
+	const microAmp = Math.round(4 + reliefH * 0.012);
+	for (let y = 1; y < N - 1; ++y) {
+		for (let x = 1; x < N - 1; ++x) {
+			const i = idx(x, y);
+			if (water[i]) { continue; }
+			let nearWater = false;
+			for (let dy = -1; dy <= 1 && !nearWater; ++dy) { for (let dx = -1; dx <= 1; ++dx) { if (water[i + dy * N + dx]) { nearWater = true; break; } } }
+			if (nearWater) { continue; }
+			let v;
+			if (MIRROR && PLAYERS > 1) { const m = mirroredTile(x, y); v = microNoise(m[0], m[1]); } else { v = microNoise(x, y); }
+			hgt[i] = clamp(hgt[i] + Math.round(v * 1.6 * microAmp), 0, 510);
+		}
+	}
+}
+
 function vtx(x, y) { return idx(Math.min(x, N - 1), Math.min(y, N - 1)); }
 // Steps between terraces must read as cliffs, whatever the number of levels
 const cliffDelta = style.terraces > 0 ? Math.min(style.cliff, Math.round(reliefH / style.terraces * 0.82 * 0.7)) : style.cliff;
@@ -508,6 +591,63 @@ for (let y = 1; y < N - 1; ++y) {
 		let n = 0;
 		for (let dy = -1; dy <= 1; ++dy) { for (let dx = -1; dx <= 1; ++dx) { if ((dx || dy) && cat[i + dy * N + dx] === CLIFF) { ++n; } } }
 		if (n <= 1) { cat[i] = LAND; }
+	}
+}
+
+// Polish: little islands of level ground ringed by cliffs (and short cliff stubs) read as
+// blocks. Melt them into gentle mounds and hollows.
+{
+	// flags: 1 visited, 2 melt, 4 zone
+	const flags = polishBuf.fill(0);
+	const minPlateau = 10 + Math.round(N / 16);
+	const stack = [];
+	const flood = (start, want, eight) => {
+		const tiles = [start];
+		flags[start] |= 1;
+		stack.length = 0;
+		stack.push(start);
+		const offs = eight ? [-N - 1, -N, -N + 1, -1, 1, N - 1, N, N + 1] : [-N, -1, 1, N];
+		while (stack.length) {
+			const i = stack.pop();
+			const x = i % N;
+			if (x === 0 || x === N - 1 || i < N || i >= AREA - N) { continue; } // map edge tiles do not spread
+			for (const o of offs) {
+				const j = i + o;
+				if (!(flags[j] & 1) && cat[j] === want) { flags[j] |= 1; tiles.push(j); stack.push(j); }
+			}
+		}
+		return tiles;
+	};
+	for (let i = 0; i < AREA; ++i) {
+		if ((flags[i] & 1) || cat[i] === WATER) { continue; }
+		const isLand = cat[i] === LAND;
+		const tiles = flood(i, cat[i], !isLand);
+		if ((isLand && tiles.length < minPlateau) || (!isLand && tiles.length < 6)) {
+			for (const t of tiles) { flags[t] |= 2; }
+		}
+	}
+	for (let y = 2; y < N - 2; ++y) {
+		for (let x = 2; x < N - 2; ++x) {
+			if (!(flags[idx(x, y)] & 2)) { continue; }
+			for (let dy = -2; dy <= 2; ++dy) { for (let dx = -2; dx <= 2; ++dx) { const j = idx(x + dx, y + dy); if (!water[j]) { flags[j] |= 4; } } }
+		}
+	}
+	// The zone flags move to a list, so the shared buffer is free for the smoothing passes
+	const zoneList = [];
+	for (let i = 0; i < AREA; ++i) { if (flags[i] & 4) { zoneList.push(i); } }
+	const out = polishBuf;
+	for (let pass = 0; pass < 8; ++pass) {
+		for (const i of zoneList) {
+			let s = 0, n = 0;
+			for (let dy = -1; dy <= 1; ++dy) { for (let dx = -1; dx <= 1; ++dx) { const j = i + dy * N + dx; if (!water[j]) { s += hgt[j]; ++n; } } }
+			out[i] = Math.round(s / n);
+		}
+		for (const i of zoneList) { hgt[i] = out[i]; }
+	}
+	// Each moved vertex is a corner of up to four tiles
+	for (const i of zoneList) {
+		const x = i % N, y = (i - x) / N;
+		for (let dy = -1; dy <= 0; ++dy) { for (let dx = -1; dx <= 0; ++dx) { if (inMap(x + dx, y + dy, 0)) { cat[idx(x + dx, y + dy)] = categorise(x + dx, y + dy); } } }
 	}
 }
 
