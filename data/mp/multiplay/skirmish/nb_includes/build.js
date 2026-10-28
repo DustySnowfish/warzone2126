@@ -69,9 +69,10 @@ function getTwoFreeTrucks()
 	return trucks;
 }
 
-function getFreeTruckAround(x, y)
+function getFreeTruckAround(x, y, withShips)
 {
-	const list = enumTrucks().filter(truckFree).filter((droid) => (
+	const all = withShips && typeof enumSeaTrucks !== "undefined" ? enumTrucks().concat(enumSeaTrucks()) : enumTrucks();
+	const list = all.filter(truckFree).filter((droid) => (
 		droidCanReach(droid, x, y)
 	)).sort((one, two) => (distance(one, x, y) - distance(two, x, y)));
 
@@ -280,18 +281,21 @@ function captureOil(oil)
 		return BUILDRET.FAILURE;
 	}
 
-	const truck = getFreeTruckAround(oil.x, oil.y);
+	// Warzone 2126: oil in the water takes an offshore rig, built by a ship or hover truck
+	const offshore = terrainType(oil.x, oil.y) === TER_WATER;
+	const stat = offshore ? (isAvailable("A0OffshoreRig") ? "A0OffshoreRig" : undefined)
+		: structures.derricks.filter((s) => (s !== "A0OffshoreRig" && isAvailable(s))).last();
+
+	if (!defined(stat))
+	{
+		return offshore ? BUILDRET.FAILURE : BUILDRET.UNAVAILABLE;
+	}
+
+	const truck = getFreeTruckAround(oil.x, oil.y, offshore);
 
 	if (!defined(truck))
 	{
 		return BUILDRET.FAILURE;
-	}
-
-	const stat = structures.derricks.filter(isAvailable).last();
-
-	if (!defined(stat))
-	{
-		return BUILDRET.UNAVAILABLE;
 	}
 
 	if (throttled(90000, oil.y * mapWidth + oil.x))

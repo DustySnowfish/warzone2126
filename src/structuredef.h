@@ -99,6 +99,10 @@ enum STRUCT_ANIM_STATES
 #define STRUCTURE_CONNECTED 0x0001 ///< This structure must be built side by side with another of the same player
 
 //this structure is used to hold the permanent stats for each type of building
+/// Warzone 2126: STRUCTURE_STATS::placement2126 values
+constexpr uint8_t PLACEMENT_SEA_2126 = 1;
+constexpr uint8_t PLACEMENT_SHORE_2126 = 2;
+
 struct STRUCTURE_STATS : public BASE_STATS
 {
 	STRUCTURE_STATS() : pBaseIMD(nullptr), pECM(nullptr), pSensor(nullptr)
@@ -109,6 +113,8 @@ struct STRUCTURE_STATS : public BASE_STATS
 
 	STRUCTURE_TYPE type;            /* the type of structure */
 	bool isShipyard = false;        ///< Warzone 2126: a FACTORY that builds ships, half on land and half on water ("shipyard": 1)
+	uint8_t placement2126 = 0;      ///< Warzone 2126: where it may be built: 0 land, PLACEMENT_SEA_2126 on water ("placement": "sea"), PLACEMENT_SHORE_2126 on water or next to it ("placement": "shore")
+	int sonarRange2126 = 0;         ///< Warzone 2126: sees ships (only) up to this range, world units ("sonarRange")
 	STRUCT_STRENGTH strength;       /* strength against the weapon effects */
 	UDWORD baseWidth;               /*The width of the base in tiles*/
 	UDWORD baseBreadth;             /*The breadth of the base in tiles*/

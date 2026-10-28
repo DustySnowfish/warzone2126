@@ -9364,6 +9364,53 @@
 		],
 		"statID": "NavalCruiser"
 	},
+	"R-Struc-OffshoreRig": {
+		"iconID": "IMAGE_RES_POWERTECH",
+		"id": "R-Struc-OffshoreRig",
+		"name": "Offshore Oil Rig",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew"
+		],
+		"researchPoints": 1800,
+		"researchPower": 60,
+		"resultStructures": [
+			"A0OffshoreRig"
+		],
+		"statID": "A0OffshoreRig"
+	},
+	"R-Struc-SonarBuoy": {
+		"iconID": "IMAGE_RES_SYSTEMTECH",
+		"id": "R-Struc-SonarBuoy",
+		"name": "Sonar Buoy",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Sys-Sensor-Tower01"
+		],
+		"researchPoints": 2400,
+		"researchPower": 75,
+		"resultStructures": [
+			"A0SonarBuoy"
+		],
+		"statID": "A0SonarBuoy"
+	},
+	"R-Defense-Torpedo": {
+		"iconID": "IMAGE_RES_DEFENCE",
+		"id": "R-Defense-Torpedo",
+		"name": "Torpedo Launcher",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Wpn-Rocket01-LtAT"
+		],
+		"researchPoints": 4800,
+		"researchPower": 125,
+		"resultComponents": [
+			"Torpedo-Launcher"
+		],
+		"resultStructures": [
+			"Emplacement-Torpedo"
+		],
+		"statID": "Emplacement-Torpedo"
+	},
 	"R-Vehicle-Body-NavalCarrier": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body-NavalCarrier",

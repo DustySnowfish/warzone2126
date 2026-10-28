@@ -579,6 +579,7 @@ bool loadWeaponStats(WzConfig &ini)
 		{
 			psStats->surfaceToAir |= SHOOT_IN_AIR;
 		}
+		psStats->shipsOnly2126 = ini.value("shipsOnly", 0).toInt() != 0; // Warzone 2126: torpedoes
 		if (std::find(flags.begin(), flags.end(), "nofriendlyfire") != flags.end()) // "NoFriendlyFire"
 		{
 			psStats->flags.set(WEAPON_FLAG_NO_FRIENDLY_FIRE, true);

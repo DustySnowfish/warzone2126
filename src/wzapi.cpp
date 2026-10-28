@@ -1769,7 +1769,8 @@ optional<scr_position> wzapi::pickStructLocation(WZAPI_PARAMS(const DROID *psDro
 	// Warzone 2126: a shipyard sits half in the water, so the path check aims at its land row (the
 	// top row when facing south, as validLocation is asked here) and the "can units get round it"
 	// check is skipped: its water side is meant to be open water, not a passage for land units
-	const bool isShipyard = static_cast<STRUCTURE_STATS *>(psStat)->isShipyard;
+	// (sea and shore structures are in or by open water too)
+	const bool isShipyard = static_cast<STRUCTURE_STATS *>(psStat)->isShipyard || static_cast<STRUCTURE_STATS *>(psStat)->placement2126 != 0;
 #define LOC_OK(_x, _y) (tileOnMap(gameWorld.map, _x, _y) && \
                         (!psDroid || fpathCheck(gameWorld.map, psDroid->pos, Vector3i(world_coord(_x), world_coord(_y), 0), propType)) \
                         && validLocation(gameWorld, psStat, world_coord(Vector2i(_x, _y)) + offset, 0, player, false) && (isShipyard || structDoubleCheck(psStat, _x, _y, maxBlockingTiles, propType)))

@@ -1013,6 +1013,12 @@ static PROJECTILE* proj_InFlightFunc(PROJECTILE *psProj)
 	}
 
 	unsigned terrainIntersectTime = map_LineIntersect(psProj->prevSpacetime.pos, psProj->pos, psProj->time - psProj->prevSpacetime.time);
+	// Warzone 2126: a torpedo runs through the water; only land stops it
+	if (terrainIntersectTime != UINT32_MAX && psStats->shipsOnly2126 && worldOnMap(gameWorld.map, psProj->pos.xy())
+	    && terrainType(worldTile(gameWorld.map, psProj->pos.xy())) == TER_WATER)
+	{
+		terrainIntersectTime = UINT32_MAX;
+	}
 	if (terrainIntersectTime != UINT32_MAX)
 	{
 		const uint32_t collisionTime = psProj->prevSpacetime.time + terrainIntersectTime;

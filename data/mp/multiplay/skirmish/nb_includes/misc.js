@@ -66,9 +66,10 @@ function enumLivingPlayers()
 	return cached(uncached, 30000);
 }
 
+// (Warzone 2126: ship trucks only work on the water, see enumSeaTrucks in naval.js)
 function enumTrucks()
 {
-	return enumDroid(me, DROID_CONSTRUCT);
+	return enumDroid(me, DROID_CONSTRUCT).filter((d) => (typeof isNavalDroid === "undefined" || !isNavalDroid(d)));
 }
 
 function goEasy()

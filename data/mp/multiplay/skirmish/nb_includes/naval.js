@@ -26,6 +26,13 @@ const NAVAL_CARRIER_SLOTS = 6;
 // Anti-aircraft guns for the carrier's two mounts, best first
 const NAVAL_CARRIER_AA = ["Missile-HvySAM", "AAGunLaser", "QuadRotAAGun", "Missile-LtSAM", "AAGun2Mk1", "QuadMg1AAGun"];
 let carrierAssign = {}; // VTOL id -> carrier id
+const NAVAL_RIG = "A0OffshoreRig";
+const NAVAL_RIG_RESEARCH = "R-Struc-OffshoreRig";
+const NAVAL_BUOY = "A0SonarBuoy";
+const NAVAL_BUOY_RESEARCH = "R-Struc-SonarBuoy";
+const NAVAL_TORPEDO = "Emplacement-Torpedo";
+const NAVAL_TORPEDO_RESEARCH = "R-Defense-Torpedo";
+const NAVAL_SEA_TRUCKS = 2;
 
 let navalTarget; // { id, type, player, wx, wy }: the object attacked and the water spot to attack it from
 
@@ -149,6 +156,23 @@ _global.navalResearch = function(lab) {
 		}
 	}
 
+	// Sea construction: offshore rigs where there is offshore oil, then sonar and torpedoes
+	if (iHaveShips() && navalWanted() && withChance(30))
+	{
+		const list = [];
+
+		if (freeOffshoreOil().length > 0)
+		{
+			list.push(NAVAL_RIG_RESEARCH);
+		}
+		list.push(NAVAL_BUOY_RESEARCH, NAVAL_TORPEDO_RESEARCH);
+		if (pursueResearch(lab, list.filter((r) => { const res = getResearch(r); return defined(res) && res !== null && !res.done; })))
+		{
+			navalDebug("researching sea construction");
+			return true;
+		}
+	}
+
 	// An aircraft carrier once both ships and VTOLs are in use
 	if (iHaveShips() && navalWanted() && myVtols().length > 0 && !componentAvailable(NAVAL_CARRIER_BODY) && withChance(25))
 	{
@@ -208,10 +232,30 @@ function carriersWanted()
 	return vtols >= 3 ? Math.min(2, Math.ceil(vtols / NAVAL_CARRIER_SLOTS)) : 0;
 }
 
-// Warships (not landing craft)
+// Warships (not landing craft or ship trucks)
 function myShips()
 {
-	return enumDroid(me).filter((d) => (isNavalDroid(d) && !isLandingCraft(d)));
+	return enumDroid(me).filter((d) => (isNavalDroid(d) && !isLandingCraft(d) && d.droidType !== DROID_CONSTRUCT));
+}
+
+// Ship trucks: they build on the water (offshore rigs, sonar buoys, torpedo launchers)
+_global.enumSeaTrucks = function() {
+	return enumDroid(me, DROID_CONSTRUCT).filter((d) => (isNavalDroid(d)));
+};
+
+// Offshore oil that a ship from the home waters can reach and nobody has built on yet
+function freeOffshoreOil()
+{
+	const home = homeWater();
+
+	if (!defined(home))
+	{
+		return [];
+	}
+
+	return enumFeature(ALL_PLAYERS, "OilResource").filter((f) => (
+		terrainType(f.x, f.y) === TER_WATER && propulsionCanReach(NAVAL_CHECK_PROP, home.x, home.y, f.x, f.y)
+	));
 }
 
 function shipCap()
@@ -303,6 +347,16 @@ _global.checkShipProduction = function() {
 		}
 	}
 
+	// Ship trucks for offshore oil and sea defences
+	if (enumSeaTrucks().length < NAVAL_SEA_TRUCKS && (isAvailable(NAVAL_RIG) && freeOffshoreOil().length > 0 || isAvailable(NAVAL_BUOY) || isAvailable(NAVAL_TORPEDO)))
+	{
+		if (buildDroid(yards[0], "Sea Truck", ["NavalFrigate", "NavalPatrol"], getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", "Spade1Mk1"))
+		{
+			navalDebug("building a ship truck");
+			return true;
+		}
+	}
+
 	if (componentAvailable(NAVAL_CARRIER_BODY) && enumDroid(me).filter(isCarrier).length < carriersWanted())
 	{
 		const aa = NAVAL_CARRIER_AA.filter((w) => (componentAvailable(w)));
@@ -366,7 +420,7 @@ function chooseNavalTarget(from, home)
 	});
 
 	candidates = candidates
-		.filter((obj) => (!isVTOL(obj)))
+		.filter((obj) => (obj.type !== DROID || !isVTOL(obj)))
 		.sort((a, b) => (distance(a, from) - distance(b, from)))
 		.slice(0, 40);
 
@@ -633,6 +687,69 @@ function landingTick()
 	});
 }
 
+// Ship trucks: offshore rigs first (through captureSomeOil), then a sonar buoy or two out in the home
+// waters and torpedo launchers off the coast and beside the rigs
+function seaConstructionTick(home)
+{
+	const trucks = enumSeaTrucks().filter((t) => (t.order !== DORDER_BUILD && t.order !== DORDER_HELPBUILD));
+
+	if (trucks.length === 0)
+	{
+		return;
+	}
+
+	const truck = trucks[0];
+	const rigs = enumStruct(me, NAVAL_RIG);
+	const plans = [];
+
+	// Offshore oil first: the nearest free well this truck can reach (a rig still being built counts
+	// too, so the truck helps finish it)
+	if (isAvailable(NAVAL_RIG))
+	{
+		const wells = freeOffshoreOil().concat(rigs.filter((r) => (r.status === BEING_BUILT)))
+			.filter((o) => (droidCanReach(truck, o.x, o.y)))
+			.sort((a, b) => (distance(truck, a) - distance(truck, b)));
+
+		if (wells.length > 0 && orderDroidBuild(truck, DORDER_BUILD, NAVAL_RIG, wells[0].x, wells[0].y))
+		{
+			navalDebug("ship truck building an offshore rig at " + wells[0].x + "," + wells[0].y);
+			return;
+		}
+	}
+
+	if (isAvailable(NAVAL_BUOY) && countStructList([NAVAL_BUOY]) < 2)
+	{
+		// Out towards the enemy: the home water spot farthest from the base
+		const spots = homeWaterInfo().spots || [];
+		const far = spots.slice().sort((a, b) => (distanceToBase(b) - distanceToBase(a)))[0];
+
+		plans.push({ stat: NAVAL_BUOY, at: defined(far) ? far : home });
+	}
+	if (isAvailable(NAVAL_TORPEDO))
+	{
+		if (countStructList([NAVAL_TORPEDO]) < 2)
+		{
+			plans.push({ stat: NAVAL_TORPEDO, at: home });
+		}
+		rigs.forEach((rig) => {
+			if (enumRange(rig.x, rig.y, 4, me, false).filter((o) => (o.type === STRUCTURE && o.stattype === DEFENSE)).length === 0)
+			{
+				plans.push({ stat: NAVAL_TORPEDO, at: { x: rig.x, y: rig.y } });
+			}
+		});
+	}
+	for (let i = 0; i < plans.length; ++i)
+	{
+		const loc = pickStructLocation(truck, plans[i].stat, plans[i].at.x, plans[i].at.y);
+
+		if (defined(loc) && orderDroidBuild(truck, DORDER_BUILD, plans[i].stat, loc.x, loc.y))
+		{
+			navalDebug("ship truck building " + plans[i].stat + " at " + loc.x + "," + loc.y);
+			return;
+		}
+	}
+}
+
 // Carriers keep behind the fleet (between home and the fleet's target) and take idle VTOLs aboard
 function carrierTick(home)
 {
@@ -709,6 +826,7 @@ _global.navalTick = function() {
 	{
 		carrierTick(home);
 	}
+	seaConstructionTick(home);
 
 	const ships = myShips().filter((d) => (!isCarrier(d)));
 

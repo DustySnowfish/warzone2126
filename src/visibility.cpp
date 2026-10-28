@@ -534,6 +534,14 @@ int visibleObject(const BASE_OBJECT *psViewer, const BASE_OBJECT *psTarget, bool
 				range = 3 * range / 2;	// increase vision range of AA vs VTOL
 			}
 
+			// Warzone 2126 sonar: hears ships (only) out to its sonar range, whatever is in the way
+			if (psStruct->pStructureType->sonarRange2126 > 0 && psTarget->type == OBJ_DROID
+			    && ((const DROID *)psTarget)->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR
+			    && iHypot((psTarget->pos - psViewer->pos).xy()) <= psStruct->pStructureType->sonarRange2126)
+			{
+				return UBYTE_MAX;
+			}
+
 			if (psStruct->psTarget[0] == psTarget && (structCBSensor(psStruct) || structVTOLCBSensor(psStruct)))
 			{
 				// if a unit is targetted by a counter battery sensor
@@ -724,7 +732,9 @@ static void processVisibilityVision(BASE_OBJECT *psViewer)
 
 	// get all the objects from the grid the droid is in
 	// Will give inconsistent results if hasSharedVision is not an equivalence relation.
-	for (BASE_OBJECT *psObj : gridStartIterateUnseen(psViewer->pos.x, psViewer->pos.y, objSensorRange(psViewer), psViewer->player))
+	// (Warzone 2126: a sonar buoy listens out to its sonar range)
+	const int searchRange = psStruct != nullptr ? std::max(objSensorRange(psViewer), psStruct->pStructureType->sonarRange2126) : objSensorRange(psViewer);
+	for (BASE_OBJECT *psObj : gridStartIterateUnseen(psViewer->pos.x, psViewer->pos.y, searchRange, psViewer->player))
 	{
 		int val = visibleObject(psViewer, psObj, false);
 
@@ -959,6 +969,31 @@ bool lineOfFire(const SIMPLE_OBJECT *psViewer, const BASE_OBJECT *psTarget, int 
 	// 2d distance
 	int distance = iHypot((psTarget->pos - psViewer->pos).xy());
 	int range = proj_GetLongRange(*psStats, psViewer->player);
+	if (psStats->shipsOnly2126)
+	{
+		// Warzone 2126: a torpedo runs in the water, so only land in the way blocks it (the tiles next
+		// to the launcher, which may stand on the shore, and next to the target are not checked)
+		if (range < distance)
+		{
+			return false;
+		}
+		const Vector2i from = psViewer->pos.xy(), to = psTarget->pos.xy();
+		const int steps = std::max(1, distance / (TILE_UNITS / 2));
+		for (int i = 1; i < steps; ++i)
+		{
+			const Vector2i p = from + (to - from) * i / steps;
+			const int fromStart = distance * i / steps;
+			if (fromStart < TILE_UNITS || distance - fromStart < TILE_UNITS)
+			{
+				continue;
+			}
+			if (!tileOnMap(gameWorld.map, map_coord(p.x), map_coord(p.y)) || terrainType(mapTile(gameWorld.map, map_coord(p.x), map_coord(p.y))) != TER_WATER)
+			{
+				return false;
+			}
+		}
+		return true;
+	}
 	if (proj_Direct(psStats))
 	{
 		/** direct shots could collide with ground **/

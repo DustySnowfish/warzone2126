@@ -75,7 +75,7 @@ class Player
 		));
 		for (let playnum = 0; playnum < maxPlayers; ++playnum)
 		{
-			oils = oils.concat(enumStruct(playnum, "A0ResourceExtractor"));
+			oils = oils.concat(enumStruct(playnum, "A0ResourceExtractor"), enumStruct(playnum, "A0OffshoreRig")); // (Warzone 2126: offshore rigs)
 		}
 
 		const trucks = enumDroid(this.playNum, DROID_CONSTRUCT);

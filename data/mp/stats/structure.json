@@ -3626,6 +3626,71 @@
 		],
 		"width": 2
 	},
+	"Emplacement-Torpedo": {
+		"armour": 15,
+		"breadth": 1,
+		"buildPoints": 450,
+		"buildPower": 150,
+		"height": 1,
+		"hitpoints": 700,
+		"id": "Emplacement-Torpedo",
+		"name": "Torpedo Launcher",
+		"placement": "shore",
+		"resistance": 150,
+		"sensorID": "DefaultSensor1Mk1",
+		"strength": "HARD",
+		"structureModel": [
+			"bltorpedo.pie"
+		],
+		"thermal": 15,
+		"type": "DEFENSE",
+		"weapons": [
+			"Torpedo-Launcher"
+		],
+		"width": 1
+	},
+	"A0OffshoreRig": {
+		"armour": 8,
+		"baseModel": "blrigbase.pie",
+		"breadth": 1,
+		"buildPoints": 250,
+		"buildPower": 50,
+		"height": 1,
+		"hitpoints": 700,
+		"id": "A0OffshoreRig",
+		"name": "Offshore Oil Rig",
+		"placement": "sea",
+		"resistance": 150,
+		"sensorID": "DefaultSensor1Mk1",
+		"strength": "MEDIUM",
+		"structureModel": [
+			"BLDERIK.PIE"
+		],
+		"thermal": 8,
+		"type": "RESOURCE EXTRACTOR",
+		"width": 1
+	},
+	"A0SonarBuoy": {
+		"armour": 4,
+		"breadth": 1,
+		"buildPoints": 150,
+		"buildPower": 40,
+		"height": 1,
+		"hitpoints": 150,
+		"id": "A0SonarBuoy",
+		"name": "Sonar Buoy",
+		"placement": "sea",
+		"resistance": 50,
+		"sensorID": "DefaultSensor1Mk1",
+		"sonarRange": 2560,
+		"strength": "SOFT",
+		"structureModel": [
+			"blsonarbuoy.pie"
+		],
+		"thermal": 4,
+		"type": "GENERIC",
+		"width": 1
+	},
 	"A0Shipyard": {
 		"armour": 10,
 		"breadth": 3,

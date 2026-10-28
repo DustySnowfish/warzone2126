@@ -443,6 +443,7 @@ struct WEAPON_STATS : public COMPONENT_STATS
 	UBYTE facePlayer = 0;				///< flag to make the (explosion) effect face the player when drawn
 	UBYTE faceInFlight = 0;				///< flag to make the inflight effect face the player when drawn
 	UBYTE surfaceToAir = 0;				///< indicates how good in the air - SHOOT_ON_GROUND, SHOOT_IN_AIR or both
+	bool shipsOnly2126 = false;			///< Warzone 2126: can only hit ships (torpedoes; "shipsOnly": 1)
 	bool lightWorld = false;			///< flag to indicate whether the effect lights up the world
 	bool penetrate = false;				///< flag to indicate whether pentrate droid or not
 	bool fireOnMove = false;			///< indicates whether the droid has to stop before firing

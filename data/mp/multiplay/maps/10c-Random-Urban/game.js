@@ -1044,6 +1044,62 @@ for (const pad of pads) {
 	markClear(pad.x, pad.y, 3);
 }
 
+// Offshore oil (Warzone 2126): wells in open water near each base, for offshore rigs built by ship or
+// hover trucks. The same pattern for every player, turned with them. The search uses the tile hash,
+// not the shared random sequence, so the rest of the map is the same as without it.
+const offshorePerPlayer = styleName === "islands" ? 2 : styleName === "lakes" ? 1 : 0;
+let offshorePlaced = 0;
+if (offshorePerPlayer > 0 && PLAYERS > 0) {
+	const openWater = (x, y) => {
+		if (!inMap(x, y, BORDER + 2)) { return false; }
+		for (let dy = -1; dy <= 1; ++dy) { for (let dx = -1; dx <= 1; ++dx) { if (cat[idx(x + dx, y + dy)] !== WATER) { return false; } } }
+		return !occ[idx(x, y)];
+	};
+	const chosen = [];
+	for (let k = 0; k < 600 && chosen.length < offshorePerPlayer; ++k) {
+		const da = (hash01(k, 11, 4126) * 2 - 1) * wedge * 0.8;
+		const rad = ringR * (0.55 + hash01(k, 12, 4126) * 0.6);
+		const pts = [];
+		let ok = true;
+		for (let p = 0; p < PLAYERS && ok; ++p) {
+			const q = polar(p, da, rad);
+			if (!openWater(q[0], q[1]) || dist(q[0], q[1], starts[p][0], starts[p][1]) < baseR + 6) { ok = false; break; }
+			pts.push(q);
+		}
+		// Apart from the other offshore wells of this pattern
+		for (const c of chosen) { for (let p = 0; p < PLAYERS && ok; ++p) { if (dist(pts[p][0], pts[p][1], c[p][0], c[p][1]) < 6) { ok = false; } } }
+		if (ok) { chosen.push(pts); }
+	}
+	if (chosen.length < offshorePerPlayer) {
+		// Lakes rarely line up for a turned pattern: then each player gets the open water spot whose
+		// distance from their base is nearest to 18 tiles (within 10 to 40), if every player has one
+		const pts = [];
+		for (let p = 0; p < PLAYERS; ++p) {
+			const sx = starts[p][0], sy = starts[p][1];
+			let best = null, bestErr = 1e9;
+			for (let y = Math.max(0, sy - 40); y <= Math.min(N - 1, sy + 40); ++y) {
+				for (let x = Math.max(0, sx - 40); x <= Math.min(N - 1, sx + 40); ++x) {
+					const d = dist(x, y, sx, sy);
+					if (d < baseR + 6 || d > 40 || !openWater(x, y)) { continue; }
+					if (chosen.some((c) => dist(c[p][0], c[p][1], x, y) < 6)) { continue; }
+					const err = Math.abs(d - 18);
+					if (err < bestErr) { bestErr = err; best = [x, y]; }
+				}
+			}
+			if (!best) { break; }
+			pts.push(best);
+		}
+		if (pts.length === PLAYERS) { chosen.push(pts); }
+	}
+	for (const pts of chosen) {
+		for (const q of pts) {
+			take(q[0], q[1], 1, 1);
+			features.push({ name: "OilResource", position: centrePos(q[0], q[1], 1, 1), direction: 0 });
+			++offshorePlaced;
+		}
+	}
+}
+
 // Scavenger camps
 const SCAV = -1;
 const CAMP_LAYOUT = [
@@ -1136,5 +1192,5 @@ if (!preview) {
 	}
 }
 
-log("W2126 random map: " + structures.length + " structures, " + droids.length + " droids, " + features.length + " features");
+log("W2126 random map: " + structures.length + " structures, " + droids.length + " droids, " + features.length + " features, " + offshorePlaced + " offshore oil");
 setMapData(N, N, texture, hgt, structures, droids, features);

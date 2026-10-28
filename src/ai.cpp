@@ -1300,6 +1300,16 @@ bool validTarget(BASE_OBJECT const *psObject, BASE_OBJECT const *psTarget, int w
 		return false;
 	}
 
+	// Warzone 2126: torpedoes only hit ships
+	if (weapon_slot >= 0 && static_cast<unsigned>(weapon_slot) < psObject->numWeaps && psObject->asWeaps[weapon_slot].nStat < asWeaponStats.size()
+	    && asWeaponStats[psObject->asWeaps[weapon_slot].nStat].shipsOnly2126)
+	{
+		if (psTarget->type != OBJ_DROID || ((const DROID *)psTarget)->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR)
+		{
+			return false;
+		}
+	}
+
 	// Need to check propulsion type of target
 	switch (psTarget->type)
 	{

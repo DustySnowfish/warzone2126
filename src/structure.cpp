@@ -598,6 +598,11 @@ bool loadStructureStats(WzConfig &ini)
 		}
 		psStats->type = structType[type];
 		psStats->isShipyard = ini.value("shipyard", 0).toInt() != 0;
+		{
+			const WzString placement = ini.value("placement", "land").toWzString();
+			psStats->placement2126 = placement == "sea" ? PLACEMENT_SEA_2126 : placement == "shore" ? PLACEMENT_SHORE_2126 : 0;
+			psStats->sonarRange2126 = std::max(0, ini.value("sonarRange", 0).toInt());
+		}
 
 		// save indexes of special structures for futher use
 		initModuleStats(statWriteIdx, psStats->type);  // This function looks like a hack. But slightly less hacky than before.
@@ -1496,7 +1501,8 @@ static bool isPulledToTerrain(const STRUCTURE *psBuilding)
 {
 	STRUCTURE_TYPE type = psBuilding->pStructureType->type;
 	return type == REF_DEFENSE || type == REF_GATE || type == REF_WALL || type == REF_WALLCORNER || type == REF_REARM_PAD
-		|| psBuilding->pStructureType->isShipyard; // Warzone 2126: stands on piles over the water, no levelling
+		|| psBuilding->pStructureType->isShipyard // Warzone 2126: stands on piles over the water, no levelling
+		|| psBuilding->pStructureType->placement2126 != 0; // Warzone 2126: sea and shore structures float or stand on piles
 }
 
 void alignStructure(STRUCTURE *psBuilding, WorldMapState& mapState)
@@ -4593,6 +4599,45 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 						return false;
 					}
 				}
+				else if (psBuilding->placement2126 == PLACEMENT_SEA_2126)
+				{
+					// Warzone 2126 sea structure: every tile on water
+					for (int j = 0; j < b.size.y; ++j)
+						for (int i = 0; i < b.size.x; ++i)
+						{
+							if (terrainType(mapTile(world.map, b.map.x + i, b.map.y + j)) != TER_WATER)
+							{
+								return false;
+							}
+						}
+				}
+				else if (psBuilding->placement2126 == PLACEMENT_SHORE_2126)
+				{
+					// Warzone 2126 shore structure: on water, or on land with water next to it
+					bool nearWater = false;
+					for (int j = 0; j < b.size.y; ++j)
+						for (int i = 0; i < b.size.x; ++i)
+						{
+							if (terrainType(mapTile(world.map, b.map.x + i, b.map.y + j)) == TER_CLIFFFACE)
+							{
+								return false;
+							}
+						}
+					for (int j = -1; j <= b.size.y && !nearWater; ++j)
+						for (int i = -1; i <= b.size.x; ++i)
+						{
+							const int tx = b.map.x + i, ty = b.map.y + j;
+							if (tileOnMap(world.map, tx, ty) && terrainType(mapTile(world.map, tx, ty)) == TER_WATER)
+							{
+								nearWater = true;
+								break;
+							}
+						}
+					if (!nearWater)
+					{
+						return false;
+					}
+				}
 				else
 				/*need to check each tile the structure will sit on is not water*/
 				for (int j = 0; j < b.size.y; ++j)
@@ -4620,7 +4665,7 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 				      psBuilding->type == REF_DEFENSE ||
 				      psBuilding->type == REF_GATE ||
 				      psBuilding->type == REF_WALL ||
-				      psBuilding->isShipyard))
+				      psBuilding->isShipyard || psBuilding->placement2126 != 0))
 				{
 					/*cannot build on ground that is too steep*/
 					for (int j = 0; j < b.size.y; ++j)
@@ -4756,7 +4801,9 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 			if (TileHasFeature(worldTile(world.map, pos)))
 			{
 				FEATURE const *psFeat = getTileFeature(world.map, map_coord(pos.x), map_coord(pos.y));
-				if (psFeat && psFeat->psStats->subType == FEAT_OIL_RESOURCE)
+				// Warzone 2126: offshore oil (on water) takes an offshore rig, oil on land a derrick
+				const bool waterOil = terrainType(worldTile(world.map, pos)) == TER_WATER;
+				if (psFeat && psFeat->psStats->subType == FEAT_OIL_RESOURCE && waterOil == (psBuilding->placement2126 == PLACEMENT_SEA_2126))
 				{
 					break;
 				}
