@@ -30,6 +30,7 @@
 
 #include "particles.h"
 #include "ambient2126.h"
+#include "weather.h"
 #include "warzoneconfig.h"
 
 #include "objectdef.h"
@@ -147,6 +148,7 @@ struct Layer
 	bool ground = false;             // lies flat on the terrain (scorch marks) instead of facing the camera
 	bool align = false;              // ground layers: turned to the effect's direction (track marks)
 	float bounce = -1.f;             // >= 0: collides with the terrain and bounces back this fraction of its speed
+	float wind = 0.f;                // how strongly it drifts with the wind (smoke 1, dust 0.6 unless "wind" says otherwise)
 };
 
 struct LightDef
@@ -426,6 +428,14 @@ Layer parseLayer(const nlohmann::json& j, const std::string& effectName)
 	l.lit = j.value("lit", !l.additive);
 	l.offset = readFloat(j, "offset", 0.f);
 	l.rise = readFloat(j, "rise", 0.f);
+	{
+		const FrameSet& smoke = frameSets().at("smoke");
+		const FrameSet& dust = frameSets().at("dust");
+		const float defaultWind = l.ground || l.bounce >= 0.f ? 0.f
+			: (l.frames.first == smoke.first && !l.additive) ? 1.f
+			: (l.frames.first == dust.first && !l.additive) ? 0.6f : 0.f;
+		l.wind = readFloat(j, "wind", defaultWind);
+	}
 	return l;
 }
 
@@ -1369,6 +1379,16 @@ void update(LightingData& lightData)
 				p.velocity *= std::exp(-layer.drag * dt);
 			}
 			p.velocity.y -= layer.gravity * p.scale * dt;
+			if (layer.wind > 0.f)
+			{
+				// Drift with the wind (the weather's: east, a little south; stronger in storms):
+				// the horizontal speed eases towards the wind, so rising smoke bends downwind
+				static const glm::vec2 kWindDir = glm::normalize(glm::vec2(0.35f, -0.12f)); // render x, z
+				const float windSpeed = 55.f * (1.f + 1.5f * weather::intensity()) * layer.wind;
+				const float ease = 1.f - std::exp(-0.7f * dt);
+				p.velocity.x += (kWindDir.x * windSpeed - p.velocity.x) * ease * layer.wind;
+				p.velocity.z += (kWindDir.y * windSpeed - p.velocity.z) * ease * layer.wind;
+			}
 			p.position += p.velocity * dt;
 			p.rotation += p.spin * dt;
 			if (layer.bounce >= 0.f && p.velocity.y < 0.f)
