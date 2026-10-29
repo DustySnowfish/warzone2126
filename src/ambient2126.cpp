@@ -116,6 +116,7 @@ struct State
 	bool groundBurnReady = false;
 	float surfCarry = 0.f;
 	float driftCarry = 0.f;
+	float mistCarry = 0.f;
 	float clock = 0.f;
 	std::vector<glm::vec3> noises;   // recent loud places: map x, y and the clock time
 	bool started = false;
@@ -148,6 +149,14 @@ float groundAt(float x, float y)
 	const int gx = std::max(0, std::min(static_cast<int>(x), world_coord(gameWorld.map.width) - 1));
 	const int gy = std::max(0, std::min(static_cast<int>(y), world_coord(gameWorld.map.height) - 1));
 	return static_cast<float>(map_Height(gameWorld.map, gx, gy));
+}
+
+/// Height of the water surface (or the ground, where higher) at a world position
+float surfaceAt(float x, float y)
+{
+	const int tx = std::max(0, std::min(map_coord(static_cast<int>(x)), gameWorld.map.width - 1));
+	const int ty = std::max(0, std::min(map_coord(static_cast<int>(y)), gameWorld.map.height - 1));
+	return std::max(groundAt(x, y), static_cast<float>(map_TileHeightSurface(gameWorld.map, tx, ty)));
 }
 
 /// Is this tile on the coast (water with land next to it)?
@@ -402,7 +411,7 @@ void updateSurf(float dt)
 			const glm::vec2 along(-land.y, land.x);
 			const glm::vec2 p = (glm::vec2(static_cast<float>(tx), static_cast<float>(ty)) + 0.5f + land * 0.42f) * static_cast<float>(TILE_UNITS)
 				+ along * randRange(-50.f, 50.f);
-			const float h = groundAt(p.x, p.y);
+			const float h = surfaceAt(p.x, p.y);
 			particles::spawn("surf_break", Vector3f(p.x, p.y, h + 4.f), Vector3f(land.x, land.y, 0.9f), randRange(0.8f, 1.2f));
 			break;
 		}
@@ -662,6 +671,56 @@ void updateDrift(float dt)
 	s.driftCarry = std::min(s.driftCarry, 1.f);
 }
 
+// ---------------------------------------------------------------------------------------
+// Mist over water at dawn and dusk
+
+/// How misty it is now: 1 around dawn and dusk, a little at night, none by day
+float mistAmount()
+{
+	const float phase = time_of_day::phase();
+	auto bump = [](float x, float centre, float halfWidth) {
+		const float d = std::abs(x - centre) / halfWidth;
+		return d < 1.f ? 0.5f + 0.5f * std::cos(d * kPi) : 0.f;
+	};
+	const float dawn = bump(phase, 0.25f, 0.08f);
+	const float dusk = bump(phase, 0.76f, 0.08f);
+	const float night = (phase < 0.2f || phase > 0.81f) ? 0.25f : 0.f;
+	return std::max(std::max(dawn, dusk), night) * (1.f - std::min(1.f, weather::intensity() * 1.5f));
+}
+
+void updateMist(float dt)
+{
+	const float amount = mistAmount();
+	if (amount <= 0.01f)
+	{
+		return;
+	}
+	static const float kRate[3] = { 1.2f, 2.4f, 4.f }; // banks a second around the view at full mist
+	s.mistCarry += dt * kRate[war_getEffectsDetail()] * amount;
+	const glm::vec2 w = wind();
+	const glm::vec2 c = cameraCentre();
+	const float r = viewRadius() * 0.8f;
+	int budget = 3;
+	while (s.mistCarry >= 1.f && budget-- > 0)
+	{
+		s.mistCarry -= 1.f;
+		for (int attempt = 0; attempt < 12; ++attempt)
+		{
+			const glm::vec2 p = c - w * r * 0.2f + glm::vec2(randRange(-r, r), randRange(-r, r));
+			const int tx = map_coord(static_cast<int>(p.x));
+			const int ty = map_coord(static_cast<int>(p.y));
+			// Open water only (keeps the shoreline and the land clear)
+			if (!onMap(tx, ty) || !waterTile(tx, ty) || !waterTile(tx + 1, ty) || !waterTile(tx - 1, ty) || !waterTile(tx, ty + 1) || !waterTile(tx, ty - 1))
+			{
+				continue;
+			}
+			particles::spawn("water_mist", Vector3f(p.x, p.y, surfaceAt(p.x, p.y) + randRange(15.f, 55.f)), Vector3f(w.x, w.y, 0.f), randRange(0.8f, 1.2f));
+			break;
+		}
+	}
+	s.mistCarry = std::min(s.mistCarry, 1.f);
+}
+
 } // namespace
 
 void update()
@@ -749,6 +808,7 @@ void update()
 		updateSurf(dt);
 		updateFires(dt);
 		updateDrift(dt);
+		updateMist(dt);
 	}
 
 	for (const Flock& f : s.flocks)
