@@ -58,6 +58,14 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 /// exceed 1 to glow with HDR bloom.
 void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha);
 
+/// An ambient bird for this frame only: a flat silhouette at `position` (world), `heading` the
+/// direction it flies (radians, map coordinates), `flap` 0 wings up, 1 level, 2 down; with a faint
+/// shadow on the ground under the sun (shadowAlpha 0 for none).
+void frameBird(const Vector3f& position, float size, float heading, int flap, const glm::vec3& rgb, float alpha, float shadowAlpha);
+
+/// The camera position (world: map x, map y, height) of the last frame drawn with particles.
+bool cameraPosition(Vector3f& out);
+
 /// True when an effect with this name is defined.
 bool hasEffect(const std::string& effectName);
 

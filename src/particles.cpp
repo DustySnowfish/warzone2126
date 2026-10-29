@@ -29,6 +29,7 @@
  */
 
 #include "particles.h"
+#include "ambient2126.h"
 #include "warzoneconfig.h"
 
 #include "objectdef.h"
@@ -100,6 +101,7 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "select", { 23, 1 } },
 		{ "tracks", { 24, 1 } },
 		{ "tyres", { 25, 1 } },
+		{ "bird", { 26, 3 } },
 	};
 	return sets;
 }
@@ -230,12 +232,16 @@ struct State
 	std::unordered_map<uint32_t, TrailState> trails;
 	std::unordered_map<uint32_t, TrailState> vehicleTrails;
 	std::vector<gfx_api::ParticleInstance> frameRings; // drawn this frame only (selection rings)
+	std::vector<gfx_api::ParticleInstance> frameBirds; // drawn this frame only (ambient birds), alpha blended
+	std::vector<gfx_api::ParticleInstance> frameShadows; // drawn this frame only (bird shadows), flat on the ground
 	std::vector<gfx_api::ParticleInstance> groundInstances; // flat ground marks: drawn first, in spawn order, unsorted
 	std::vector<gfx_api::ParticleInstance> combinedInstances; // reused upload buffer
 	size_t groundMarks = 0;                            // live particles of ground layers
 	std::unordered_map<std::string, PropulsionVfx> byPropulsion;
 	uint32_t frameCounter = 0;
 	std::mt19937 rng { 2126u };
+	bool haveCamera = false;
+	glm::vec3 cameraRender { 0.f };  // the last drawn frame's camera (render space)
 
 	gfx_api::texture* atlas = nullptr;
 	gfx_api::buffer* quad = nullptr;
@@ -587,6 +593,36 @@ float smoothstep(float e0, float e1, float x)
 	return t * t * (3.f - 2.f * t);
 }
 
+/// A bird seen from above, flying towards +u: body, head, forked tail and swept wings. `span` is
+/// the wing tip's distance from the body (shorter while the wings are raised or lowered), `sweep`
+/// how far back the tips are.
+float birdAlpha(float u, float v, float span, float sweep)
+{
+	const float av = std::abs(v);
+	// Body and head
+	const float bu = u / 0.30f, bv = v / 0.075f;
+	float a = (bu * bu + bv * bv < 1.f) ? 1.f : 0.f;
+	if ((u - 0.33f) * (u - 0.33f) + v * v < 0.07f * 0.07f)
+	{
+		a = 1.f;
+	}
+	// Tail: a short wedge behind the body
+	if (u < -0.22f && u > -0.46f && av < 0.05f + (-0.22f - u) * 0.45f)
+	{
+		a = 1.f;
+	}
+	// Wings: a tapering chord along v out to the tip, swept back towards the tips
+	if (av < span)
+	{
+		const float t = av / span;
+		const float centre = 0.06f - sweep * t * t;
+		const float halfChord = 0.13f * (1.f - t) + 0.025f;
+		const float d = std::abs(u - centre);
+		a = std::max(a, 1.f - smoothstep(halfChord * 0.85f, halfChord, d));
+	}
+	return a;
+}
+
 /// Alpha of frame `frame` at cell coordinates u, v in [-1, 1]
 float frameAlpha(int frame, float u, float v)
 {
@@ -644,6 +680,12 @@ float frameAlpha(int frame, float u, float v)
 		const float glow = 0.18f * (1.f - smoothstep(0.2f, 0.78f, r)) * smoothstep(0.3f, 0.78f, r);
 		return std::min(1.f, band + glow) * (1.f - smoothstep(0.92f, 1.f, r));
 	}
+	case 26: // bird, wings raised (shorter seen from above)
+		return birdAlpha(u, v, 0.58f, 0.10f);
+	case 27: // bird, wings level (gliding)
+		return birdAlpha(u, v, 0.92f, 0.22f);
+	case 28: // bird, wings lowered and swept
+		return birdAlpha(u, v, 0.74f, 0.32f);
 	case 20: case 21: case 22: // scorch mark: dark centre, blotchy fading edge, radial streaks
 	{
 		const float angle = std::atan2(v, u);
@@ -898,6 +940,59 @@ void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, f
 	s.frameRings.push_back(inst);
 }
 
+void frameBird(const Vector3f& position, float size, float heading, int flap, const glm::vec3& rgb, float alpha, float shadowAlpha)
+{
+	if (s.atlas == nullptr)
+	{
+		return;
+	}
+	const glm::vec3 p = toRender(position);
+	// Flat sprite at the bird's height, turned to its heading (render z is minus the map y)
+	const float rotation = -heading;
+	gfx_api::ParticleInstance inst;
+	inst.positionSize = glm::vec4(p, size);
+	inst.colour = glm::vec4(rgb, alpha);
+	inst.params = glm::vec4(rotation, static_cast<float>(26 + std::max(0, std::min(flap, 2))), 0.f, 3.f); // flat and lit
+	inst.velocity = glm::vec4(0.f);
+	s.frameBirds.push_back(inst);
+	if (shadowAlpha <= 0.f)
+	{
+		return;
+	}
+	// Its shadow: along the sunlight down to the ground
+	const Vector3f sun = getTheSun();
+	glm::vec3 light = glm::vec3(sun.x, sun.y, sun.z); // (the lighting uses its negation, the direction towards the sun)
+	const float len = glm::length(light);
+	if (len < 1e-3f || light.y > -0.15f * len)
+	{
+		return; // sun too low (or below the horizon) for a useful shadow
+	}
+	light /= len;
+	glm::vec3 q = p;
+	for (int i = 0; i < 2; ++i)
+	{
+		const int gx = std::max(0, std::min(static_cast<int>(q.x), world_coord(gameWorld.map.width) - 1));
+		const int gy = std::max(0, std::min(static_cast<int>(-q.z), world_coord(gameWorld.map.height) - 1));
+		const float ground = static_cast<float>(map_Height(gameWorld.map, gx, gy)) + 2.f;
+		q = p + light * ((ground - p.y) / light.y);
+	}
+	gfx_api::ParticleInstance sh = inst;
+	sh.positionSize = glm::vec4(q, size * 0.9f);
+	sh.colour = glm::vec4(0.02f, 0.02f, 0.02f, shadowAlpha);
+	sh.params.w = 2.f; // flat, unlit
+	s.frameShadows.push_back(sh);
+}
+
+bool cameraPosition(Vector3f& out)
+{
+	if (!s.haveCamera)
+	{
+		return false;
+	}
+	out = Vector3f(s.cameraRender.x, -s.cameraRender.z, s.cameraRender.y);
+	return true;
+}
+
 bool hasEffect(const std::string& effectName)
 {
 	return s.loaded && s.effects.count(effectName) != 0;
@@ -908,8 +1003,23 @@ void spawn(const std::string& effectName, const Vector3f& position, const Vector
 	spawnNamed(effectName, toRender(position), toRender(direction), scale);
 }
 
+/// How far a weapon's noise carries for the ambient birds (1 an ordinary shot)
+static float weaponNoise(const WEAPON_STATS* weapon)
+{
+	switch (weapon->weaponSubClass)
+	{
+	case WSC_MGUN: return 0.6f;
+	case WSC_MORTARS: case WSC_HOWITZERS: case WSC_BOMB: case WSC_MISSILE: case WSC_SLOWMISSILE: case WSC_SLOWROCKET: return 1.6f;
+	default: return 1.f;
+	}
+}
+
 void weaponFired(const WEAPON_STATS* weapon, const Vector3f& muzzlePosition, const Vector3f& muzzleDirection)
 {
+	if (weapon != nullptr)
+	{
+		ambient::disturb(muzzlePosition, weaponNoise(weapon) * 0.6f);
+	}
 	const WeaponVfx* vfx = weaponVfx(weapon);
 	if (vfx != nullptr)
 	{
@@ -1007,6 +1117,10 @@ void weaponTrail(const WEAPON_STATS* weapon, uint32_t id, const Vector3f& positi
 
 void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKind kind, const Vector3f& travel)
 {
+	if (weapon != nullptr)
+	{
+		ambient::disturb(position, weaponNoise(weapon));
+	}
 	const WeaponVfx* vfx = weaponVfx(weapon);
 	if (vfx == nullptr)
 	{
@@ -1048,6 +1162,8 @@ size_t liveCount()
 void update(LightingData& lightData)
 {
 	s.frameRings.clear();
+	s.frameBirds.clear();
+	s.frameShadows.clear();
 	++s.frameCounter;
 	const float dt = static_cast<float>(deltaGraphicsTime) / 1000.f;
 	if (dt > 0.f)
@@ -1132,7 +1248,9 @@ void update(LightingData& lightData)
 
 void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 {
-	if ((s.alive.empty() && s.frameRings.empty()) || s.atlas == nullptr || s.quad == nullptr || s.instanceBuffers.empty())
+	s.cameraRender = glm::vec3(glm::inverse(viewMatrix)[3]);
+	s.haveCamera = true;
+	if ((s.alive.empty() && s.frameRings.empty() && s.frameBirds.empty()) || s.atlas == nullptr || s.quad == nullptr || s.instanceBuffers.empty())
 	{
 		return;
 	}
@@ -1186,6 +1304,12 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix)
 		}
 	}
 	s.additiveInstances.insert(s.additiveInstances.end(), s.frameRings.begin(), s.frameRings.end());
+	s.groundInstances.insert(s.groundInstances.end(), s.frameShadows.begin(), s.frameShadows.end());
+	for (const gfx_api::ParticleInstance& b : s.frameBirds)
+	{
+		s.sortKeys.emplace_back(glm::dot(glm::vec3(b.positionSize) - cameraPos, forward), s.alphaInstances.size());
+		s.alphaInstances.push_back(b);
+	}
 	// Alpha-blended particles back to front
 	std::sort(s.sortKeys.begin(), s.sortKeys.end(), [](const std::pair<float, size_t>& a, const std::pair<float, size_t>& b) { return a.first > b.first; });
 	std::vector<gfx_api::ParticleInstance>& combined = s.combinedInstances;
