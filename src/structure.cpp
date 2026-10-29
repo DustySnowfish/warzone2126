@@ -600,7 +600,7 @@ bool loadStructureStats(WzConfig &ini)
 		psStats->isShipyard = ini.value("shipyard", 0).toInt() != 0;
 		{
 			const WzString placement = ini.value("placement", "land").toWzString();
-			psStats->placement2126 = placement == "sea" ? PLACEMENT_SEA_2126 : placement == "shore" ? PLACEMENT_SHORE_2126 : 0;
+			psStats->placement2126 = placement == "sea" ? PLACEMENT_SEA_2126 : placement == "shore" ? PLACEMENT_SHORE_2126 : placement == "coast" ? PLACEMENT_COAST_2126 : 0;
 			psStats->sonarRange2126 = std::max(0, ini.value("sonarRange", 0).toInt());
 		}
 
@@ -4625,6 +4625,34 @@ bool validLocation(GameWorld& world, BASE_STATS *psStats, Vector2i pos, uint16_t
 						}
 					for (int j = -1; j <= b.size.y && !nearWater; ++j)
 						for (int i = -1; i <= b.size.x; ++i)
+						{
+							const int tx = b.map.x + i, ty = b.map.y + j;
+							if (tileOnMap(world.map, tx, ty) && terrainType(mapTile(world.map, tx, ty)) == TER_WATER)
+							{
+								nearWater = true;
+								break;
+							}
+						}
+					if (!nearWater)
+					{
+						return false;
+					}
+				}
+				else if (psBuilding->placement2126 == PLACEMENT_COAST_2126)
+				{
+					// Warzone 2126 coastal structure (coastal battery): on land, with water within 2 tiles
+					for (int j = 0; j < b.size.y; ++j)
+						for (int i = 0; i < b.size.x; ++i)
+						{
+							const auto type = terrainType(mapTile(world.map, b.map.x + i, b.map.y + j));
+							if (type == TER_WATER || type == TER_CLIFFFACE)
+							{
+								return false;
+							}
+						}
+					bool nearWater = false;
+					for (int j = -2; j < b.size.y + 2 && !nearWater; ++j)
+						for (int i = -2; i < b.size.x + 2; ++i)
 						{
 							const int tx = b.map.x + i, ty = b.map.y + j;
 							if (tileOnMap(world.map, tx, ty) && terrainType(mapTile(world.map, tx, ty)) == TER_WATER)

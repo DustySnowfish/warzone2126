@@ -580,6 +580,10 @@ bool loadWeaponStats(WzConfig &ini)
 			psStats->surfaceToAir |= SHOOT_IN_AIR;
 		}
 		psStats->shipsOnly2126 = ini.value("shipsOnly", 0).toInt() != 0; // Warzone 2126: torpedoes
+		{
+			const WzString torpedo = ini.value("torpedo", "").toWzString();
+			psStats->torpedo2126 = torpedo == "guided" ? TORPEDO_GUIDED_2126 : torpedo == "straight" ? TORPEDO_STRAIGHT_2126 : 0;
+		}
 		if (std::find(flags.begin(), flags.end(), "nofriendlyfire") != flags.end()) // "NoFriendlyFire"
 		{
 			psStats->flags.set(WEAPON_FLAG_NO_FRIENDLY_FIRE, true);

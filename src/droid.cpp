@@ -3959,6 +3959,15 @@ bool checkValidWeaponForProp(const DROID_TEMPLATE *psTemplate)
 		}
 	}
 
+	// Warzone 2126: torpedo turrets only on ships
+	for (int i = 0; i < psTemplate->numWeaps; ++i)
+	{
+		if (psTemplate->getWeaponStats(i)->torpedo2126 != 0 && psPropStats->propulsionType != PROPULSION_TYPE_PROPELLOR)
+		{
+			return false;
+		}
+	}
+
 	//also checks that there is no other system component
 	if (psTemplate->asParts[COMP_BRAIN] != 0
 		&& psTemplate->getWeaponStats(0)->weaponSubClass != WSC_COMMAND)

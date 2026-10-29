@@ -398,6 +398,12 @@ struct REPAIR_STATS : public COMPONENT_STATS
 	} upgrade[MAX_PLAYERS], base;
 };
 
+/// Warzone 2126: WEAPON_STATS::torpedo2126 values. Torpedoes arc into the water, then run along the surface:
+/// guided ones are launched 40 degrees off the line to the target (alternating sides) and steer onto it;
+/// straight ones run on the line they were launched on. Torpedo turrets mount on ships only.
+constexpr uint8_t TORPEDO_GUIDED_2126 = 1;
+constexpr uint8_t TORPEDO_STRAIGHT_2126 = 2;
+
 struct WEAPON_STATS : public COMPONENT_STATS
 {
 	UPGRADE const &getBase() const override { return base; }
@@ -444,6 +450,7 @@ struct WEAPON_STATS : public COMPONENT_STATS
 	UBYTE faceInFlight = 0;				///< flag to make the inflight effect face the player when drawn
 	UBYTE surfaceToAir = 0;				///< indicates how good in the air - SHOOT_ON_GROUND, SHOOT_IN_AIR or both
 	bool shipsOnly2126 = false;			///< Warzone 2126: can only hit ships (torpedoes; "shipsOnly": 1)
+	uint8_t torpedo2126 = 0;			///< Warzone 2126: torpedo movement: 0 none, TORPEDO_GUIDED_2126 ("torpedo": "guided"), TORPEDO_STRAIGHT_2126 ("straight")
 	bool lightWorld = false;			///< flag to indicate whether the effect lights up the world
 	bool penetrate = false;				///< flag to indicate whether pentrate droid or not
 	bool fireOnMove = false;			///< indicates whether the droid has to stop before firing

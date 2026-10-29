@@ -80,6 +80,44 @@
 			"water": "water_splash",
 			"replaceImpact": true,
 			"scale": 1.15
+		},
+		"Torpedo-Twin": {
+			"muzzle": "rocket_muzzle",
+			"trail": "wake_ship",
+			"trailSpacing": 30,
+			"hit": "explosion_medium",
+			"miss": "water_splash",
+			"water": "water_splash",
+			"replaceImpact": true,
+			"scale": 1.0
+		},
+		"Torpedo-Heavy": {
+			"muzzle": "rocket_muzzle",
+			"trail": "wake_ship",
+			"trailSpacing": 30,
+			"hit": "explosion_medium",
+			"miss": "water_splash",
+			"water": "water_splash",
+			"replaceImpact": true,
+			"scale": 1.3
+		},
+		"Torpedo-Launcher": {
+			"muzzle": "rocket_muzzle",
+			"trail": "wake_ship",
+			"trailSpacing": 30,
+			"hit": "explosion_medium",
+			"miss": "water_splash",
+			"water": "water_splash",
+			"replaceImpact": true,
+			"scale": 1.3
+		},
+		"Coastal-Gun": {
+			"muzzle": "cannon_muzzle",
+			"hit": "explosion_medium",
+			"miss": "explosion_medium",
+			"water": "water_splash",
+			"replaceImpact": true,
+			"scale": 1.15
 		}
 	},
 	"propulsion": {

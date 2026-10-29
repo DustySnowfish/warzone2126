@@ -3626,6 +3626,30 @@
 		],
 		"width": 2
 	},
+	"Emplacement-CoastalGun": {
+		"armour": 30,
+		"breadth": 2,
+		"buildPoints": 2400,
+		"buildPower": 650,
+		"height": 1,
+		"hitpoints": 3200,
+		"id": "Emplacement-CoastalGun",
+		"name": "Coastal Battery",
+		"placement": "coast",
+		"resistance": 300,
+		"sensorID": "NavGunSensor",
+		"strength": "HARD",
+		"structureModel": [
+			"blcoastbattery.pie"
+		],
+		"thermal": 25,
+		"type": "DEFENSE",
+		"weapons": [
+			"Coastal-Gun",
+			"Coastal-Gun"
+		],
+		"width": 2
+	},
 	"Emplacement-Torpedo": {
 		"armour": 15,
 		"breadth": 1,

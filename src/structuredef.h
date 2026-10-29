@@ -102,6 +102,7 @@ enum STRUCT_ANIM_STATES
 /// Warzone 2126: STRUCTURE_STATS::placement2126 values
 constexpr uint8_t PLACEMENT_SEA_2126 = 1;
 constexpr uint8_t PLACEMENT_SHORE_2126 = 2;
+constexpr uint8_t PLACEMENT_COAST_2126 = 3;
 
 struct STRUCTURE_STATS : public BASE_STATS
 {
@@ -113,7 +114,7 @@ struct STRUCTURE_STATS : public BASE_STATS
 
 	STRUCTURE_TYPE type;            /* the type of structure */
 	bool isShipyard = false;        ///< Warzone 2126: a FACTORY that builds ships, half on land and half on water ("shipyard": 1)
-	uint8_t placement2126 = 0;      ///< Warzone 2126: where it may be built: 0 land, PLACEMENT_SEA_2126 on water ("placement": "sea"), PLACEMENT_SHORE_2126 on water or next to it ("placement": "shore")
+	uint8_t placement2126 = 0;      ///< Warzone 2126: where it may be built: 0 land, PLACEMENT_SEA_2126 on water ("placement": "sea"), PLACEMENT_SHORE_2126 on water or next to it ("placement": "shore"), PLACEMENT_COAST_2126 on land with water within 2 tiles ("placement": "coast")
 	int sonarRange2126 = 0;         ///< Warzone 2126: sees ships (only) up to this range, world units ("sonarRange")
 	STRUCT_STRENGTH strength;       /* strength against the weapon effects */
 	UDWORD baseWidth;               /*The width of the base in tiles*/

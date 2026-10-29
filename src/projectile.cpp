@@ -597,7 +597,17 @@ static PROJECTILE* proj_SendProjectileAngledInternal(WEAPON* psWeap, SIMPLE_OBJE
 	// Get target distance, horizontal distance only.
 	uint32_t dist = iHypot(deltaPos.xy());
 
-	if (proj_Direct(psStats))
+	if (psStats->torpedo2126 != 0)
+	{
+		// Warzone 2126 torpedo: vXY holds the launch side (guided ones go out 40 degrees off the line to
+		// the target, alternating sides shot by shot); its heading is kept in rot.direction
+		const int side = psStats->torpedo2126 == TORPEDO_GUIDED_2126 ? ((psWeap->shotsFired & 1) ? 1 : -1) : 0;
+		proj.vXY = side;
+		proj.vZ = 0;
+		proj.rot.direction = static_cast<uint16_t>(proj.rot.direction + side * DEG(40));
+		proj.rot.pitch = 0;
+	}
+	else if (proj_Direct(psStats))
 	{
 		proj.rot.pitch = iAtan2(deltaPos.z, dist);
 	}
@@ -858,6 +868,41 @@ static PROJECTILE* proj_InFlightFunc(PROJECTILE *psProj)
 
 	/* Calculate movement vector: */
 	int32_t currentDistance = 0;
+	if (psStats->torpedo2126 != 0)
+	{
+		// Warzone 2126 torpedo: a short arc into the water, then a run along the surface; guided
+		// torpedoes steer onto the target at a limited rate, straight ones keep their heading
+		constexpr int kLaunchMs = 450;          // in the air before it reaches the water
+		constexpr int kLaunchHump = 22;         // world units: height of the arc above the straight line
+		constexpr int kRunHeight = 6;           // world units above the surface while running (at the waterline)
+		constexpr int kTurnDegPerSec = 70;      // guided torpedoes' turn rate
+		const int dt = std::max<int>(0, psProj->time - psProj->prevSpacetime.time);
+		if (psStats->torpedo2126 == TORPEDO_GUIDED_2126 && timeSoFar > kLaunchMs)
+		{
+			const Vector3i aim = psProj->psDest != nullptr ? psProj->psDest->pos : psProj->dst;
+			const uint16_t want = iAtan2((aim - psProj->pos).xy());
+			const int maxTurn = DEG(kTurnDegPerSec) * dt / GAME_TICKS_PER_SEC;
+			psProj->rot.direction = static_cast<uint16_t>(psProj->rot.direction + clip(angleDelta(want - psProj->rot.direction), -maxTurn, maxTurn));
+		}
+		const int speed = timeSoFar < kLaunchMs ? psStats->flightSpeed * 3 / 2 : psStats->flightSpeed;
+		const Vector2i step = iSinCosR(psProj->rot.direction, speed * dt / GAME_TICKS_PER_SEC);
+		psProj->pos.x = clip(psProj->pos.x + step.x, 0, world_coord(gameWorld.map.width) - 1);
+		psProj->pos.y = clip(psProj->pos.y + step.y, 0, world_coord(gameWorld.map.height) - 1);
+		const int surface = map_Height(gameWorld.map, psProj->pos.xy()) + kRunHeight;
+		if (timeSoFar < kLaunchMs)
+		{
+			const int64_t t = timeSoFar;
+			const int hump = static_cast<int>(kLaunchHump * 4 * t * (kLaunchMs - t) / (int64_t(kLaunchMs) * kLaunchMs));
+			psProj->pos.z = psProj->src.z + static_cast<int>((surface - psProj->src.z) * t / kLaunchMs) + hump;
+		}
+		else
+		{
+			psProj->pos.z = surface;
+		}
+		psProj->rot.pitch = 0;
+		currentDistance = timeSoFar * psStats->flightSpeed / GAME_TICKS_PER_SEC;
+	}
+	else
 	switch (psStats->movementModel)
 	{
 	case MM_DIRECT:           // Go in a straight line.
@@ -985,6 +1030,10 @@ static PROJECTILE* proj_InFlightFunc(PROJECTILE *psProj)
 		{
 			// Dont damage one target twice
 			continue;
+		}
+		if (psStats->shipsOnly2126 && (psTempObj->type != OBJ_DROID || ((DROID *)psTempObj)->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR))
+		{
+			continue; // Warzone 2126: torpedoes only hit ships
 		}
 
 		Vector3i psTempObjPrevPos = isDroid(psTempObj) ? castDroid(psTempObj)->prevSpacetime.pos : psTempObj->pos;

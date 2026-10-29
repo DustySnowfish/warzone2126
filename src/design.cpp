@@ -2160,6 +2160,7 @@ static bool intAddComponentButtons(ListTabWidget *compList, ComponentIterator co
 
 	/*if adding weapons - need to check if the propulsion is a VTOL*/
 	bool bVTOL = false;
+	bool bShip = false; // Warzone 2126: torpedo turrets only on ships
 
 	if (bWeapon)
 	{
@@ -2170,6 +2171,7 @@ static bool intAddComponentButtons(ListTabWidget *compList, ComponentIterator co
 			ASSERT_OR_RETURN(false, psPropStats != nullptr, "invalid propulsion stats pointer");
 
 			bVTOL |= asPropulsionTypes[psPropStats->propulsionType].travel == AIR;
+			bShip = psPropStats->propulsionType == PROPULSION_TYPE_PROPELLOR;
 		}
 		if (sCurrDesign.asParts[COMP_BODY])
 		{
@@ -2193,6 +2195,7 @@ static bool intAddComponentButtons(ListTabWidget *compList, ComponentIterator co
 		{
 			auto &weapon = (WEAPON_STATS &)currStats;
 			if ((weapon.vtolAttackRuns > 0) != bVTOL
+			    || (weapon.torpedo2126 != 0 && !bShip)
 			    || (weapon.weaponSize == WEAPON_SIZE_LIGHT && bodysize != SIZE_LIGHT)
 			    || (weapon.weaponSize == WEAPON_SIZE_HEAVY && bodysize == SIZE_LIGHT))
 			{
@@ -2693,6 +2696,10 @@ static void setTemplateStat(DROID_TEMPLATE *psTemplate, COMPONENT_STATS *psStats
 		{
 			clearTurret();
 		}
+		else if (stats->propulsionType != PROPULSION_TYPE_PROPELLOR && psTemplate->numWeaps > 0 && psTemplate->getWeaponStats(0)->torpedo2126 != 0)
+		{
+			clearTurret(); // Warzone 2126: torpedo turrets only on ships
+		}
 		psTemplate->asParts[COMP_PROPULSION] = stats - asPropulsionStats.data();
 		break;
 	}
@@ -3020,6 +3027,11 @@ bool intValidTemplate(DROID_TEMPLATE *psTempl, const char *newName, bool complai
 		else if (psTempl->getWeaponStats(i)->vtolAttackRuns > 0)
 		{
 			debug(level, "Non-VTOL with VTOL turret, not possible");
+			return false;
+		}
+		if (psTempl->getWeaponStats(i)->torpedo2126 != 0 && psTempl->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR)
+		{
+			debug(level, "Torpedo turret on a unit that is not a ship, not possible");
 			return false;
 		}
 	}

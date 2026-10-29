@@ -727,6 +727,17 @@ glm::vec4 colourAt(const Layer& layer, float t)
 	return glm::vec4(keys.back().rgb, keys.back().alpha);
 }
 
+static bool particleOverWater2126(const glm::vec3& renderPos)
+{
+	const int mx = map_coord(static_cast<int>(renderPos.x));
+	const int my = map_coord(static_cast<int>(-renderPos.z));
+	if (mx < 0 || my < 0 || mx >= gameWorld.map.width || my >= gameWorld.map.height)
+	{
+		return false;
+	}
+	return terrainType(mapTile(gameWorld.map, mx, my)) == TER_WATER;
+}
+
 void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& dir, float scale)
 {
 	const float dirLen = glm::length(dir);
@@ -754,6 +765,12 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 			}
 			Particle p;
 			p.position = pos + randomUnit() * (layer.offset * scale * random01());
+			// Dark ground marks (scorches, tracks) have nothing to mark on open water: drawn flat on the
+			// surface they showed as black blotches wherever something exploded at sea or on the shore
+			if (layer.ground && !layer.additive && !layer.lit && particleOverWater2126(p.position))
+			{
+				continue;
+			}
 			p.velocity = d * (pick(layer.speed) * scale) + glm::vec3(0.f, layer.rise * scale, 0.f);
 			p.age = 0.f;
 			p.life = std::max(0.016f, pick(layer.life) / 1000.f);

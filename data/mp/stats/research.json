@@ -9393,6 +9393,54 @@
 		],
 		"statID": "A0SonarBuoy"
 	},
+	"R-Defense-CoastalGun": {
+		"iconID": "IMAGE_RES_DEFENCE",
+		"id": "R-Defense-CoastalGun",
+		"name": "Coastal Battery",
+		"requiredResearch": [
+			"R-Defense-Torpedo",
+			"R-Wpn-Cannon3Mk1",
+			"R-Wpn-Cannon-Damage06"
+		],
+		"researchPoints": 9600,
+		"researchPower": 300,
+		"resultComponents": [
+			"Coastal-Gun"
+		],
+		"resultStructures": [
+			"Emplacement-CoastalGun"
+		],
+		"statID": "Emplacement-CoastalGun"
+	},
+	"R-Wpn-Torpedo-Twin": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-Torpedo-Twin",
+		"name": "Twin Torpedo Tubes",
+		"requiredResearch": [
+			"R-Defense-Torpedo"
+		],
+		"researchPoints": 3600,
+		"researchPower": 100,
+		"resultComponents": [
+			"Torpedo-Twin"
+		],
+		"statID": "Torpedo-Twin"
+	},
+	"R-Wpn-Torpedo-Heavy": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-Torpedo-Heavy",
+		"name": "Heavy Torpedo",
+		"requiredResearch": [
+			"R-Wpn-Torpedo-Twin",
+			"R-Wpn-Rocket07-Tank-Killer"
+		],
+		"researchPoints": 9000,
+		"researchPower": 225,
+		"resultComponents": [
+			"Torpedo-Heavy"
+		],
+		"statID": "Torpedo-Heavy"
+	},
 	"R-Defense-Torpedo": {
 		"iconID": "IMAGE_RES_DEFENCE",
 		"id": "R-Defense-Torpedo",

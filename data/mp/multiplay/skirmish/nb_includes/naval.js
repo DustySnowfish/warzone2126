@@ -32,6 +32,36 @@ const NAVAL_BUOY = "A0SonarBuoy";
 const NAVAL_BUOY_RESEARCH = "R-Struc-SonarBuoy";
 const NAVAL_TORPEDO = "Emplacement-Torpedo";
 const NAVAL_TORPEDO_RESEARCH = "R-Defense-Torpedo";
+const NAVAL_BATTERY = "Emplacement-CoastalGun";
+const NAVAL_BATTERY_RESEARCH = "R-Defense-CoastalGun";
+const NAVAL_TUBES = ["Torpedo-Heavy", "Torpedo-Twin"]; // ship torpedo tubes, best first
+const NAVAL_TUBES_RESEARCH = ["R-Wpn-Torpedo-Twin", "R-Wpn-Torpedo-Heavy"];
+
+// Whether this AI has seen enemy ships in the last 5 minutes (torpedo tubes only hit ships)
+let enemyShipsSeenAt = -1;
+let smallShipTubes = false; // single-mount hulls alternate between tubes and the usual weapon
+
+function seenEnemyShips()
+{
+	if (enemyShipsSeenAt >= 0 && gameTime - enemyShipsSeenAt < 300000)
+	{
+		return true;
+	}
+	let n = 0;
+	for (let p = 0; p < maxPlayers; ++p)
+	{
+		if (p === me || allianceExistsBetween(me, p))
+		{
+			continue;
+		}
+		n += enumDroid(p, DROID_ANY, me).filter((d) => (d.propulsion === "NavalScrew" || d.propulsion === "NavalJet")).length;
+	}
+	if (n > 0)
+	{
+		enemyShipsSeenAt = gameTime;
+	}
+	return n > 0;
+}
 const NAVAL_SEA_TRUCKS = 2;
 
 let navalTarget; // { id, type, player, wx, wy }: the object attacked and the water spot to attack it from
@@ -183,6 +213,27 @@ _global.navalResearch = function(lab) {
 		}
 	}
 
+	// Torpedo tubes once enemy ships have been seen
+	if (iHaveShips() && withChance(40) && seenEnemyShips())
+	{
+		if (pursueResearch(lab, NAVAL_TUBES_RESEARCH.filter((r) => { const res = getResearch(r); return defined(res) && res !== null && !res.done; })))
+		{
+			navalDebug("researching torpedo tubes");
+			return true;
+		}
+	}
+
+	// Coastal batteries late in the game, once enemy ships have been seen
+	if (iHaveShips() && gameTime > 20 * 60000 && withChance(25) && seenEnemyShips())
+	{
+		const res = getResearch(NAVAL_BATTERY_RESEARCH);
+		if (defined(res) && res !== null && !res.done && pursueResearch(lab, NAVAL_BATTERY_RESEARCH))
+		{
+			navalDebug("researching the Coastal Battery");
+			return true;
+		}
+	}
+
 	// Bigger hulls once ships are in use (the research tree leads from Frigate to Super Battleship)
 	if (iHaveShips() && navalWanted() && withChance(25))
 	{
@@ -323,6 +374,51 @@ _global.buildShipyard = function() {
 	return success;
 };
 
+// Coastal batteries: up to 2 on the home coast while enemy ships are about (land trucks build them)
+function buildCoastalBattery()
+{
+	if (!isAvailable(NAVAL_BATTERY) || !seenEnemyShips() || countStructList([NAVAL_BATTERY]) >= 2 || myPower() < 700 || throttled(20000, "navalBattery"))
+	{
+		return false;
+	}
+
+	const trucks = enumTrucks().filter((t) => (
+		t.order !== DORDER_BUILD && t.order !== DORDER_HELPBUILD && t.order !== DORDER_LINEBUILD && t.order !== DORDER_DEMOLISH &&
+		(typeof DORDER_EARTHWORK === "undefined" || t.order !== DORDER_EARTHWORK) && distanceToBase(t) < baseScale * 2.5));
+
+	if (trucks.length === 0)
+	{
+		return false;
+	}
+
+	const spots = homeWaterInfo().spots;
+	let loc;
+
+	for (let i = 0; i < spots.length && !defined(loc); ++i)
+	{
+		const l = pickStructLocation(trucks[0], NAVAL_BATTERY, spots[i].x, spots[i].y);
+
+		if (defined(l) && distanceToBase(l) <= baseScale * 3)
+		{
+			loc = l;
+		}
+	}
+
+	if (!defined(loc))
+	{
+		return false;
+	}
+
+	let success = false;
+
+	trucks.slice(0, 2).forEach((t) => {
+		success = orderDroidBuild(t, DORDER_BUILD, NAVAL_BATTERY, loc.x, loc.y) || success;
+	});
+	navalDebug("Coastal Battery ordered at " + loc.x + "," + loc.y + ": " + success);
+
+	return success;
+}
+
 // Production: warships from idle Shipyards
 _global.checkShipProduction = function() {
 	if (!iCanDesign() || !iHaveShips())
@@ -380,13 +476,32 @@ _global.checkShipProduction = function() {
 	const propulsions = getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL);
 	let success = false;
 
+	// Against enemy ships, every other mount carries torpedo tubes (the rest keep the usual weapon
+	// so the ship can still fight the shore); a single-mount hull gets tubes on every second ship
+	const tubes = (seenEnemyShips()) ? NAVAL_TUBES.filter((w) => (componentAvailable(w)))[0] : undefined;
+
 	yards.forEach((yard) => {
 		const bwPair = chooseShipBodyWeaponPair(bodies, chooseShipWeapon());
 
 		if (defined(bwPair))
 		{
 			// (every mount gets the chosen weapon; a hull takes as many as it has mounts, up to 8)
-			success = buildDroid(yard, "Warship", bwPair.b, propulsions, "", "", bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w) || success;
+			const w = [bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w];
+			if (defined(tubes))
+			{
+				if (bwPair.b === "NavalPatrol" || bwPair.b === "NavalLanding")
+				{
+					smallShipTubes = !smallShipTubes;
+					if (smallShipTubes) { w[0] = tubes; }
+				}
+				else
+				{
+					for (let i = 1; i < w.length; i += 2) { w[i] = tubes; }
+				}
+			}
+			const built = buildDroid(yard, "Warship", bwPair.b, propulsions, "", "", w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
+			navalDebug("warship " + bwPair.b + (w.indexOf(tubes) >= 0 ? " with " + tubes : "") + (built ? "" : " (failed)"));
+			success = built || success;
 		}
 	});
 
@@ -812,7 +927,9 @@ function carrierTick(home)
 
 // Tactics, every few seconds
 _global.navalTick = function() {
+	seenEnemyShips(); // note enemy ships in sight, for the torpedo tube choice
 	buildShipyard();
+	buildCoastalBattery();
 	landingTick();
 
 	const home = homeWater();

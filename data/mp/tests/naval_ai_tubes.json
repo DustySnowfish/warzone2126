@@ -1,0 +1,20 @@
+{
+	"challenge": {
+		"map": "Random-Arizona-4",
+		"randomMapCode": "256A4-6AAAAAA0-3",
+		"maxPlayers": 4,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 2,
+		"bases": 2,
+		"name": "Naval AI torpedo tube test",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "naval_ai_tubes.js"
+	},
+	"player_0": { "team": 0, "position": 0 },
+	"player_1": { "team": 1, "position": 1, "difficulty": "Medium", "ai": "nb_generic.js" },
+	"player_2": { "team": 2, "position": 2, "difficulty": "Medium", "ai": "nb_generic.js" },
+	"player_3": { "team": 3, "position": 3, "difficulty": "Medium", "ai": "nb_generic.js" }
+}

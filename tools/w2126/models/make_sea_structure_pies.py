@@ -4,6 +4,7 @@
 blsonarbuoy.pie  - sonar buoy: a float with a mast and a light, 1 tile
 blrigbase.pie    - offshore oil rig platform: a deck on four legs; the oil derrick stands on it
 bltorpedo.pie    - torpedo launcher: a raft with a launcher housing; the weapon mounts on top
+blcoastbattery.pie - coastal battery: a 2 x 2 casemate with two gun pits (two connectors)
 Built from boxes, textured from page-34-buildings.png.
 Run:  python3 tools/w2126/models/make_sea_structure_pies.py
 """
@@ -86,3 +87,14 @@ for x in (-54, 54):
 rig.box(-62, -20, -62, 62, -8, -52, STRIPE)
 rig.box(-62, -20, 52, 62, -8, 62, STRIPE)
 rig.write("blrigbase.pie")
+
+# Coastal battery (2 x 2 tiles): a concrete casemate on a sloped earth berm, two gun pits on the roof
+# for its twin heavy guns (two connectors), and an ammunition bunker at the back
+bat = Model()
+bat.box(-124, -6, -124, 124, 10, 124, PILE, DECK)
+bat.box(-108, 10, -100, 108, 46, 92, WALL, ROOF)
+bat.box(-100, 46, -60, 100, 54, 60, STRIPE, DECK)
+for x in (-52, 52):
+    bat.box(x - 34, 54, -34, x + 34, 62, 34, PILE, DECK)
+bat.box(-60, 10, 92, 60, 30, 120, WALL, ROOF)
+bat.write("blcoastbattery.pie", connectors=[(-52, 0, 62), (52, 0, 62)])
