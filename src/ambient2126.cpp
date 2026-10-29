@@ -115,6 +115,7 @@ struct State
 	std::vector<float> groundBurn;           // burnability per ground type (Arizona only)
 	bool groundBurnReady = false;
 	float surfCarry = 0.f;
+	float driftCarry = 0.f;
 	float clock = 0.f;
 	std::vector<glm::vec3> noises;   // recent loud places: map x, y and the clock time
 	bool started = false;
@@ -601,6 +602,66 @@ void updateFires(float dt)
 	}
 }
 
+// ---------------------------------------------------------------------------------------
+// Drifting dust, leaves and litter on the wind
+
+/// Gusts: 0.35..1, a slow swell with quicker flurries on top
+float gust()
+{
+	const float slow = 0.5f + 0.5f * std::sin(s.clock * 2.f * kPi / 16.f);
+	const float quick = 0.5f + 0.5f * std::sin(s.clock * 2.f * kPi / 5.3f + 1.3f);
+	return 0.35f + 0.65f * slow * (0.6f + 0.4f * quick);
+}
+
+void updateDrift(float dt)
+{
+	if (wetness() > 0.2f || weather::groundState() < -0.2f)
+	{
+		return; // rain or snow on the ground: nothing loose blows about
+	}
+	static const float kRate[3] = { 1.5f, 3.5f, 6.f }; // per second around the view in a full gust
+	const float g = gust();
+	s.driftCarry += dt * kRate[war_getEffectsDetail()] * g * g;
+	const glm::vec2 w = wind();
+	const glm::vec2 c = cameraCentre();
+	const float r = viewRadius() * 0.7f;
+	int budget = 4;
+	while (s.driftCarry >= 1.f && budget-- > 0)
+	{
+		s.driftCarry -= 1.f;
+		// Start a little upwind, so things blow across the view
+		const glm::vec2 p = c - w * r * 0.35f + glm::vec2(randRange(-r, r), randRange(-r, r));
+		const int tx = map_coord(static_cast<int>(p.x));
+		const int ty = map_coord(static_cast<int>(p.y));
+		if (!onMap(tx, ty) || waterTile(tx, ty))
+		{
+			continue;
+		}
+		const float ground = groundAt(p.x, p.y);
+		const float speedScale = 0.7f + 0.6f * g;
+		switch (currentMapTileset)
+		{
+		case MAP_TILESET::ARIZONA:
+			particles::spawn("drift_dust", Vector3f(p.x, p.y, ground + randRange(12.f, 40.f)), Vector3f(w.x, w.y, 0.03f), speedScale);
+			break;
+		case MAP_TILESET::ROCKIES:
+			particles::spawn("drift_leaf", Vector3f(p.x, p.y, ground + randRange(40.f, 170.f)), Vector3f(w.x, w.y, 0.18f), speedScale);
+			break;
+		case MAP_TILESET::URBAN:
+			if (rand01() < 0.5f)
+			{
+				particles::spawn("drift_paper", Vector3f(p.x, p.y, ground + randRange(8.f, 70.f)), Vector3f(w.x, w.y, 0.2f), speedScale);
+			}
+			else
+			{
+				particles::spawn("drift_grit", Vector3f(p.x, p.y, ground + randRange(10.f, 30.f)), Vector3f(w.x, w.y, 0.03f), speedScale);
+			}
+			break;
+		}
+	}
+	s.driftCarry = std::min(s.driftCarry, 1.f);
+}
+
 } // namespace
 
 void update()
@@ -687,6 +748,7 @@ void update()
 		s.noises.erase(std::remove_if(s.noises.begin(), s.noises.end(), [](const glm::vec3& n) { return s.clock - n.z > 25.f; }), s.noises.end());
 		updateSurf(dt);
 		updateFires(dt);
+		updateDrift(dt);
 	}
 
 	for (const Flock& f : s.flocks)

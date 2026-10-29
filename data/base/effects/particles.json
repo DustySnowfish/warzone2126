@@ -204,6 +204,28 @@
 			{"texture": "scorch", "blend": "alpha", "orient": "ground", "lit": false, "count": 1, "life": [150000, 200000], "size": [175, 180], "sizeJitter": 0.1, "speed": 0, "rotation": [0, 360], "colour": [{"rgb": [0.05, 0.045, 0.04], "alpha": 0.55}, {"t": 0.8, "rgb": [0.06, 0.05, 0.045], "alpha": 0.45}, {"rgb": [0.07, 0.06, 0.05], "alpha": 0}]}
 		]
 	},
+	"drift_dust": {
+		"layers": [
+			{"texture": "dust", "blend": "alpha", "lit": true, "count": 1, "life": [3000, 5000], "size": [60, 230], "speed": [150, 260], "direction": "emitter", "spread": 10, "rise": 6, "drag": 0.1, "rotation": [0, 360], "spin": [5, 20], "colour": [{"rgb": [0.78, 0.62, 0.44], "alpha": 0}, {"t": 0.25, "rgb": [0.78, 0.62, 0.44], "alpha": 0.2}, {"rgb": [0.8, 0.66, 0.5], "alpha": 0}]}
+		]
+	},
+	"drift_grit": {
+		"layers": [
+			{"texture": "dust", "blend": "alpha", "lit": true, "count": 1, "life": [2500, 4000], "size": [40, 160], "speed": [150, 240], "direction": "emitter", "spread": 12, "rise": 4, "drag": 0.1, "rotation": [0, 360], "spin": [5, 20], "colour": [{"rgb": [0.6, 0.58, 0.55], "alpha": 0}, {"t": 0.25, "rgb": [0.6, 0.58, 0.55], "alpha": 0.16}, {"rgb": [0.62, 0.6, 0.57], "alpha": 0}]}
+		]
+	},
+	"drift_leaf": {
+		"layers": [
+			{"texture": "leaf", "blend": "alpha", "lit": true, "count": [0, 1], "life": [5000, 8000], "size": [24, 24], "sizeJitter": 0.3, "speed": [120, 230], "direction": "emitter", "spread": 25, "gravity": 22, "drag": 0.15, "rotation": [0, 360], "spin": [90, 320], "colour": [{"rgb": [0.72, 0.36, 0.1], "alpha": 0}, {"t": 0.1, "rgb": [0.72, 0.36, 0.1], "alpha": 1}, {"t": 0.85, "rgb": [0.72, 0.36, 0.1], "alpha": 1}, {"rgb": [0.72, 0.36, 0.1], "alpha": 0}]},
+			{"texture": "leaf", "blend": "alpha", "lit": true, "count": [0, 1], "life": [5000, 8000], "size": [21, 21], "sizeJitter": 0.3, "speed": [120, 230], "direction": "emitter", "spread": 25, "gravity": 22, "drag": 0.15, "rotation": [0, 360], "spin": [90, 320], "colour": [{"rgb": [0.78, 0.6, 0.16], "alpha": 0}, {"t": 0.1, "rgb": [0.78, 0.6, 0.16], "alpha": 1}, {"t": 0.85, "rgb": [0.78, 0.6, 0.16], "alpha": 1}, {"rgb": [0.78, 0.6, 0.16], "alpha": 0}]},
+			{"texture": "leaf", "blend": "alpha", "lit": true, "count": [0, 1], "life": [5000, 8000], "size": [23, 23], "sizeJitter": 0.3, "speed": [120, 230], "direction": "emitter", "spread": 25, "gravity": 22, "drag": 0.15, "rotation": [0, 360], "spin": [90, 320], "colour": [{"rgb": [0.45, 0.22, 0.08], "alpha": 0}, {"t": 0.1, "rgb": [0.45, 0.22, 0.08], "alpha": 1}, {"t": 0.85, "rgb": [0.45, 0.22, 0.08], "alpha": 1}, {"rgb": [0.45, 0.22, 0.08], "alpha": 0}]}
+		]
+	},
+	"drift_paper": {
+		"layers": [
+			{"texture": "scrap", "blend": "alpha", "lit": true, "count": 1, "life": [4000, 7000], "size": [20, 20], "sizeJitter": 0.3, "speed": [130, 240], "direction": "emitter", "spread": 25, "gravity": 15, "drag": 0.2, "rotation": [0, 360], "spin": [60, 260], "colour": [{"rgb": [0.86, 0.85, 0.8], "alpha": 0}, {"t": 0.1, "rgb": [0.86, 0.85, 0.8], "alpha": 0.95}, {"t": 0.85, "rgb": [0.86, 0.85, 0.8], "alpha": 0.95}, {"rgb": [0.86, 0.85, 0.8], "alpha": 0}]}
+		]
+	},
 	"surf_break": {
 		"layers": [
 			{"texture": "dust", "blend": "alpha", "orient": "ground", "lit": true, "count": [2, 3], "life": [2200, 3400], "size": [40, 150], "speed": 0, "offset": 24, "rotation": [0, 360], "colour": [{"rgb": [0.93, 0.95, 0.97], "alpha": 0}, {"t": 0.12, "rgb": [0.93, 0.95, 0.97], "alpha": 0.75}, {"t": 0.55, "rgb": [0.88, 0.92, 0.95], "alpha": 0.25}, {"rgb": [0.85, 0.9, 0.93], "alpha": 0}]},

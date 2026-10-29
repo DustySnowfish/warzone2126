@@ -102,6 +102,8 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "tracks", { 24, 1 } },
 		{ "tyres", { 25, 1 } },
 		{ "bird", { 26, 3 } },
+		{ "leaf", { 29, 2 } },
+		{ "scrap", { 31, 1 } },
 	};
 	return sets;
 }
@@ -721,6 +723,26 @@ float frameAlpha(int frame, float u, float v)
 		return birdAlpha(u, v, 0.92f, 0.22f);
 	case 28: // bird, wings lowered and swept
 		return birdAlpha(u, v, 0.74f, 0.32f);
+	case 29: // leaf: pointed oval, a little curved
+	{
+		const float uu = u / 0.85f;
+		const float half = 0.36f * (1.f - uu * uu) + 0.02f;
+		const float vv = v - 0.12f * uu * uu; // slight curl
+		const float edge = std::abs(vv) / half;
+		return std::abs(uu) < 1.f ? 1.f - smoothstep(0.85f, 1.f, edge) : 0.f;
+	}
+	case 30: // leaf: rounder and lobed
+	{
+		const float angle = std::atan2(v, u);
+		const float radius = 0.55f + 0.12f * std::cos(angle * 5.f);
+		return 1.f - smoothstep(radius - 0.05f, radius, r);
+	}
+	case 31: // scrap of paper: a torn rectangle
+	{
+		const float tear = 0.06f * valueNoise(u * 9.f + 3.f, v * 9.f, 31);
+		const float inside = std::max(std::abs(u) / 0.6f, std::abs(v) / 0.42f) + tear;
+		return 1.f - smoothstep(0.92f, 1.f, inside);
+	}
 	case 20: case 21: case 22: // scorch mark: dark centre, blotchy fading edge, radial streaks
 	{
 		const float angle = std::atan2(v, u);
