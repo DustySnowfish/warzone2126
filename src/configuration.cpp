@@ -823,6 +823,9 @@ bool loadConfig()
 	war_setHullSuspension(iniGetBool("hullSuspension2126", war_getHullSuspension()).value());
 	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
 	war_setHeatShimmer(iniGetBool("heatShimmer2126", war_getHeatShimmer()).value());
+	war_setIdleIndicators(iniGetBool("idleIndicators2126", war_getIdleIndicators()).value());
+	war_setTruckAutoHelp(iniGetBool("truckAutoHelp2126", war_getTruckAutoHelp()).value());
+	war_setAutoUpgradeDesigns(iniGetBool("autoUpgradeDesigns2126", war_getAutoUpgradeDesigns()).value());
 	war_setInterface2126(iniGetBool("interface2126", war_getInterface2126()).value());
 	war_setTimeOfDay(iniGetInteger("timeOfDay2126", war_getTimeOfDay()).value());
 	{
@@ -1171,6 +1174,9 @@ bool saveConfig()
 	iniSetBool("hullSuspension2126", war_getHullSuspension());
 	iniSetBool("hitFlash2126", war_getHitFlash());
 	iniSetBool("heatShimmer2126", war_getHeatShimmer());
+	iniSetBool("idleIndicators2126", war_getIdleIndicators());
+	iniSetBool("truckAutoHelp2126", war_getTruckAutoHelp());
+	iniSetBool("autoUpgradeDesigns2126", war_getAutoUpgradeDesigns());
 	iniSetBool("interface2126", war_getInterface2126());
 	iniSetInteger("timeOfDay2126", war_getTimeOfDay());
 	switch (war_getSmaaMode())

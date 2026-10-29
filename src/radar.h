@@ -70,6 +70,9 @@ std::shared_ptr<WIDGET> getRadarWidget();
 bool isMouseOverRadar();
 /// Warzone 2126: screen y of the top of the minimap (for panels placed above it)
 int radarTopY2126();
+/// Warzone 2126: the minimap's left edge and bottom (screen coordinates), for widgets laid out around it
+int radarLeftX2126();
+int radarBottomY2126();
 bool isRadarDragging();
 
 extern PIELIGHT clanColours[];

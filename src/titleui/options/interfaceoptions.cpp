@@ -219,6 +219,63 @@ std::shared_ptr<OptionsForm> makeInterfaceOptionsForm(bool inGame, const std::fu
 
 	result->addSection(OptionsSection(N_("Game UI"), ""), true);
 	{
+		auto optionInfo = OptionInfo("interface.game.idleIndicators2126", N_("Idle Indicators"), N_("Buttons beside the minimap counting idle trucks, factories and research facilities; click to go to the next one."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getIdleIndicators());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setIdleIndicators(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("interface.game.autoUpgradeDesigns2126", N_("Upgrade Designs in Production"), N_("When better weapons or bodies of the same kind are researched, designs waiting in factory queues switch to them (a new design is added; the unit being built finishes as it was)."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getAutoUpgradeDesigns());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setAutoUpgradeDesigns(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("interface.game.truckAutoHelp2126", N_("Trucks Help Nearby Building"), N_("Trucks left idle for a few seconds help build anything of yours being built within 8 tiles (not trucks set to Hold Position)."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getTruckAutoHelp());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setTruckAutoHelp(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("interface.game.showFPS", N_("Show FPS"), "");
 		auto valueChanger = OptionsDropdown<bool>::make(
 			[]() {

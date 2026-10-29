@@ -1012,6 +1012,18 @@ bool isRadarDragging()
 	return pRadarWidget->isRadarDragging();
 }
 
+int radarLeftX2126()
+{
+	const int w = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarWidth);
+	return radarCenterX - w / 2;
+}
+
+int radarBottomY2126()
+{
+	const int h = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarHeight);
+	return radarCenterY + h / 2;
+}
+
 int radarTopY2126()
 {
 	const int h = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarHeight);

@@ -21,6 +21,7 @@
 #include <vector>
 
 #include "keyconfig.h"
+#include "../hci/idlebar2126.h"
 
 #include "lib/framework/frame.h"
 #include "lib/framework/input.h"
@@ -130,6 +131,10 @@ static void initializeKeyFunctions(std::vector<KeyFunctionInfo>& entries)
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_JumpToUnits(DROID_CONSTRUCT),                               "JumpToConstructorUnits",       N_("View next Truck"),                              {}));
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_JumpToUnits(DROID_SENSOR),                                  "JumpToSensorUnits",            N_("View next Sensor Unit"),                        {}));
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_JumpToUnits(DROID_COMMAND),                                 "JumpToCommandUnits",           N_("View next Commander"),                          {}));
+	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  []() { idleBar2126SelectNext(IdleKind2126::Trucks); },        "JumpToIdleTruck2126",          N_("View next idle Truck"),                         {}));
+	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  []() { idleBar2126SelectNext(IdleKind2126::Factories); },     "JumpToIdleFactory2126",        N_("View next idle Factory"),                       {}));
+	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  []() { idleBar2126SelectNext(IdleKind2126::Labs); },          "JumpToIdleLab2126",            N_("View next idle Research Facility"),             {}));
+	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  []() { idleBar2126SelectAllTrucks(); },                       "SelectIdleTrucks2126",         N_("Select all idle Trucks"),                       {}));
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_ToggleOverlays,                                             "ToggleOverlays",               N_("Toggle Overlays"),                              {{ KeyMappingSlot::PRIMARY, { KEY_CODE::KEY_TAB                                     } }}));
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_ToggleConsoleDrop,                                          "ToggleConsoleDrop",            N_("Toggle Console History "),                      {{ KeyMappingSlot::PRIMARY, { KEY_CODE::KEY_BACKQUOTE                               } }}));
 	entries.emplace_back(KeyFunctionInfo(InputContext::GAMEPLAY,            KeyMappingType::ASSIGNABLE,  kf_ToggleResearchTree,                                         "ToggleResearchTree",           N_("Toggle Research Tree"),                         {{ KeyMappingSlot::PRIMARY, { KEY_CODE::KEY_N                                       } }}));

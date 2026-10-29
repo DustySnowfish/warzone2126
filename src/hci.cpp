@@ -56,6 +56,9 @@
 #include "edit3d.h"
 #include "game.h"
 #include "hci.h"
+#include "hci/idlebar2126.h"
+#include "truckhelp2126.h"
+#include "autoupgrade2126.h"
 #include "hci/infopanel2126.h"
 #include "hci/unitbar2126.h"
 #include "randommap2126.h"
@@ -1017,6 +1020,7 @@ void interfaceShutDown()
 	intRemoveIntelMapNoAnim(); // always call to ensure overlay screen is destroyed
 	unitBar2126Remove();
 	infoPanel2126Remove();
+	idleBar2126Remove();
 
 	if (replayOverlayScreen)
 	{
@@ -1434,6 +1438,9 @@ INT_RETVAL intRunWidgets()
 
 	unitBar2126Update(); // Warzone 2126 interface: the selected-units bar follows the selection
 	infoPanel2126Update(); // Warzone 2126: details of a single selected unit or building
+	idleBar2126Update(); // Warzone 2126: idle trucks, factories and labs beside the minimap
+	truckHelp2126Update(); // Warzone 2126: idle trucks help nearby construction
+	autoUpgrade2126Update(); // Warzone 2126: queued designs take better researched parts
 	announceRandomMapCode2126();
 
 	if (quitToMainMenuRequested)
@@ -2430,6 +2437,7 @@ void intRemoveReticule()
 		widgDelete(psWScreen, IDHUD2126_STATUS);
 		unitBar2126Remove();
 		infoPanel2126Remove();
+		idleBar2126Remove();
 		ReticuleUp = false;
 	}
 }
@@ -2793,6 +2801,7 @@ void intApplyInterfaceStyle2126()
 		widgDelete(psWScreen, IDHUD2126_STATUS);
 		unitBar2126Remove();
 		infoPanel2126Remove();
+		idleBar2126Remove();
 		if (auto orderForm = widgGetFromID(psWScreen, IDORDER_FORM))
 		{
 			orderForm->show();

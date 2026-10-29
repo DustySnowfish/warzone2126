@@ -138,6 +138,9 @@ struct WARZONE_GLOBALS
 	bool hullSuspension = true;
 	bool hitFlash = true;
 	bool heatShimmer = true;
+	bool idleIndicators = true;
+	bool truckAutoHelp = true;
+	bool autoUpgradeDesigns = true;
 	bool interface2126 = true;
 	int timeOfDay = 0; // time_of_day::Mode: 0 map default
 	// UI config
@@ -1034,6 +1037,36 @@ bool war_getHullSuspension()
 void war_setHullSuspension(bool enabled)
 {
 	warGlobs.hullSuspension = enabled;
+}
+
+bool war_getIdleIndicators()
+{
+	return warGlobs.idleIndicators;
+}
+
+void war_setIdleIndicators(bool enabled)
+{
+	warGlobs.idleIndicators = enabled;
+}
+
+bool war_getAutoUpgradeDesigns()
+{
+	return warGlobs.autoUpgradeDesigns;
+}
+
+void war_setAutoUpgradeDesigns(bool enabled)
+{
+	warGlobs.autoUpgradeDesigns = enabled;
+}
+
+bool war_getTruckAutoHelp()
+{
+	return warGlobs.truckAutoHelp;
+}
+
+void war_setTruckAutoHelp(bool enabled)
+{
+	warGlobs.truckAutoHelp = enabled;
 }
 
 bool war_getHeatShimmer()
