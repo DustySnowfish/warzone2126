@@ -231,6 +231,15 @@
 			{"texture": "smoke", "blend": "alpha", "lit": true, "count": 1, "life": [12000, 18000], "size": [260, 520], "sizeJitter": 0.25, "speed": [12, 30], "direction": "emitter", "spread": 30, "rise": 2, "drag": 0.05, "rotation": [0, 360], "spin": [1, 4], "colour": [{"rgb": [0.86, 0.88, 0.92], "alpha": 0}, {"t": 0.3, "rgb": [0.86, 0.88, 0.92], "alpha": 0.22}, {"t": 0.7, "rgb": [0.86, 0.88, 0.92], "alpha": 0.2}, {"rgb": [0.88, 0.9, 0.93], "alpha": 0}]}
 		]
 	},
+	"lightning_strike": {
+		"layers": [
+			{"texture": "glow", "blend": "additive", "count": 1, "life": [250, 400], "size": [210, 90], "speed": 0, "colour": [{"rgb": [0.8, 0.85, 1.0], "intensity": 4, "alpha": 1}, {"rgb": [0.6, 0.7, 1.0], "intensity": 1, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [8, 14], "life": [150, 400], "size": [10, 3], "speed": [300, 800], "direction": "hemisphere", "gravity": 600, "stretch": 2.5, "colour": [{"rgb": [0.85, 0.9, 1.0], "intensity": 5, "alpha": 1}, {"rgb": [0.5, 0.6, 1.0], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "lit": true, "count": [2, 3], "life": [1500, 2500], "size": [40, 180], "speed": [20, 60], "direction": "up", "spread": 40, "rise": 30, "offset": 20, "colour": [{"rgb": [0.3, 0.3, 0.32], "alpha": 0.5}, {"rgb": [0.4, 0.4, 0.42], "alpha": 0}]},
+			{"texture": "scorch", "blend": "alpha", "orient": "ground", "lit": false, "count": 1, "life": [20000, 30000], "size": [90, 95], "speed": 0, "rotation": [0, 360], "colour": [{"rgb": [0.05, 0.045, 0.04], "alpha": 0.7}, {"t": 0.75, "rgb": [0.06, 0.05, 0.045], "alpha": 0.55}, {"rgb": [0.07, 0.06, 0.05], "alpha": 0}]}
+		],
+		"light": {"rgb": [0.75, 0.82, 1.0], "range": 1400, "intensity": 3.0, "life": 350}
+	},
 	"surf_break": {
 		"layers": [
 			{"texture": "dust", "blend": "alpha", "orient": "ground", "lit": true, "count": [2, 3], "life": [2200, 3400], "size": [40, 150], "speed": 0, "offset": 24, "rotation": [0, 360], "colour": [{"rgb": [0.93, 0.95, 0.97], "alpha": 0}, {"t": 0.12, "rgb": [0.93, 0.95, 0.97], "alpha": 0.75}, {"t": 0.55, "rgb": [0.88, 0.92, 0.95], "alpha": 0.25}, {"rgb": [0.85, 0.9, 0.93], "alpha": 0}]},

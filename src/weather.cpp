@@ -35,6 +35,7 @@
 #include "loop.h"
 #include "map.h"
 #include "particles.h"
+#include "ambient2126.h"
 #include "warzoneconfig.h"
 
 #include <glm/glm.hpp>
@@ -42,6 +43,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <vector>
 
 namespace weather
 {
@@ -69,6 +71,13 @@ struct State
 	float carry = 0.f;          // fractional particles carried to the next frame
 	float splashCarry = 0.f;
 	uint32_t lastTime = 0;
+	// Lightning (render-only)
+	float nextStrike = 6.f;     // seconds until the next strike
+	float boltAge = -1.f;       // seconds since the current strike (< 0: none)
+	bool boltVisible = false;   // the bolt is in view (otherwise only the sky flashes, dimmer)
+	std::vector<glm::vec3> bolt;          // main channel, sky to ground (world)
+	std::vector<std::vector<glm::vec3>> forks;
+	float flash = 0.f;          // how lit the scene is by the flash, 0..1
 	glm::vec3 tintDiffuse { 1.f };
 	glm::vec3 tintSpecular { 1.f };
 	glm::vec3 tintAmbient { 1.f };
@@ -164,6 +173,129 @@ void emitAround(const char* effect, float count, float& carry, float radius, flo
 	}
 }
 
+// ---------------------------------------------------------------------------------------
+// Lightning
+
+/// A jagged channel from `top` down to `bottom` in `segments` steps
+std::vector<glm::vec3> jaggedChannel(const glm::vec3& top, const glm::vec3& bottom, int segments, float jitter)
+{
+	std::vector<glm::vec3> pts;
+	pts.reserve(static_cast<size_t>(segments) + 1);
+	glm::vec2 wander(0.f);
+	for (int i = 0; i <= segments; ++i)
+	{
+		const float t = static_cast<float>(i) / static_cast<float>(segments);
+		if (i > 0 && i < segments)
+		{
+			wander += glm::vec2(randRange(-jitter, jitter), randRange(-jitter, jitter));
+			wander *= 0.85f;
+		}
+		const glm::vec3 p = glm::mix(top, bottom, t);
+		pts.emplace_back(p.x + wander.x * (i < segments ? 1.f : 0.f), p.y + wander.y * (i < segments ? 1.f : 0.f), p.z);
+	}
+	return pts;
+}
+
+/// Brightness of a strike over its life: two or three quick strokes, then a fading afterglow
+float strikeBrightness(float age)
+{
+	if (age < 0.f)
+	{
+		return 0.f;
+	}
+	if (age < 0.07f) { return 1.f; }
+	if (age < 0.13f) { return 0.15f; }
+	if (age < 0.22f) { return 0.9f; }
+	if (age < 0.27f) { return 0.2f; }
+	if (age < 0.33f) { return 0.7f; }
+	return std::max(0.f, 0.5f * (1.f - (age - 0.33f) / 0.35f));
+}
+
+void strike()
+{
+	const float cx = static_cast<float>(playerPos.p.x);
+	const float cy = static_cast<float>(playerPos.p.z);
+	const float view = std::max(1200.f, getViewDistance() * 0.9f);
+	// Most strikes land in or near the view; the rest are far off (the sky flashes, no bolt in sight)
+	s.boltVisible = rand01() < 0.6f;
+	const float dist = s.boltVisible ? randRange(0.f, view * 0.6f) : randRange(view * 1.5f, view * 3.f);
+	const float angle = randRange(0.f, 6.2831853f);
+	const float mapW = static_cast<float>(world_coord(gameWorld.map.width) - 1);
+	const float mapH = static_cast<float>(world_coord(gameWorld.map.height) - 1);
+	const float x = std::max(0.f, std::min(mapW, cx + std::cos(angle) * dist));
+	const float y = std::max(0.f, std::min(mapH, cy + std::sin(angle) * dist));
+	const float ground = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(x), static_cast<int>(y)));
+	const glm::vec3 bottom(x, y, ground);
+	const glm::vec3 top(x + randRange(-500.f, 500.f), y + randRange(-500.f, 500.f), ground + 2600.f);
+	s.bolt = jaggedChannel(top, bottom, 28, 70.f);
+	s.forks.clear();
+	const int forkCount = 1 + static_cast<int>(rng() % 3u);
+	for (int f = 0; f < forkCount; ++f)
+	{
+		const size_t at = 4 + rng() % (s.bolt.size() / 2);
+		const glm::vec3 from = s.bolt[at];
+		const glm::vec3 to = from + glm::vec3(randRange(-500.f, 500.f), randRange(-500.f, 500.f), -randRange(400.f, 900.f));
+		s.forks.push_back(jaggedChannel(from, glm::vec3(to.x, to.y, std::max(to.z, ground + 200.f)), 16, 40.f));
+	}
+	s.boltAge = 0.f;
+	if (s.boltVisible)
+	{
+		particles::spawn("lightning_strike", Vector3f(x, y, ground + 45.f), Vector3f(0.f, 0.f, 1.f), 1.f);
+		ambient::disturb(Vector3f(x, y, ground), 2.5f); // the birds hear it too
+	}
+}
+
+void updateLightning(float dt)
+{
+	// Thunderstorms in heavy rain; now and then dry lightning in a strong dust storm
+	float rate = 0.f; // strikes a second
+	if (s.type == Type::Rain && s.level > 0.45f)
+	{
+		rate = 0.12f * (s.level - 0.3f);
+	}
+	else if (s.type == Type::Dust && s.level > 0.7f)
+	{
+		rate = 0.02f;
+	}
+	if (s.boltAge >= 0.f)
+	{
+		s.boltAge += dt;
+		if (s.boltAge > 0.8f)
+		{
+			s.boltAge = -1.f;
+			s.bolt.clear();
+			s.forks.clear();
+		}
+	}
+	if (rate > 0.f && s.boltAge < 0.f)
+	{
+		s.nextStrike -= dt;
+		if (s.nextStrike <= 0.f)
+		{
+			strike();
+			s.nextStrike = randRange(0.4f, 1.6f) / rate; // irregular gaps
+		}
+	}
+	const float b = strikeBrightness(s.boltAge);
+	s.flash = b * (s.boltVisible ? 1.f : 0.45f);
+	// The bolt itself, bright enough to bloom
+	if (s.boltVisible && b > 0.12f)
+	{
+		const glm::vec3 core = glm::vec3(2.6f, 2.8f, 3.6f) * (0.5f + 2.5f * b);
+		for (size_t i = 1; i < s.bolt.size(); ++i)
+		{
+			particles::frameStreak(Vector3f(s.bolt[i - 1].x, s.bolt[i - 1].y, s.bolt[i - 1].z), Vector3f(s.bolt[i].x, s.bolt[i].y, s.bolt[i].z), core, 1.f);
+		}
+		for (const auto& fork : s.forks)
+		{
+			for (size_t i = 1; i < fork.size(); ++i)
+			{
+				particles::frameStreak(Vector3f(fork[i - 1].x, fork[i - 1].y, fork[i - 1].z), Vector3f(fork[i].x, fork[i].y, fork[i].z), core * 0.55f, 0.8f);
+			}
+		}
+	}
+}
+
 } // anonymous namespace
 
 void update()
@@ -198,6 +330,19 @@ void update()
 	s.tintDiffuse = glm::vec3(sunDim) * dustTint;
 	s.tintSpecular = glm::vec3(1.f - 0.6f * gloom);
 	s.tintAmbient = glm::vec3(1.f - 0.12f * gloom) * dustTint;
+
+	// Lightning lights up the whole scene for a moment, cold and blue-white
+	if (!gamePaused() && dt > 0.f)
+	{
+		updateLightning(dt);
+	}
+	if (s.flash > 0.f)
+	{
+		const glm::vec3 flashTint = glm::vec3(0.9f, 0.95f, 1.15f) * s.flash;
+		s.tintAmbient += flashTint * 1.6f;
+		s.tintDiffuse += flashTint * 0.7f;
+		s.tintSpecular += flashTint * 0.5f;
+	}
 
 	if (s.level <= 0.01f || dt <= 0.f || gamePaused())
 	{

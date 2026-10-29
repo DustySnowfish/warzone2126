@@ -1016,6 +1016,32 @@ void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, f
 	s.frameRings.push_back(inst);
 }
 
+void frameStreak(const Vector3f& from, const Vector3f& to, const glm::vec3& rgb, float alpha)
+{
+	if (s.atlas == nullptr)
+	{
+		return;
+	}
+	const glm::vec3 a = toRender(from);
+	const glm::vec3 b = toRender(to);
+	const glm::vec3 d = b - a;
+	const float len = glm::length(d);
+	if (len < 1e-3f)
+	{
+		return;
+	}
+	// A spark streak with its head at `to`, stretched back along the segment (up to 5 times its width)
+	gfx_api::ParticleInstance inst;
+	inst.positionSize = glm::vec4(b, std::max(4.f, len / 4.5f));
+	inst.colour = glm::vec4(rgb, alpha);
+	inst.params = glm::vec4(0.f, 2.f, 0.5f, 0.f);
+	inst.velocity = glm::vec4(d / len * 8.f, 0.f);
+	s.frameRings.push_back(inst); // additive, drawn this frame only
+	// A second one from the middle, overlapping, so a chain of segments reads as one line
+	inst.positionSize = glm::vec4(a + d * 0.55f, std::max(4.f, len / 4.5f));
+	s.frameRings.push_back(inst);
+}
+
 void frameBird(const Vector3f& position, float size, float heading, int flap, const glm::vec3& rgb, float alpha, float shadowAlpha)
 {
 	if (s.atlas == nullptr)

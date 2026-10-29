@@ -58,6 +58,10 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 /// exceed 1 to glow with HDR bloom.
 void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha);
 
+/// A bright additive streak from `from` to `to` (world) for this frame only (lightning bolts).
+/// `rgb` is linear and may exceed 1 to glow with HDR bloom.
+void frameStreak(const Vector3f& from, const Vector3f& to, const glm::vec3& rgb, float alpha);
+
 /// An ambient bird for this frame only: a flat silhouette at `position` (world), `heading` the
 /// direction it flies (radians, map coordinates), `flap` 0 wings up, 1 level, 2 down; with a faint
 /// shadow on the ground under the sun (shadowAlpha 0 for none).
