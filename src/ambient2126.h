@@ -49,6 +49,9 @@ void ignite(const Vector3f& position, float chance);
 /// Tiles burning now (for tests).
 size_t fireCount();
 
+/// Lightning struck `distance` (world units) from the view: thunder follows after a delay.
+void thunderAfter(float distance);
+
 /// Forget everything (level change).
 void reset();
 

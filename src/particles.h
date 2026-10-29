@@ -58,6 +58,9 @@ void draw(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix);
 /// exceed 1 to glow with HDR bloom.
 void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, float alpha);
 
+/// A small additive glow for this frame only (lit windows): a hot core, or a soft halo when `soft`.
+void frameGlow(const Vector3f& position, float size, const glm::vec3& rgb, float alpha, bool soft);
+
 /// A bright additive streak from `from` to `to` (world) for this frame only (lightning bolts).
 /// `rgb` is linear and may exceed 1 to glow with HDR bloom.
 void frameStreak(const Vector3f& from, const Vector3f& to, const glm::vec3& rgb, float alpha);

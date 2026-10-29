@@ -70,6 +70,8 @@ struct State
 	float snow = 0.f;           // ground snow cover 0..1
 	float carry = 0.f;          // fractional particles carried to the next frame
 	float splashCarry = 0.f;
+	float puddleCarry = 0.f;
+	float rippleCarry = 0.f;
 	uint32_t lastTime = 0;
 	// Lightning (render-only)
 	float nextStrike = 6.f;     // seconds until the next strike
@@ -174,6 +176,77 @@ void emitAround(const char* effect, float count, float& carry, float radius, flo
 }
 
 // ---------------------------------------------------------------------------------------
+// Rain on puddles and on water
+
+/// Fixed per tile: whether rain collects there in a puddle (about a quarter of the tiles)
+bool puddleTile(int tx, int ty)
+{
+	uint32_t h = static_cast<uint32_t>(tx) * 73856093u ^ static_cast<uint32_t>(ty) * 19349663u ^ 0x2126u;
+	h ^= h >> 13;
+	h *= 0x5bd1e995u;
+	h ^= h >> 15;
+	return (h & 3u) == 0u;
+}
+
+void emitRainRipples(float dt, float radius, float detail)
+{
+	const float cx = static_cast<float>(playerPos.p.x);
+	const float cy = static_cast<float>(playerPos.p.z);
+	const int w = gameWorld.map.width;
+	const int h = gameWorld.map.height;
+	auto randomTile = [&](int& tx, int& ty, float& x, float& y) {
+		x = cx + randRange(-radius, radius);
+		y = cy + randRange(-radius, radius);
+		tx = map_coord(static_cast<int>(x));
+		ty = map_coord(static_cast<int>(y));
+		return tx >= 0 && ty >= 0 && tx < w && ty < h;
+	};
+	// Puddles on soaked ground: wider, slower rings and droplets jumping up
+	s.puddleCarry += dt * 260.f * s.level * std::max(0.f, s.wet - 0.3f) * detail;
+	for (int n = 0; s.puddleCarry >= 1.f && n < 40; ++n)
+	{
+		s.puddleCarry -= 1.f;
+		for (int attempt = 0; attempt < 6; ++attempt)
+		{
+			int tx, ty;
+			float x, y;
+			if (!randomTile(tx, ty, x, y))
+			{
+				continue;
+			}
+			const MAPTILE* tile = mapTile(gameWorld.map, tx, ty);
+			if (terrainType(tile) == TER_WATER || terrainType(tile) == TER_CLIFFFACE || !puddleTile(tx, ty))
+			{
+				continue;
+			}
+			const float ground = static_cast<float>(map_Height(gameWorld.map, static_cast<int>(x), static_cast<int>(y)));
+			particles::spawn("rain_puddle", Vector3f(x, y, ground + 2.f), Vector3f(0.f, 0.f, 1.f), 1.f);
+			break;
+		}
+	}
+	s.puddleCarry = std::min(s.puddleCarry, 1.f);
+	// Rings spreading on lakes and the sea
+	s.rippleCarry += dt * 220.f * s.level * detail;
+	for (int n = 0; s.rippleCarry >= 1.f && n < 40; ++n)
+	{
+		s.rippleCarry -= 1.f;
+		for (int attempt = 0; attempt < 4; ++attempt)
+		{
+			int tx, ty;
+			float x, y;
+			if (!randomTile(tx, ty, x, y) || terrainType(mapTile(gameWorld.map, tx, ty)) != TER_WATER)
+			{
+				continue;
+			}
+			const float surface = static_cast<float>(std::max(map_Height(gameWorld.map, static_cast<int>(x), static_cast<int>(y)), map_TileHeightSurface(gameWorld.map, tx, ty)));
+			particles::spawn("rain_ripple_water", Vector3f(x, y, surface + 2.f), Vector3f(0.f, 0.f, 1.f), 1.f);
+			break;
+		}
+	}
+	s.rippleCarry = std::min(s.rippleCarry, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
 // Lightning
 
 /// A jagged channel from `top` down to `bottom` in `segments` steps
@@ -238,6 +311,7 @@ void strike()
 		s.forks.push_back(jaggedChannel(from, glm::vec3(to.x, to.y, std::max(to.z, ground + 200.f)), 16, 40.f));
 	}
 	s.boltAge = 0.f;
+	ambient::thunderAfter(dist);
 	if (s.boltVisible)
 	{
 		particles::spawn("lightning_strike", Vector3f(x, y, ground + 45.f), Vector3f(0.f, 0.f, 1.f), 1.f);
@@ -361,6 +435,7 @@ void update()
 	case Type::Rain:
 		emitAround("weather_rain", 2600.f * s.level * areaScale * detail * dt, s.carry, radius, 450.f, 950.f, glm::normalize(glm::vec3(wind.x, wind.y, -1.f)), 1.f);
 		emitAround("weather_rain_splash", 700.f * s.level * areaScale * detail * dt, s.splashCarry, radius * 0.8f, 2.f, 4.f, glm::vec3(0.f, 0.f, 1.f), 1.f);
+		emitRainRipples(dt, radius * 0.75f, detail * areaScale);
 		break;
 	case Type::Snow:
 		emitAround("weather_snow", 520.f * s.level * areaScale * detail * dt, s.carry, radius, 350.f, 900.f, glm::normalize(glm::vec3(wind.x * 1.4f, wind.y * 1.4f, -1.f)), 1.f);

@@ -23,6 +23,10 @@
 
 #include "lib/framework/frame.h"
 #include "lib/gamelib/gtime.h"
+#include "lib/ivis_opengl/ivisdef.h"
+#include "lib/sound/audio.h"
+#include "lib/sound/mixer.h"
+#include "lib/sound/track.h"
 
 #include "display3d.h"
 #include "game_world.h"
@@ -32,6 +36,8 @@
 #include "time_of_day.h"
 #include "warzoneconfig.h"
 #include "weather.h"
+#include "feature.h"
+#include "structure.h"
 
 #include <glm/glm.hpp>
 
@@ -117,12 +123,52 @@ struct State
 	float surfCarry = 0.f;
 	float driftCarry = 0.f;
 	float mistCarry = 0.f;
+	float fireflyCarry = 0.f;
+	// Sound
+	struct WindSlot { AUDIO_STREAM* stream = nullptr; float age = 0.f; };
+	WindSlot wind[2];
+	float windRetry = 0.f;
+	float surfSoundWait = 0.f;
+	float battleSoundWait = 0.f;
+	float fireSoundWait = 0.f;
+	struct PendingThunder { float delay; bool near; };
+	std::vector<PendingThunder> thunder;
 	float clock = 0.f;
 	std::vector<glm::vec3> noises;   // recent loud places: map x, y and the clock time
 	bool started = false;
 };
 
 State s;
+
+// ---------------------------------------------------------------------------------------
+// Sound helpers
+
+int track(const char* fileName)
+{
+	if (audio_Disabled())
+	{
+		return -1;
+	}
+	return audio_GetTrackID(fileName);
+}
+
+void playAt(const char* fileName, float x, float y)
+{
+	const int id = track(fileName);
+	if (id >= 0)
+	{
+		audio_PlayStaticTrack(static_cast<SDWORD>(x), static_cast<SDWORD>(y), id);
+	}
+}
+
+void playFlat(const char* fileName)
+{
+	const int id = track(fileName);
+	if (id >= 0)
+	{
+		audio_PlayTrack(id, false);
+	}
+}
 
 float mapWidthWorld()
 {
@@ -413,6 +459,12 @@ void updateSurf(float dt)
 				+ along * randRange(-50.f, 50.f);
 			const float h = surfaceAt(p.x, p.y);
 			particles::spawn("surf_break", Vector3f(p.x, p.y, h + 4.f), Vector3f(land.x, land.y, 0.9f), randRange(0.8f, 1.2f));
+			if (s.surfSoundWait <= 0.f && rand01() < 0.35f)
+			{
+				static const char* kSurf[3] = { "surf1.ogg", "surf2.ogg", "surf3.ogg" };
+				playAt(kSurf[rng() % 3u], p.x, p.y);
+				s.surfSoundWait = randRange(0.9f, 2.2f);
+			}
 			break;
 		}
 	}
@@ -574,6 +626,11 @@ void updateFires(float dt)
 			f.emitCarry -= 1.f;
 			const glm::vec2 p = centre + glm::vec2(randRange(-48.f, 48.f), randRange(-48.f, 48.f));
 			particles::spawn("grass_fire", Vector3f(p.x, p.y, groundAt(p.x, p.y) + 4.f), Vector3f(w.x * 0.8f, w.y * 0.8f, 1.f), randRange(0.8f, 1.2f) * (0.6f + 0.4f * intensity));
+			if (s.fireSoundWait <= 0.f && intensity > 0.5f)
+			{
+				playAt("fire_crackle.ogg", p.x, p.y);
+				s.fireSoundWait = randRange(1.0f, 2.0f);
+			}
 		}
 		f.emitCarry = std::min(f.emitCarry, 1.f);
 		f.glowCarry += dt * 1.6f * intensity;
@@ -721,6 +778,225 @@ void updateMist(float dt)
 	s.mistCarry = std::min(s.mistCarry, 1.f);
 }
 
+// ---------------------------------------------------------------------------------------
+// Night: lit windows and fireflies
+
+/// 1 at night, 0 by day, easing through dusk and dawn on the Time of Day cycle
+float nightAmount()
+{
+	const float phase = time_of_day::phase();
+	const float evening = smoothstepf(0.77f, 0.84f, phase);
+	const float morning = 1.f - smoothstepf(0.16f, 0.23f, phase);
+	return std::max(evening, morning);
+}
+
+uint32_t mixHash(uint32_t a, uint32_t b)
+{
+	uint32_t h = a * 0x9E3779B1u ^ (b + 0x7F4A7C15u + (a << 6) + (a >> 2));
+	h ^= h >> 15;
+	h *= 0x2C1B3C6Du;
+	h ^= h >> 12;
+	return h;
+}
+
+float hash01(uint32_t a, uint32_t b)
+{
+	return static_cast<float>(mixHash(a, b) & 0xFFFFu) / 65535.f;
+}
+
+/// A few windows on one building: fixed per building (by its id), on its sides, some lit
+void drawWindows(const BASE_OBJECT* obj, int footprintW, int footprintB, float litChance, const glm::vec3& warm, const glm::vec3& cool, float night, bool flicker)
+{
+	const iIMDShape* imd = obj->sDisplay.imd ? obj->sDisplay.imd->displayModel() : nullptr;
+	const float height = imd ? static_cast<float>(std::max(30, imd->max.y)) : 90.f;
+	// On the model's walls (its bounds, turned with the building), not the tile footprint
+	const float halfW = imd ? std::max(20.f, (imd->max.x - imd->min.x) * 0.48f) : std::max(1, footprintW) * TILE_UNITS * 0.3f;
+	const float halfB = imd ? std::max(20.f, (imd->max.z - imd->min.z) * 0.48f) : std::max(1, footprintB) * TILE_UNITS * 0.3f;
+	const float midX = imd ? (imd->max.x + imd->min.x) * 0.5f : 0.f;
+	const float midZ = imd ? (imd->max.z + imd->min.z) * 0.5f : 0.f;
+	const float turn = static_cast<float>(obj->rot.direction) * (2.f * kPi / 65536.f);
+	const float ct = std::cos(turn);
+	const float st = std::sin(turn);
+	const int windows = std::min(10, 2 + footprintW * footprintB * 2);
+	const float ground = groundAt(static_cast<float>(obj->pos.x), static_cast<float>(obj->pos.y));
+	for (int i = 0; i < windows; ++i)
+	{
+		const uint32_t id = obj->id;
+		if (hash01(id, static_cast<uint32_t>(i) * 7u + 1u) > litChance)
+		{
+			continue;
+		}
+		const int side = static_cast<int>(mixHash(id, static_cast<uint32_t>(i) * 7u + 2u) % 4u);
+		const float along = hash01(id, static_cast<uint32_t>(i) * 7u + 3u) * 1.6f - 0.8f;
+		const float up = 0.25f + 0.55f * hash01(id, static_cast<uint32_t>(i) * 7u + 4u);
+		float ox = midX;
+		float oz = midZ;
+		switch (side)
+		{
+		case 0: ox += halfW; oz += along * halfB; break;
+		case 1: ox -= halfW; oz += along * halfB; break;
+		case 2: oz += halfB; ox += along * halfW; break;
+		default: oz -= halfB; ox += along * halfW; break;
+		}
+		const float x = static_cast<float>(obj->pos.x) + ct * ox + st * oz;
+		const float y = static_cast<float>(obj->pos.y) - st * ox + ct * oz;
+		const bool isCool = hash01(id, static_cast<uint32_t>(i) * 7u + 5u) < 0.3f;
+		float brightness = night * (0.7f + 0.3f * hash01(id, static_cast<uint32_t>(i) * 7u + 6u));
+		if (flicker)
+		{
+			// Firelight: a slow, uneven flicker
+			const float seed = hash01(id, static_cast<uint32_t>(i)) * 50.f;
+			brightness *= 0.75f + 0.25f * std::sin(s.clock * 3.1f + seed) * std::sin(s.clock * 1.7f + seed * 0.7f);
+		}
+		const glm::vec3 rgb = (isCool ? cool : warm) * brightness;
+		const Vector3f at(x, y, ground + height * up);
+		particles::frameGlow(at, 11.f, rgb * 2.2f, 1.f, false);
+		particles::frameGlow(at, 38.f, rgb * 0.45f, 0.8f, true);
+	}
+}
+
+void updateNight(float dt)
+{
+	const float night = nightAmount();
+	if (night <= 0.01f)
+	{
+		return;
+	}
+	const glm::vec2 c = cameraCentre();
+	const float r = viewRadius() * 1.1f;
+	auto near = [&](const BASE_OBJECT* o) {
+		return std::abs(static_cast<float>(o->pos.x) - c.x) < r && std::abs(static_cast<float>(o->pos.y) - c.y) < r && o->visibleForLocalDisplay();
+	};
+	// Lights in the buildings of every side, and on Urban maps fires and lamps in the ruins
+	for (int player = 0; player < MAX_PLAYERS; ++player)
+	{
+		for (const STRUCTURE* st : gameWorld.objects.structures[player])
+		{
+			if (st == nullptr || st->status != SS_BUILT || st->died || !near(st))
+			{
+				continue;
+			}
+			const STRUCTURE_TYPE type = st->pStructureType->type;
+			if (type == REF_WALL || type == REF_WALLCORNER || type == REF_DEFENSE || type == REF_GATE || type == REF_REARM_PAD)
+			{
+				continue;
+			}
+			drawWindows(st, st->pStructureType->baseWidth, st->pStructureType->baseBreadth, 0.7f, glm::vec3(1.f, 0.78f, 0.45f), glm::vec3(0.75f, 0.85f, 1.f), night, false);
+		}
+	}
+	if (currentMapTileset == MAP_TILESET::URBAN)
+	{
+		for (const BASE_OBJECT* o : gameWorld.objects.features[0])
+		{
+			const FEATURE* f = static_cast<const FEATURE*>(o);
+			if (f == nullptr || f->died || f->psStats->subType != FEAT_BUILDING || !near(f))
+			{
+				continue;
+			}
+			drawWindows(f, f->psStats->baseWidth, f->psStats->baseBreadth, 0.45f, glm::vec3(1.f, 0.62f, 0.28f), glm::vec3(1.f, 0.72f, 0.4f), night, true);
+		}
+	}
+	// Fireflies drifting low over the land (not on snow or in the rain)
+	if (wetness() > 0.2f || weather::groundState() < -0.2f || weather::intensity() > 0.4f)
+	{
+		return;
+	}
+	static const float kRate[3] = { 3.f, 7.f, 12.f };
+	s.fireflyCarry += dt * kRate[war_getEffectsDetail()] * night;
+	const float vr = viewRadius() * 0.6f;
+	int budget = 6;
+	while (s.fireflyCarry >= 1.f && budget-- > 0)
+	{
+		s.fireflyCarry -= 1.f;
+		const glm::vec2 p = c + glm::vec2(randRange(-vr, vr), randRange(-vr, vr));
+		const int tx = map_coord(static_cast<int>(p.x));
+		const int ty = map_coord(static_cast<int>(p.y));
+		if (!onMap(tx, ty) || waterTile(tx, ty) || mapTile(gameWorld.map, tx, ty)->psObject != nullptr)
+		{
+			continue;
+		}
+		particles::spawn("firefly", Vector3f(p.x, p.y, groundAt(p.x, p.y) + randRange(15.f, 70.f)));
+	}
+	s.fireflyCarry = std::min(s.fireflyCarry, 1.f);
+}
+
+// ---------------------------------------------------------------------------------------
+// Ambient sound: the wind bed, thunder after lightning, and the timers for one-shots
+
+void updateSound(float dt)
+{
+	s.surfSoundWait -= dt;
+	s.battleSoundWait -= dt;
+	s.fireSoundWait -= dt;
+	if (audio_Disabled())
+	{
+		return;
+	}
+	// Wind: a 24-second loop played as two streams taking turns, crossfading at the ends;
+	// louder in storms and with the camera high up
+	constexpr float kWindLength = 24.f;
+	constexpr float kWindFade = 2.5f;
+	const float zoom = std::max(0.f, std::min(1.f, (getViewDistance() - 1500.f) / 3000.f));
+	const float windVolume = sound_GetEffectsVolume() * (0.10f + 0.45f * weather::intensity() + 0.08f * zoom);
+	auto startWind = [&](State::WindSlot& slot) {
+		slot.age = 0.f;
+		slot.stream = audio_PlayStream("audio/sfx/ambient/wind_loop.ogg", 0.f, [](const AUDIO_STREAM* finished, const void* user) {
+			State::WindSlot* owner = static_cast<State::WindSlot*>(const_cast<void*>(user));
+			if (owner->stream == finished)
+			{
+				owner->stream = nullptr; // finished or stopped (and not since replaced by a new stream)
+			}
+		}, &slot);
+	};
+	bool any = false;
+	for (State::WindSlot& slot : s.wind)
+	{
+		if (slot.stream == nullptr)
+		{
+			continue;
+		}
+		any = true;
+		slot.age += dt;
+		const float fadeIn = std::min(1.f, slot.age / kWindFade);
+		const float fadeOut = std::min(1.f, std::max(0.f, (kWindLength - slot.age) / kWindFade));
+		sound_SetStreamVolume(slot.stream, windVolume * fadeIn * fadeOut);
+	}
+	if (!any)
+	{
+		s.windRetry -= dt;
+		if (s.windRetry <= 0.f)
+		{
+			s.windRetry = 5.f;
+			startWind(s.wind[0]);
+		}
+	}
+	else
+	{
+		for (int i = 0; i < 2; ++i)
+		{
+			State::WindSlot& cur = s.wind[i];
+			State::WindSlot& other = s.wind[1 - i];
+			if (cur.stream != nullptr && cur.age >= kWindLength - kWindFade && other.stream == nullptr)
+			{
+				startWind(other);
+			}
+		}
+	}
+	// Thunder rolls in after the flash
+	for (size_t i = 0; i < s.thunder.size();)
+	{
+		s.thunder[i].delay -= dt;
+		if (s.thunder[i].delay > 0.f)
+		{
+			++i;
+			continue;
+		}
+		playFlat(s.thunder[i].near ? "thunder_near.ogg" : (rand01() < 0.5f ? "thunder_far1.ogg" : "thunder_far2.ogg"));
+		s.thunder[i] = s.thunder.back();
+		s.thunder.pop_back();
+	}
+}
+
 } // namespace
 
 void update()
@@ -818,11 +1094,23 @@ void update()
 			drawBird(f, b);
 		}
 	}
+	updateNight(paused ? 0.f : dt);
+	if (!paused)
+	{
+		updateSound(dt);
+	}
 }
 
 void disturb(const Vector3f& position, float strength)
 {
 	const glm::vec2 p(position.x, position.y);
+	// Fighting out of sight is heard as a far-off rumble
+	if (strength >= 1.f && s.battleSoundWait <= 0.f && glm::length(p - cameraCentre()) > viewRadius() * 1.3f)
+	{
+		static const char* kBattle[4] = { "battle_far1.ogg", "battle_far2.ogg", "battle_far3.ogg", "battle_far4.ogg" };
+		playFlat(kBattle[rng() % 4u]);
+		s.battleSoundWait = randRange(1.5f, 3.5f);
+	}
 	// Remember it for a while (one entry per area), so new flocks keep away
 	bool known = false;
 	for (glm::vec3& n : s.noises)
@@ -856,6 +1144,10 @@ void disturb(const Vector3f& position, float strength)
 			continue;
 		}
 		const bool wasCalm = f.fleeLeft <= 0.f;
+		if (wasCalm && glm::length(f.centre - cameraCentre()) < viewRadius())
+		{
+			playAt("wings.ogg", f.centre.x, f.centre.y);
+		}
 		f.fleeLeft = std::max(f.fleeLeft, randRange(4.f, 7.f));
 		glm::vec2 away = f.centre - p;
 		away = glm::length(away) > 1.f ? glm::normalize(away) : glm::vec2(std::cos(randRange(0.f, 2.f * kPi)), std::sin(randRange(0.f, 2.f * kPi)));
@@ -910,8 +1202,22 @@ size_t fireCount()
 	return s.fires.size();
 }
 
+void thunderAfter(float distance)
+{
+	// Sound is far slower than light: about a second for every 1300 units
+	s.thunder.push_back({ std::max(0.f, distance / 1300.f), distance < 2600.f });
+}
+
 void reset()
 {
+	for (State::WindSlot& slot : s.wind)
+	{
+		if (slot.stream != nullptr)
+		{
+			sound_StopStream(slot.stream);
+			slot.stream = nullptr;
+		}
+	}
 	s = State();
 }
 

@@ -1026,6 +1026,20 @@ void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, f
 	s.frameRings.push_back(inst);
 }
 
+void frameGlow(const Vector3f& position, float size, const glm::vec3& rgb, float alpha, bool soft)
+{
+	if (s.atlas == nullptr)
+	{
+		return;
+	}
+	gfx_api::ParticleInstance inst;
+	inst.positionSize = glm::vec4(toRender(position), size);
+	inst.colour = glm::vec4(rgb, alpha);
+	inst.params = glm::vec4(0.f, soft ? 0.f : 1.f, 0.f, 0.f); // soft glow or hot core, camera-facing, unlit
+	inst.velocity = glm::vec4(0.f);
+	s.frameRings.push_back(inst); // additive, drawn this frame only
+}
+
 void frameStreak(const Vector3f& from, const Vector3f& to, const glm::vec3& rgb, float alpha)
 {
 	if (s.atlas == nullptr)

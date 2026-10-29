@@ -505,6 +505,23 @@
             { "fileName": "untnut.ogg", "loop": false, "range": 1800, "volume": 100 }
         ]
     },
+    "Ambient2126": {
+        "_name": "Warzone 2126 ambient sounds",
+        "data": [
+            { "fileName": "surf1.ogg", "loop": false, "range": 2400, "volume": 45 },
+            { "fileName": "surf2.ogg", "loop": false, "range": 2400, "volume": 45 },
+            { "fileName": "surf3.ogg", "loop": false, "range": 2400, "volume": 45 },
+            { "fileName": "thunder_near.ogg", "loop": false, "range": 1800, "volume": 100 },
+            { "fileName": "thunder_far1.ogg", "loop": false, "range": 1800, "volume": 70 },
+            { "fileName": "thunder_far2.ogg", "loop": false, "range": 1800, "volume": 70 },
+            { "fileName": "battle_far1.ogg", "loop": false, "range": 1800, "volume": 40 },
+            { "fileName": "battle_far2.ogg", "loop": false, "range": 1800, "volume": 40 },
+            { "fileName": "battle_far3.ogg", "loop": false, "range": 1800, "volume": 40 },
+            { "fileName": "battle_far4.ogg", "loop": false, "range": 1800, "volume": 40 },
+            { "fileName": "wings.ogg", "loop": false, "range": 2000, "volume": 55 },
+            { "fileName": "fire_crackle.ogg", "loop": false, "range": 2200, "volume": 50 }
+        ]
+    },
     "MultiplayerAudio": {
         "_name": "Multiplayer sounds",
         "data": [
