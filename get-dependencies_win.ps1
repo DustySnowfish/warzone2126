@@ -71,7 +71,17 @@ Else
 	popd;
 }
 pushd vcpkg;
-git reset --hard origin/master;
+# Warzone 2126: pin the vcpkg tool and scripts to a known-good commit, so an upstream change cannot
+# break the build overnight (vcpkg moved its bundled Python to 3.15 on 27 Oct 2026, and the old pip
+# bootstrap used by the ANGLE port fails under it). Set VCPKG_COMMIT to override; move the pin
+# forward deliberately, after checking that a Windows build passes.
+$vcpkg_commit = "0e5030f583a5427123cd3b714255e5ae62faa3ba";
+If (-not ([string]::IsNullOrEmpty($env:VCPKG_COMMIT)))
+{
+	$vcpkg_commit = "$env:VCPKG_COMMIT";
+}
+Write-Output "Using vcpkg commit $($vcpkg_commit)";
+git reset --hard $vcpkg_commit;
 .\bootstrap-vcpkg.bat;
 
 $triplet = "x86-windows"; # vcpkg default
