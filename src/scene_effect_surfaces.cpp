@@ -27,6 +27,7 @@
 #include "display3d.h"
 #include "ssao.h"
 #include "ssr.h"
+#include "warzoneconfig.h"
 
 #include "lib/framework/frame.h"
 #include "lib/ivis_opengl/gfx_api.h"
@@ -42,6 +43,7 @@ bool applySceneEffectSurfaces()
 	cfg.ssr = ssrSettings.enabled;
 	cfg.ssrResolution = {ssrSettings.generateDivisor, ssrSettings.blurDivisor};
 	cfg.fog = pie_GetFogEnabled();
+	cfg.heatShimmer = war_getHeatShimmer();
 	cfg.rangeRings = rangeOnScreen;
 	if (!gfx_api::context::get().setSceneEffectSurfaces(cfg))
 	{

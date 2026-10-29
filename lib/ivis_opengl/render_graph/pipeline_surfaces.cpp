@@ -316,6 +316,36 @@ const PipelineSurfaceCatalogTable PIPELINE_SURFACE_CATALOG = {{
 		PipelineSurfaceId::Count,
 		BlurResolutionStage::None,
 		ScenePostEffectId::Fog),
+	// HeatShimmerOffset - Warzone 2126 heat shimmer offset field (half size, signed half float)
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchSceneDiv2,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::HdrColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::ScenePostEffect,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound,
+		PipelineSurfaceId::Count,
+		BlurResolutionStage::None,
+		ScenePostEffectId::HeatShimmer),
+	// HeatShimmerColor - lit scene bent by the heat shimmer
+	makeCatalogEntry(
+		PipelineSurfaceUsage::ColorResolve,
+		SurfaceExtentPolicy::MatchScene,
+		SurfaceSamplePolicy::One,
+		SurfaceFormatClass::SceneColor,
+		SurfaceGpuUsage::ColorAttachment | SurfaceGpuUsage::Sampled,
+		SurfaceArrayLayerPolicy::One,
+		SurfaceEnablePolicy::ScenePostEffect,
+		SurfaceProvisionMode::Allocate,
+		SurfaceStorageKind::SampledColor2D,
+		SurfaceLifetimePolicy::SwapchainBound,
+		PipelineSurfaceId::Count,
+		BlurResolutionStage::None,
+		ScenePostEffectId::HeatShimmer),
 	// RangeRingSdf - packed per-type union field (RGB)
 	makeCatalogEntry(
 		PipelineSurfaceUsage::ColorResolve,

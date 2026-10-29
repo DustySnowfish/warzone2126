@@ -112,6 +112,8 @@ constexpr std::array<shader_program_desc, SHADER_MAX> make_catalog_table()
 	t[SHADER_TAA_COPY] = make_program("TAA copy program", "postprocess_fullscreen.vert", "taa_copy.frag");
 	t[SHADER_TAA_SHARPEN] = make_program("TAA sharpen program", "postprocess_fullscreen.vert", "taa_sharpen.frag");
 	t[SHADER_PARTICLE] = make_program("Particle program", "particle.vert", "particle.frag");
+	t[SHADER_HEAT_SPRITE] = make_program("Heat sprite program", "heat_sprite.vert", "heat_sprite.frag");
+	t[SHADER_HEAT_SHIMMER] = make_program("Heat shimmer program", "postprocess_fullscreen.vert", "heat_shimmer.frag");
 	t[SHADER_DEBUG_TEXTURE2D_QUAD] = make_program("Debug texture quad program", "quad_texture2d.vert", "quad_texture2d.frag");
 	t[SHADER_DEBUG_TEXTURE2DARRAY_QUAD] = make_program("Debug texture array quad program", "quad_texture2darray.vert", "quad_texture2darray.frag");
 	t[SHADER_DEBUG_TESS_QUAD] = make_program("Debug tessellated quad program", "tess_quad.vert", "tess_quad.frag", "tess_quad.tesc", "tess_quad.tese");

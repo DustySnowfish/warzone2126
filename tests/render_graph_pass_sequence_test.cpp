@@ -80,6 +80,8 @@ static const char* passIdName(PassId id)
 	case PassId::SSRBlurV: return "SSRBlurV";
 	case PassId::SSRCompose: return "SSRCompose";
 	case PassId::FogApply: return "FogApply";
+	case PassId::HeatShimmerSprites: return "HeatShimmerSprites";
+	case PassId::HeatShimmerApply: return "HeatShimmerApply";
 	case PassId::RangeRingSdfSensor: return "RangeRingSdfSensor";
 	case PassId::RangeRingSdfWeapon: return "RangeRingSdfWeapon";
 	case PassId::RangeRingSdfMin: return "RangeRingSdfMin";

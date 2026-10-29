@@ -156,10 +156,21 @@ struct LightDef
 	float life = 200.f;
 };
 
+/// Warzone 2126 heat shimmer: invisible rising heat an effect leaves behind ("heat" in particles.json)
+struct HeatDef
+{
+	bool enabled = false;
+	float size = 200.f;      // width (world units)
+	float aspect = 1.6f;     // height / width
+	float strength = 1.f;    // 0..1
+	float life = 1000.f;     // ms
+};
+
 struct Effect
 {
 	std::vector<Layer> layers;
 	LightDef light;
+	HeatDef heat;
 };
 
 struct WeaponVfx
@@ -203,6 +214,17 @@ struct Particle
 	const Layer* layer;
 };
 
+struct HeatPuff
+{
+	glm::vec3 position; // render space
+	float size;
+	float aspect;
+	float strength;
+	float age;
+	float life;
+	float seed;
+};
+
 struct EffectLight
 {
 	glm::vec3 position; // render space
@@ -229,6 +251,10 @@ struct State
 	std::unordered_map<const WEAPON_STATS*, const WeaponVfx*> weaponCache;
 	std::vector<Particle> alive;
 	std::vector<EffectLight> lights;
+	std::vector<HeatPuff> heat;
+	std::vector<gfx_api::ParticleInstance> heatInstances;
+	std::vector<gfx_api::buffer*> heatBuffers;
+	size_t heatBufferIndex = 0;
 	std::unordered_map<uint32_t, TrailState> trails;
 	std::unordered_map<uint32_t, TrailState> vehicleTrails;
 	std::vector<gfx_api::ParticleInstance> frameRings; // drawn this frame only (selection rings)
@@ -477,6 +503,15 @@ bool loadDefinitions()
 			e.light.range = readFloat(*lightIt, "range", 256.f);
 			e.light.intensity = readFloat(*lightIt, "intensity", 1.f);
 			e.light.life = std::max(1.f, readFloat(*lightIt, "life", 200.f));
+		}
+		auto heatIt = it.value().find("heat");
+		if (heatIt != it.value().end() && heatIt->is_object())
+		{
+			e.heat.enabled = true;
+			e.heat.size = readFloat(*heatIt, "size", 200.f);
+			e.heat.aspect = readFloat(*heatIt, "aspect", 1.6f);
+			e.heat.strength = readFloat(*heatIt, "strength", 1.f);
+			e.heat.life = std::max(1.f, readFloat(*heatIt, "life", 1000.f));
 		}
 		s.effects.emplace(it.key(), std::move(e));
 	}
@@ -840,6 +875,19 @@ void spawnRender(const Effect& effect, const glm::vec3& pos, const glm::vec3& di
 			s.alive.push_back(p);
 		}
 	}
+	static const size_t kMaxHeat = 512;
+	if (effect.heat.enabled && s.heat.size() < kMaxHeat)
+	{
+		HeatPuff h;
+		h.position = pos;
+		h.size = effect.heat.size * scale;
+		h.aspect = effect.heat.aspect;
+		h.strength = effect.heat.strength;
+		h.age = 0.f;
+		h.life = effect.heat.life / 1000.f;
+		h.seed = random01() * 100.f;
+		s.heat.push_back(h);
+	}
 	if (effect.light.enabled && s.lights.size() < kMaxLights)
 	{
 		EffectLight l;
@@ -904,6 +952,11 @@ void shutdown()
 		delete b;
 	}
 	s.instanceBuffers.clear();
+	for (auto* b : s.heatBuffers)
+	{
+		delete b;
+	}
+	s.heatBuffers.clear();
 	s.effects.clear();
 	s.bySubclass.clear();
 	s.byWeaponId.clear();
@@ -913,6 +966,7 @@ void shutdown()
 
 void clear()
 {
+	s.heat.clear();
 	s.alive.clear();
 	s.lights.clear();
 	s.trails.clear();
@@ -981,6 +1035,71 @@ void frameBird(const Vector3f& position, float size, float heading, int flap, co
 	sh.colour = glm::vec4(0.02f, 0.02f, 0.02f, shadowAlpha);
 	sh.params.w = 2.f; // flat, unlit
 	s.frameShadows.push_back(sh);
+}
+
+bool heatActive()
+{
+	return !s.heat.empty();
+}
+
+void drawHeat(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, float timeSeconds, float offsetScale)
+{
+	if (s.heat.empty() || s.quad == nullptr)
+	{
+		return;
+	}
+	if (s.heatBuffers.empty())
+	{
+		s.heatBuffers.resize(gfx_api::context::get().maxFramesInFlight() + 1);
+		for (size_t i = 0; i < s.heatBuffers.size(); ++i)
+		{
+			s.heatBuffers[i] = gfx_api::context::get().create_buffer_object(gfx_api::buffer::usage::vertex_buffer, gfx_api::context::buffer_storage_hint::stream_draw, "heatInstances[" + std::to_string(i) + "]");
+		}
+	}
+	const glm::vec3 right(viewMatrix[0][0], viewMatrix[1][0], viewMatrix[2][0]);
+	const glm::vec3 up(viewMatrix[0][1], viewMatrix[1][1], viewMatrix[2][1]);
+	const glm::mat4 viewProjection = projectionMatrix * viewMatrix;
+	const float projX = std::abs(projectionMatrix[0][0]);
+	const float projY = std::abs(projectionMatrix[1][1]);
+	s.heatInstances.clear();
+	for (const HeatPuff& h : s.heat)
+	{
+		const glm::vec4 clip = viewProjection * glm::vec4(h.position, 1.f);
+		const float r = h.size * h.aspect + 64.f;
+		if (clip.w > 0.f && (std::abs(clip.x) - r * projX > clip.w || std::abs(clip.y) - r * projY > clip.w))
+		{
+			continue;
+		}
+		// Swells quickly, then fades over its life
+		const float t = h.age / h.life;
+		const float envelope = std::min(1.f, t * 6.f) * (1.f - t * t);
+		gfx_api::ParticleInstance inst;
+		inst.positionSize = glm::vec4(h.position, h.size * (0.8f + 0.4f * t));
+		inst.colour = glm::vec4(h.strength * envelope, h.seed, h.aspect, 0.f);
+		inst.params = glm::vec4(0.f);
+		inst.velocity = glm::vec4(0.f);
+		s.heatInstances.push_back(inst);
+	}
+	if (s.heatInstances.empty())
+	{
+		return;
+	}
+	s.heatBufferIndex = (s.heatBufferIndex + 1) % s.heatBuffers.size();
+	gfx_api::buffer* instances = s.heatBuffers[s.heatBufferIndex];
+	instances->upload(s.heatInstances.size() * sizeof(gfx_api::ParticleInstance), s.heatInstances.data());
+
+	gfx_api::constant_buffer_type<SHADER_HEAT_SPRITE> constants {};
+	constants.viewProjection = viewProjection;
+	constants.cameraRight = glm::vec4(right, 0.f);
+	constants.cameraUp = glm::vec4(up, 0.f);
+	constants.heatParams = glm::vec4(timeSeconds, offsetScale, 0.f, 0.f);
+	auto& pso = gfx_api::HeatSpritePSO::get();
+	pso.bind();
+	pso.bind_constants(constants);
+	gfx_api::context::get().bind_vertex_buffers(0, {
+		std::make_tuple(s.quad, static_cast<size_t>(0)),
+		std::make_tuple(instances, static_cast<size_t>(0)) });
+	pso.draw_instanced(4, 0, s.heatInstances.size());
 }
 
 bool cameraPosition(Vector3f& out)
@@ -1223,6 +1342,17 @@ void update(LightingData& lightData)
 						p.spin = 0.f;
 					}
 				}
+			}
+			++i;
+		}
+		for (size_t i = 0; i < s.heat.size();)
+		{
+			s.heat[i].age += dt;
+			if (s.heat[i].age >= s.heat[i].life)
+			{
+				s.heat[i] = s.heat.back();
+				s.heat.pop_back();
+				continue;
 			}
 			++i;
 		}

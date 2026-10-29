@@ -1188,6 +1188,55 @@ namespace gfx_api
 	using ParticleAdditivePSO = ParticlePSO<REND_ADDITIVE>;
 	using ParticleAlphaPSO = ParticlePSO<REND_ALPHA>;
 
+	// Warzone 2126 heat shimmer sources: camera-facing quads (ParticleInstance layout) adding signed
+	// screen offsets (RG) weighted by alpha into the offset field; no depth test
+	template<>
+	struct constant_buffer_type<SHADER_HEAT_SPRITE>
+	{
+		glm::mat4 viewProjection;
+		glm::vec4 cameraRight;
+		glm::vec4 cameraUp;
+		glm::vec4 heatParams;   // x = time (s), y = offset scale (screen uv)
+	};
+
+	using HeatSpritePSO = typename gfx_api::pipeline_state_helper<rasterizer_state<REND_ADDITIVE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangle_strip, index_type::u16,
+	std::tuple<constant_buffer_type<SHADER_HEAT_SPRITE>>,
+	std::tuple<
+		vertex_buffer_description<2 * sizeof(gfxFloat), gfx_api::vertex_attribute_input_rate::vertex,
+			vertex_attribute_description<position, gfx_api::vertex_attribute_type::float2, 0>
+		>,
+		vertex_buffer_description<sizeof(ParticleInstance), gfx_api::vertex_attribute_input_rate::instance,
+			vertex_attribute_description<5, gfx_api::vertex_attribute_type::float4, 0>,
+			vertex_attribute_description<6, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4)>,
+			vertex_attribute_description<7, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4) * 2>,
+			vertex_attribute_description<8, gfx_api::vertex_attribute_type::float4, sizeof(glm::vec4) * 3>
+		>
+	>,
+	std::tuple<>, SHADER_HEAT_SPRITE>;
+
+	// Warzone 2126 heat shimmer apply: the scene sampled through the offset field
+	template<>
+	struct constant_buffer_type<SHADER_HEAT_SHIMMER>
+	{
+		glm::mat4 invProjectionMatrix;
+		glm::vec4 uvScaleClamp;
+		glm::vec4 offsetUvScaleClamp;
+		glm::vec4 heatParams;   // x = time (s), y = ground shimmer strength, z = start distance, w = full distance
+	};
+
+	using HeatShimmerPSO = typename gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16,
+	std::tuple<constant_buffer_type<SHADER_HEAT_SHIMMER>>,
+	std::tuple<
+		vertex_buffer_description<2 * sizeof(gfxFloat), gfx_api::vertex_attribute_input_rate::vertex,
+			vertex_attribute_description<position, gfx_api::vertex_attribute_type::float2, 0>
+		>
+	>,
+	std::tuple<
+		texture_description<0, sampler_type::bilinear, kSampler_sceneTexture, pixel_format_target::texture_2d>,
+		texture_description<1, sampler_type::bilinear, kSampler_heatOffset, pixel_format_target::texture_2d>,
+		texture_description<2, sampler_type::nearest_clamped, kSampler_prepassDepth, pixel_format_target::texture_2d>
+	>, SHADER_HEAT_SHIMMER>;
+
 #define WZ2126_FULLSCREEN_PSO_PREFIX(SHADER) \
 	gfx_api::pipeline_state_helper<rasterizer_state<REND_OPAQUE, DEPTH_CMP_ALWAYS_WRT_OFF, 255, polygon_offset::disabled, stencil_mode::stencil_disabled, cull_mode::none>, primitive_type::triangles, index_type::u16, \
 	std::tuple<constant_buffer_type<SHADER>>, \

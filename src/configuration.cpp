@@ -822,6 +822,7 @@ bool loadConfig()
 	war_setPhysicalWrecks(iniGetBool("physicalWrecks2126", war_getPhysicalWrecks()).value());
 	war_setHullSuspension(iniGetBool("hullSuspension2126", war_getHullSuspension()).value());
 	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
+	war_setHeatShimmer(iniGetBool("heatShimmer2126", war_getHeatShimmer()).value());
 	war_setInterface2126(iniGetBool("interface2126", war_getInterface2126()).value());
 	war_setTimeOfDay(iniGetInteger("timeOfDay2126", war_getTimeOfDay()).value());
 	{
@@ -1169,6 +1170,7 @@ bool saveConfig()
 	iniSetBool("physicalWrecks2126", war_getPhysicalWrecks());
 	iniSetBool("hullSuspension2126", war_getHullSuspension());
 	iniSetBool("hitFlash2126", war_getHitFlash());
+	iniSetBool("heatShimmer2126", war_getHeatShimmer());
 	iniSetBool("interface2126", war_getInterface2126());
 	iniSetInteger("timeOfDay2126", war_getTimeOfDay());
 	switch (war_getSmaaMode())

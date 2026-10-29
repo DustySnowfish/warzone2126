@@ -278,6 +278,8 @@ void war_setPhysicalWrecks(bool enabled);
 bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration and recoil
 void war_setHullSuspension(bool enabled);
 bool war_getHitFlash(); // units and buildings flash when hit
+bool war_getHeatShimmer(); // Warzone 2126: heat haze behind fires and over hot ground
+void war_setHeatShimmer(bool enabled);
 void war_setHitFlash(bool enabled);
 bool war_getInterface2126(); // Warzone 2126 interface (tab bar and status strip) instead of the classic reticule
 void war_setInterface2126(bool enabled);

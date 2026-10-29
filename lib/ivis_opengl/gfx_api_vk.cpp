@@ -3175,6 +3175,8 @@ const char* pipelineSurfaceDebugName(gfx_api::PipelineSurfaceId id)
 	case gfx_api::PipelineSurfaceId::SwapchainMSAAColor: return "<swapchain msaa color>";
 	case gfx_api::PipelineSurfaceId::RangeRingSdf: return "<range ring sdf>";
 	case gfx_api::PipelineSurfaceId::RangeRingSdfDepth: return "<range ring sdf depth>";
+	case gfx_api::PipelineSurfaceId::HeatShimmerOffset: return "<heat shimmer offset>";
+	case gfx_api::PipelineSurfaceId::HeatShimmerColor: return "<heat shimmer color>";
 	case gfx_api::PipelineSurfaceId::RangeRingColor: return "<range ring color>";
 	default: return "<pipeline surface>";
 	}

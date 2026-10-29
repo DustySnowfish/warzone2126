@@ -77,6 +77,7 @@ struct SceneEffectSurfaces
 	bool ssr = false;
 	BlurResolution ssrResolution;
 	bool fog = false;
+	bool heatShimmer = false;
 	bool rangeRings = false;
 
 	bool operator==(const SceneEffectSurfaces& other) const
@@ -86,6 +87,7 @@ struct SceneEffectSurfaces
 			&& ssr == other.ssr
 			&& ssrResolution == other.ssrResolution
 			&& fog == other.fog
+			&& heatShimmer == other.heatShimmer
 			&& rangeRings == other.rangeRings;
 	}
 
@@ -99,6 +101,8 @@ struct SceneEffectSurfaces
 			return ssr;
 		case ScenePostEffectId::Fog:
 			return fog;
+		case ScenePostEffectId::HeatShimmer:
+			return heatShimmer;
 		case ScenePostEffectId::RangeRings:
 			return rangeRings;
 		case ScenePostEffectId::Count:
@@ -160,6 +164,10 @@ enum class PipelineSurfaceId : uint8_t
 	SsrComposedColor,
 	/// Scene-sized lit(+AO) scene with distance fog applied; feeds SMAA/blit/FSR.
 	FogColor,
+	/// Warzone 2126 heat shimmer: half-size screen-space offset field (RG, signed half float)
+	HeatShimmerOffset,
+	/// Scene-sized lit scene bent by the heat shimmer; feeds range rings/SMAA/blit/FSR.
+	HeatShimmerColor,
 	/// Packed per-type range-ring union field (RGB = sensor / weapon / min-range).
 	RangeRingSdf,
 	/// Scratch depth for the range-ring cone Z-test (not sampled).

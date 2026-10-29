@@ -141,6 +141,15 @@ void emitRangeRingPreparePasses(BlueprintBuilder& builder, const RenderTopologyS
 		.viewport(ViewportRule::SceneColorTarget);
 }
 
+void emitHeatShimmerPreparePasses(BlueprintBuilder& builder, const RenderTopologySnapshot&, PassId)
+{
+	// Warzone 2126: heat sources add signed screen-space offsets (RG) into a cleared half-size field
+	static constexpr ClearValue NO_OFFSET = ClearValue::colorClear(0.f, 0.f, 0.f, 0.f);
+	builder.beginPass(PassId::HeatShimmerSprites, "HeatShimmerSprites")
+		.color(PipelineSurfaceId::HeatShimmerOffset, AttachmentLoadOp::Clear, AttachmentStoreOp::Store, NO_OFFSET)
+		.viewport(ViewportRule::ColorTarget);
+}
+
 } // anonymous namespace
 
 bool effectEnabled(const RenderTopologySnapshot& snapshot, ScenePostEffectId id)
@@ -202,6 +211,12 @@ static constexpr auto kRangeRingApplyReads = std::array{
 	ScenePostEffectRead::incomingColor(),
 	ScenePostEffectRead::passOutput(PassId::ScenePrepass, AttachmentRole::Depth),
 	ScenePostEffectRead::passOutput(PassId::RangeRingSdfMin),
+};
+
+static constexpr auto kHeatShimmerApplyReads = std::array{
+	ScenePostEffectRead::incomingColor(),
+	ScenePostEffectRead::passOutput(PassId::HeatShimmerSprites),
+	ScenePostEffectRead::passOutput(PassId::ScenePrepass, AttachmentRole::Depth),
 };
 
 } // anonymous namespace
@@ -300,6 +315,15 @@ const std::array<ScenePostEffectDesc, static_cast<size_t>(ScenePostEffectId::Cou
 		.applyDebugName = "FogApply",
 		.applyOutput = PipelineSurfaceId::FogColor,
 		.applyReads = kFogApplyReads,
+	},
+	{
+		.id = ScenePostEffectId::HeatShimmer,
+		.prepassNeed = PrepassNeed::Depth,
+		.emitPreparePasses = emitHeatShimmerPreparePasses,
+		.applyPass = PassId::HeatShimmerApply,
+		.applyDebugName = "HeatShimmerApply",
+		.applyOutput = PipelineSurfaceId::HeatShimmerColor,
+		.applyReads = kHeatShimmerApplyReads,
 	},
 	{
 		.id = ScenePostEffectId::RangeRings,

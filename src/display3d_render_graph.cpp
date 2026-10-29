@@ -43,6 +43,7 @@
 #include "ssao.h"
 #include "ssr.h"
 #include "fog_pass.h"
+#include "heat_shimmer.h"
 #include "hdr_pass.h"
 #include "taa.h"
 #include "particles.h"
@@ -301,6 +302,8 @@ void registerInGame3DRecordFuncs(gfx_api::RecordFuncTable& table)
 	table.set(gfx_api::PassId::SSRBlurV, ssr::recordBlurV);
 	table.set(gfx_api::PassId::SSRCompose, ssr::recordCompose);
 	table.set(gfx_api::PassId::FogApply, fog_pass::recordApply);
+	table.set(gfx_api::PassId::HeatShimmerSprites, heat_shimmer::recordSprites);
+	table.set(gfx_api::PassId::HeatShimmerApply, heat_shimmer::recordApply);
 	table.set(gfx_api::PassId::RangeRingSdfSensor, range_rings::recordSdfSensor);
 	table.set(gfx_api::PassId::RangeRingSdfWeapon, range_rings::recordSdfWeapon);
 	table.set(gfx_api::PassId::RangeRingSdfMin, range_rings::recordSdfMin);

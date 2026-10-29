@@ -137,6 +137,7 @@ struct WARZONE_GLOBALS
 	bool physicalWrecks = true;
 	bool hullSuspension = true;
 	bool hitFlash = true;
+	bool heatShimmer = true;
 	bool interface2126 = true;
 	int timeOfDay = 0; // time_of_day::Mode: 0 map default
 	// UI config
@@ -1033,6 +1034,16 @@ bool war_getHullSuspension()
 void war_setHullSuspension(bool enabled)
 {
 	warGlobs.hullSuspension = enabled;
+}
+
+bool war_getHeatShimmer()
+{
+	return warGlobs.heatShimmer;
+}
+
+void war_setHeatShimmer(bool enabled)
+{
+	warGlobs.heatShimmer = enabled;
 }
 
 bool war_getHitFlash()

@@ -38,6 +38,7 @@ enum class ScenePostEffectId : uint8_t
 	Ssao,
 	Ssr,
 	Fog,
+	HeatShimmer, // Warzone 2126: heat haze bending the scene behind fires and hot ground
 	RangeRings,
 	Count
 };

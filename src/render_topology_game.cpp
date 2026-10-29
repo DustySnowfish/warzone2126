@@ -24,6 +24,7 @@
 
 #include "loop.h"
 #include "main.h"
+#include "heat_shimmer.h"
 #include "range_rings.h"
 #include "wrappers.h"
 
@@ -138,6 +139,8 @@ public:
 		// idle frames then skip several scene-sized clears, the fullscreen composite,
 		// and (when SSAO and fog - etc - are off) the scene prepass.
 		cfg.rangeRings = cfg.rangeRings && range_rings::gatherForFrameAndHasRings();
+		// Warzone 2126: likewise the heat shimmer, when nothing is hot
+		cfg.heatShimmer = cfg.heatShimmer && heat_shimmer::activeThisFrame();
 		return cfg;
 	}
 

@@ -211,6 +211,7 @@ bool applyQualityPreset(QualityPreset preset)
 	war_setMuzzleFlashLighting(v.muzzleLights);
 	war_setProjectileLighting(v.projectileLights);
 	war_setEffectsDetail(v.effectsDetail);
+	war_setHeatShimmer(v.effectsDetail > 0); // Warzone 2126: off on Low
 	if (getTerrainMeshSubdivision() != v.terrainDetail)
 	{
 		setTerrainMeshSubdivision(v.terrainDetail); // smooth, detailed terrain mesh (the classic mesh is low-poly)
@@ -326,6 +327,26 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 			},
 			[](const auto& newValue) -> bool {
 				war_setHitFlash(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
+		auto optionInfo = OptionInfo("gfx.heatShimmer", N_("Heat Shimmer"), N_("The view bends in the heat behind fires, burning wrecks and explosions, and faintly over distant desert ground by day."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getHeatShimmer());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setHeatShimmer(newValue);
+				applySceneEffectSurfaces();
 				return true;
 			}, true
 		);

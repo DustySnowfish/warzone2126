@@ -902,6 +902,7 @@ namespace gfx_api
 	inline constexpr char kSampler_prepassNormals[] = "prepassNormals";
 	inline constexpr char kSampler_prepassDepth[] = "prepassDepth";
 	inline constexpr char kSampler_rangeRingSdf[] = "rangeRingSdf";
+	inline constexpr char kSampler_heatOffset[] = "heatOffset";
 	inline constexpr char kSampler_skyboxTexture[] = "skyboxTexture";
 	inline constexpr char kSampler_ssrTexture[] = "ssrTexture";
 

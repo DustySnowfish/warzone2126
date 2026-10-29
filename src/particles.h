@@ -63,6 +63,11 @@ void frameRing(const Vector3f& position, float diameter, const glm::vec3& rgb, f
 /// shadow on the ground under the sun (shadowAlpha 0 for none).
 void frameBird(const Vector3f& position, float size, float heading, int flap, const glm::vec3& rgb, float alpha, float shadowAlpha);
 
+/// Warzone 2126 heat shimmer: true while any effect's rising heat is alive.
+bool heatActive();
+/// Draw the live heat sources into the bound heat-offset target (HeatShimmerSprites pass).
+void drawHeat(const glm::mat4& viewMatrix, const glm::mat4& projectionMatrix, float timeSeconds, float offsetScale);
+
 /// The camera position (world: map x, map y, height) of the last frame drawn with particles.
 bool cameraPosition(Vector3f& out);
 

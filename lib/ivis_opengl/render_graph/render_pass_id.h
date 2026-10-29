@@ -56,6 +56,9 @@ enum class PassId : uint16_t
 	SSRBlurV,
 	SSRCompose,
 	FogApply,
+	// Warzone 2126 heat shimmer: heat sources into an offset field, then the scene bent by it
+	HeatShimmerSprites,
+	HeatShimmerApply,
 	RangeRingSdfSensor,
 	RangeRingSdfWeapon,
 	RangeRingSdfMin,
