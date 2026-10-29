@@ -1120,6 +1120,20 @@ void weaponImpact(const WEAPON_STATS* weapon, const Vector3f& position, ImpactKi
 	if (weapon != nullptr)
 	{
 		ambient::disturb(position, weaponNoise(weapon));
+		if (kind != ImpactKind::Water)
+		{
+			// Chance to set dry grass alight (visual only)
+			float ignite = 0.f;
+			if (weapon->weaponSubClass == WSC_FLAME || weapon->weaponClass == WC_HEAT)
+			{
+				ignite = 0.6f;
+			}
+			else if (weapon->weaponSubClass != WSC_MGUN)
+			{
+				ignite = weaponNoise(weapon) > 1.2f ? 0.12f : 0.03f;
+			}
+			ambient::ignite(position, ignite);
+		}
 	}
 	const WeaponVfx* vfx = weaponVfx(weapon);
 	if (vfx == nullptr)

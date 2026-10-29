@@ -21,7 +21,7 @@
 
 /**
  * Ambient life around the camera: flocks of birds over land that scatter at gunfire and
- * explosions, gulls along the coast, and surf breaking on the shore.
+ * explosions, gulls along the coast, surf breaking on the shore, and grass fires.
  *
  * Render-only: it keeps its own random numbers and never touches the game state, so each
  * player sees their own birds without any effect on multiplayer sync.
@@ -40,6 +40,14 @@ void update();
 /// Something loud happened at `position` (world): shots and explosions. `strength` 1 for an
 /// ordinary impact; larger for big explosions. Birds within reach scatter.
 void disturb(const Vector3f& position, float strength);
+
+/// A shot or explosion landed at `position` (world); with probability `chance` (times how readily
+/// the ground there burns) it sets the grass alight. Grass fires are visual only for now: they
+/// spread downwind across grass and dry scrub on Arizona maps, then leave charred ground.
+void ignite(const Vector3f& position, float chance);
+
+/// Tiles burning now (for tests).
+size_t fireCount();
 
 /// Forget everything (level change).
 void reset();

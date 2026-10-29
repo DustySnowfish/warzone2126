@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <random>
+#include <unordered_map>
 #include <vector>
 
 namespace ambient
@@ -58,6 +59,12 @@ float rand01()
 float randRange(float a, float b)
 {
 	return a + (b - a) * rand01();
+}
+
+float smoothstepf(float e0, float e1, float x)
+{
+	const float t = std::max(0.f, std::min((x - e0) / (e1 - e0), 1.f));
+	return t * t * (3.f - 2.f * t);
 }
 
 struct Bird
@@ -87,9 +94,26 @@ struct Flock
 	std::vector<Bird> birds;
 };
 
+/// A burning tile of grass (visual only)
+struct Fire
+{
+	int x = 0;
+	int y = 0;
+	float age = 0.f;
+	float life = 9.f;
+	float emitCarry = 0.f;
+	float glowCarry = 0.f;
+	float spreadTimer = 0.5f;
+	int generation = 0;      // steps from where it was lit (fires burn out after a few dozen tiles)
+};
+
 struct State
 {
 	std::vector<Flock> flocks;
+	std::vector<Fire> fires;
+	std::unordered_map<int, float> burnt;   // tile index -> clock time it may burn again
+	std::vector<float> groundBurn;           // burnability per ground type (Arizona only)
+	bool groundBurnReady = false;
 	float surfCarry = 0.f;
 	float clock = 0.f;
 	std::vector<glm::vec3> noises;   // recent loud places: map x, y and the clock time
@@ -385,6 +409,198 @@ void updateSurf(float dt)
 	s.surfCarry = std::min(s.surfCarry, 1.f);
 }
 
+// ---------------------------------------------------------------------------------------
+// Grass fires (visual only)
+
+/// The wind the weather uses (east, a little south), as a map direction
+glm::vec2 wind()
+{
+	return glm::normalize(glm::vec2(0.35f, 0.12f));
+}
+
+void prepareGroundBurn()
+{
+	s.groundBurnReady = true;
+	s.groundBurn.assign(getNumGroundTypes(), 0.f);
+	if (currentMapTileset != MAP_TILESET::ARIZONA)
+	{
+		return; // grass fires are an Arizona thing for now
+	}
+	for (size_t i = 0; i < s.groundBurn.size(); ++i)
+	{
+		const std::string& name = getGroundType(i).textureName;
+		if (name.find("grass") != std::string::npos)
+		{
+			s.groundBurn[i] = 1.f;
+		}
+		else if (name.find("yellow") != std::string::npos)
+		{
+			s.groundBurn[i] = 0.8f; // dry scrub (most of the open ground on Arizona maps)
+		}
+		else if (name.find("red-earth") != std::string::npos)
+		{
+			s.groundBurn[i] = 0.25f;
+		}
+	}
+}
+
+/// How readily a tile burns, 0..1
+float burnability(int tx, int ty)
+{
+	if (!s.groundBurnReady)
+	{
+		prepareGroundBurn();
+	}
+	if (!onMap(tx, ty))
+	{
+		return 0.f;
+	}
+	const MAPTILE* tile = mapTile(gameWorld.map, tx, ty);
+	if (terrainType(tile) == TER_WATER || terrainType(tile) == TER_CLIFFFACE || tile->psObject != nullptr)
+	{
+		return 0.f; // nothing to burn on water, cliffs, or under buildings and features
+	}
+	return tile->ground < s.groundBurn.size() ? s.groundBurn[tile->ground] : 0.f;
+}
+
+/// Wet ground (rain) puts fires out and stops new ones
+float wetness()
+{
+	return std::max(0.f, std::min(1.f, weather::groundState() * 2.f));
+}
+
+size_t maxFires()
+{
+	static const size_t kMax[3] = { 24, 48, 96 };
+	return kMax[war_getEffectsDetail()];
+}
+
+bool burning(int tx, int ty)
+{
+	for (const Fire& f : s.fires)
+	{
+		if (f.x == tx && f.y == ty)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+constexpr int kMaxGenerations = 8;
+
+bool light(int tx, int ty, int generation = 0)
+{
+	if (s.fires.size() >= maxFires() || burnability(tx, ty) <= 0.f || burning(tx, ty))
+	{
+		return false;
+	}
+	const int idx = ty * gameWorld.map.width + tx;
+	const auto it = s.burnt.find(idx);
+	if (it != s.burnt.end() && it->second > s.clock)
+	{
+		return false; // burnt already: nothing left to burn for a while
+	}
+	Fire f;
+	f.x = tx;
+	f.y = ty;
+	f.life = randRange(7.f, 12.f) * (0.6f + 0.4f * burnability(tx, ty));
+	f.spreadTimer = randRange(0.5f, 1.2f);
+	f.generation = generation;
+	s.fires.push_back(f);
+	return true;
+}
+
+void updateFires(float dt)
+{
+	if (s.fires.empty())
+	{
+		return;
+	}
+	const glm::vec2 w = wind();
+	const float wet = wetness();
+	const glm::vec2 c = cameraCentre();
+	const float r = viewRadius();
+	static const float kEmit[3] = { 3.f, 4.5f, 6.f };
+	const float emitRate = kEmit[war_getEffectsDetail()];
+	std::vector<glm::ivec3> spread;
+	for (Fire& f : s.fires)
+	{
+		f.age += dt * (1.f + wet * 3.f); // rain burns it out sooner
+		const float intensity = smoothstepf(0.f, 1.5f, f.age) * (1.f - smoothstepf(f.life - 3.f, f.life, f.age));
+		// Spread to the neighbours: more readily downwind, not at all in the rain
+		f.spreadTimer -= dt;
+		if (f.spreadTimer <= 0.f && f.age > 1.f && f.age < f.life - 2.f && f.generation < kMaxGenerations)
+		{
+			f.spreadTimer = randRange(0.6f, 1.2f);
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					if (dx == 0 && dy == 0)
+					{
+						continue;
+					}
+					const glm::vec2 dir = glm::normalize(glm::vec2(static_cast<float>(dx), static_cast<float>(dy)));
+					const float downwind = std::max(0.f, glm::dot(dir, w));
+					const float chance = 0.055f * burnability(f.x + dx, f.y + dy) * (0.35f + 1.8f * downwind) * (1.f - wet);
+					if (rand01() < chance)
+					{
+						spread.emplace_back(f.x + dx, f.y + dy, f.generation + 1);
+					}
+				}
+			}
+		}
+		// Flames, embers and smoke only where the player might see them
+		const glm::vec2 centre((static_cast<float>(f.x) + 0.5f) * TILE_UNITS, (static_cast<float>(f.y) + 0.5f) * TILE_UNITS);
+		if (glm::length(centre - c) > r * 0.8f)
+		{
+			continue;
+		}
+		f.emitCarry += dt * emitRate * intensity;
+		int budget = 4;
+		while (f.emitCarry >= 1.f && budget-- > 0)
+		{
+			f.emitCarry -= 1.f;
+			const glm::vec2 p = centre + glm::vec2(randRange(-48.f, 48.f), randRange(-48.f, 48.f));
+			particles::spawn("grass_fire", Vector3f(p.x, p.y, groundAt(p.x, p.y) + 4.f), Vector3f(w.x * 0.8f, w.y * 0.8f, 1.f), randRange(0.8f, 1.2f) * (0.6f + 0.4f * intensity));
+		}
+		f.emitCarry = std::min(f.emitCarry, 1.f);
+		f.glowCarry += dt * 1.6f * intensity;
+		if (f.glowCarry >= 1.f)
+		{
+			f.glowCarry -= 1.f;
+			particles::spawn("grass_fire_glow", Vector3f(centre.x, centre.y, groundAt(centre.x, centre.y) + 30.f));
+		}
+	}
+	for (const glm::ivec3& t : spread)
+	{
+		light(t.x, t.y, t.z);
+	}
+	// Burnt out: charred ground for a few minutes, and nothing to burn there again for a while
+	for (size_t i = 0; i < s.fires.size();)
+	{
+		const Fire& f = s.fires[i];
+		if (f.age < f.life)
+		{
+			++i;
+			continue;
+		}
+		const glm::vec2 centre((static_cast<float>(f.x) + 0.5f) * TILE_UNITS, (static_cast<float>(f.y) + 0.5f) * TILE_UNITS);
+		particles::spawn("grass_burnt", Vector3f(centre.x, centre.y, groundAt(centre.x, centre.y)));
+		s.burnt[f.y * gameWorld.map.width + f.x] = s.clock + 240.f;
+		s.fires[i] = s.fires.back();
+		s.fires.pop_back();
+	}
+	if (s.burnt.size() > 4096)
+	{
+		for (auto it = s.burnt.begin(); it != s.burnt.end();)
+		{
+			it = it->second <= s.clock ? s.burnt.erase(it) : std::next(it);
+		}
+	}
+}
+
 } // namespace
 
 void update()
@@ -470,6 +686,7 @@ void update()
 
 		s.noises.erase(std::remove_if(s.noises.begin(), s.noises.end(), [](const glm::vec3& n) { return s.clock - n.z > 25.f; }), s.noises.end());
 		updateSurf(dt);
+		updateFires(dt);
 	}
 
 	for (const Flock& f : s.flocks)
@@ -550,6 +767,25 @@ void disturb(const Vector3f& position, float strength)
 			f.leaving = true; // nowhere to go: off it goes
 		}
 	}
+}
+
+void ignite(const Vector3f& position, float chance)
+{
+	if (chance <= 0.f || gameWorld.map.width <= 0 || wetness() > 0.3f)
+	{
+		return;
+	}
+	const int tx = map_coord(static_cast<int>(position.x));
+	const int ty = map_coord(static_cast<int>(position.y));
+	if (rand01() < chance * burnability(tx, ty))
+	{
+		light(tx, ty);
+	}
+}
+
+size_t fireCount()
+{
+	return s.fires.size();
 }
 
 void reset()

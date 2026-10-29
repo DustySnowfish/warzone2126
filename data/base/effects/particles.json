@@ -181,6 +181,24 @@
 			{"texture": "debris", "blend": "alpha", "lit": true, "count": [2, 4], "life": [500, 900], "size": [6, 5], "speed": [120, 260], "direction": "up", "spread": 50, "gravity": 900, "bounce": 0.2, "colour": [{"rgb": [0.28, 0.21, 0.15], "alpha": 1}, {"t": 0.85, "rgb": [0.28, 0.21, 0.15], "alpha": 1}, {"rgb": [0.28, 0.21, 0.15], "alpha": 0}]}
 		]
 	},
+	"grass_fire": {
+		"layers": [
+			{"texture": "fire", "blend": "additive", "count": [2, 4], "life": [350, 700], "size": [30, 10], "speed": [30, 80], "direction": "up", "spread": 25, "rise": 60, "offset": 42, "colour": [{"rgb": [1.0, 0.62, 0.22], "intensity": 2.2, "alpha": 0.9}, {"rgb": [1.0, 0.3, 0.05], "intensity": 0.8, "alpha": 0}]},
+			{"texture": "spark", "blend": "additive", "count": [0, 2], "life": [600, 1300], "size": [4, 2], "speed": [60, 160], "direction": "up", "spread": 40, "rise": 40, "drag": 1, "stretch": 0.6, "offset": 40, "colour": [{"rgb": [1.0, 0.7, 0.3], "intensity": 3, "alpha": 1}, {"rgb": [1.0, 0.35, 0.1], "intensity": 1, "alpha": 0}]},
+			{"texture": "smoke", "blend": "alpha", "lit": true, "count": 1, "life": [2500, 4000], "size": [30, 160], "speed": [40, 90], "direction": "emitter", "spread": 25, "rise": 50, "drag": 0.6, "offset": 30, "spin": [5, 20], "colour": [{"rgb": [0.22, 0.2, 0.18], "alpha": 0}, {"t": 0.1, "rgb": [0.25, 0.23, 0.21], "alpha": 0.45}, {"rgb": [0.4, 0.38, 0.36], "alpha": 0}]}
+		]
+	},
+	"grass_fire_glow": {
+		"layers": [
+			{"texture": "glow", "blend": "additive", "count": 1, "life": [500, 800], "size": [90, 120], "speed": 0, "offset": 30, "colour": [{"rgb": [1.0, 0.5, 0.15], "intensity": 0.5, "alpha": 0.35}, {"rgb": [1.0, 0.4, 0.1], "intensity": 0.3, "alpha": 0}]}
+		],
+		"light": {"rgb": [1.0, 0.55, 0.2], "range": 340, "intensity": 1.4, "life": 700}
+	},
+	"grass_burnt": {
+		"layers": [
+			{"texture": "scorch", "blend": "alpha", "orient": "ground", "lit": false, "count": 1, "life": [150000, 200000], "size": [175, 180], "sizeJitter": 0.1, "speed": 0, "rotation": [0, 360], "colour": [{"rgb": [0.05, 0.045, 0.04], "alpha": 0.55}, {"t": 0.8, "rgb": [0.06, 0.05, 0.045], "alpha": 0.45}, {"rgb": [0.07, 0.06, 0.05], "alpha": 0}]}
+		]
+	},
 	"surf_break": {
 		"layers": [
 			{"texture": "dust", "blend": "alpha", "orient": "ground", "lit": true, "count": [2, 3], "life": [2200, 3400], "size": [40, 150], "speed": 0, "offset": 24, "rotation": [0, 360], "colour": [{"rgb": [0.93, 0.95, 0.97], "alpha": 0}, {"t": 0.12, "rgb": [0.93, 0.95, 0.97], "alpha": 0.75}, {"t": 0.55, "rgb": [0.88, 0.92, 0.95], "alpha": 0.25}, {"rgb": [0.85, 0.9, 0.93], "alpha": 0}]},
