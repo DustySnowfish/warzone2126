@@ -139,6 +139,7 @@ struct WARZONE_GLOBALS
 	bool hitFlash = true;
 	bool heatShimmer = true;
 	bool idleIndicators = true;
+	bool menuFootage2126 = true;
 	bool truckAutoHelp = true;
 	bool autoUpgradeDesigns = true;
 	bool interface2126 = true;
@@ -1037,6 +1038,16 @@ bool war_getHullSuspension()
 void war_setHullSuspension(bool enabled)
 {
 	warGlobs.hullSuspension = enabled;
+}
+
+bool war_getMenuFootage2126()
+{
+	return warGlobs.menuFootage2126;
+}
+
+void war_setMenuFootage2126(bool enabled)
+{
+	warGlobs.menuFootage2126 = enabled;
 }
 
 bool war_getIdleIndicators()

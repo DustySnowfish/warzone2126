@@ -1,0 +1,52 @@
+{
+	"challenge": {
+		"map": "Random-Arizona-2",
+		"randomMapCode": "128A2-7AAAAAA0-1",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 0,
+		"name": "Menu footage - river crossing at dusk",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "menu_river.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 3,
+		"warmupSpeed": 1,
+		"settleSeconds": 0.2,
+		"timeOfDay": 2,
+		"weather": "none",
+		"record": {
+			"fps": 30,
+			"warmupStepMs": 100
+		},
+		"shots": [
+			{
+				"name": "river",
+				"anchor": "tile",
+				"offset": [
+					78,
+					87
+				],
+				"distance": 1800,
+				"pitch": -22,
+				"yaw": 232,
+				"orbit": 2.5,
+				"hold": 16
+			}
+		]
+	}
+}

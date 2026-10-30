@@ -67,6 +67,7 @@ void screenDoDumpToDiskIfRequired();
 
 void screen_enableMapPreview(int width, int height, Vector2i *playerpositions);
 void screen_disableMapPreview();
+bool screen_mapPreviewActive();
 
 void screen_updateGeometry();
 

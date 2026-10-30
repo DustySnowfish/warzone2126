@@ -136,6 +136,9 @@ void wzGamepadApplyMode(); ///< Applies the current gamepad mode setting, initia
 void wzGrabMouse();		///< Trap mouse cursor in application window
 void wzReleaseMouse();	///< Undo the wzGrabMouse operation
 uint32_t wzGetTicks();		///< Milliseconds since start of game
+/// Warzone 2126: frame recording runs on a virtual clock (fixed steps per rendered frame), so
+/// wzGetTicks() returns this value while it is set. Clear it to go back to the real clock.
+void wzSetTicksOverride(bool enabled, uint32_t ticks = 0);
 enum DialogType {
 	Dialog_Error,
 	Dialog_Warning,

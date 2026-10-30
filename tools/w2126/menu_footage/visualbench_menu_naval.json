@@ -1,0 +1,53 @@
+{
+	"challenge": {
+		"map": "Random-Arizona-2",
+		"randomMapCode": "128A2-6AAAAAA0-1",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 0,
+		"name": "Menu footage - warships and a carrier in the rain",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "menu_naval.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 3,
+		"warmupSpeed": 1,
+		"settleSeconds": 0.2,
+		"record": {
+			"fps": 30,
+			"warmupStepMs": 100
+		},
+		"timeOfDay": 2,
+		"weather": "rain",
+		"weatherStrength": 0.35,
+		"shots": [
+			{
+				"name": "naval",
+				"anchor": "tile",
+				"offset": [
+					29,
+					30
+				],
+				"distance": 2300,
+				"pitch": -26,
+				"yaw": 310,
+				"orbit": 3,
+				"hold": 16
+			}
+		]
+	}
+}

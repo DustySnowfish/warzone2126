@@ -1,0 +1,53 @@
+{
+	"challenge": {
+		"map": "Random-Rockies-2",
+		"randomMapCode": "128R2-5AAAAAA0-1",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 2,
+		"name": "Menu footage - a night strike in a thunderstorm",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "menu_night.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 3,
+		"warmupSpeed": 1,
+		"settleSeconds": 0.2,
+		"record": {
+			"fps": 30,
+			"warmupStepMs": 100
+		},
+		"timeOfDay": 4,
+		"weather": "rain",
+		"weatherStrength": 0.95,
+		"shots": [
+			{
+				"name": "night",
+				"anchor": "tile",
+				"offset": [
+					108,
+					18
+				],
+				"distance": 2300,
+				"pitch": -30,
+				"yaw": 200,
+				"orbit": 3,
+				"hold": 16
+			}
+		]
+	}
+}

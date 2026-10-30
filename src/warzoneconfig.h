@@ -279,6 +279,8 @@ bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration 
 void war_setHullSuspension(bool enabled);
 bool war_getHitFlash(); // units and buildings flash when hit
 bool war_getHeatShimmer(); // Warzone 2126: heat haze behind fires and over hot ground
+bool war_getMenuFootage2126(); // Warzone 2126: battle footage behind the main menus (else the classic pictures)
+void war_setMenuFootage2126(bool enabled);
 bool war_getIdleIndicators(); // Warzone 2126: idle trucks/factories/labs buttons beside the minimap
 void war_setIdleIndicators(bool enabled);
 bool war_getTruckAutoHelp(); // Warzone 2126: idle trucks help nearby construction by themselves

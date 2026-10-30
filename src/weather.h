@@ -54,4 +54,8 @@ float intensity();
 /// Forget the current weather (level change).
 void reset();
 
+/// Warzone 2126 recordings (visual bench): hold the weather at `level` (0..1) of a type
+/// (0 none, 1 rain, 2 snow, 3 dust) instead of the tileset's storm schedule. type < 0 releases it.
+void setForced(int type, float level);
+
 } // namespace weather

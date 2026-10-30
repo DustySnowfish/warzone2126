@@ -109,6 +109,7 @@
 #include "seqdisp.h"
 #include "warzoneconfig.h"
 #include "main.h"
+#include "menufootage2126.h"
 #include "wrappers.h"
 #include "version.h"
 #include "map.h"
@@ -777,6 +778,7 @@ static LoadingTask<> startTitleLoopTask(ResourceLoadingController& controller, b
  */
 static void stopTitleLoop()
 {
+	menu_footage::stop();
 	if (!frontendShutdown())
 	{
 		debug(LOG_FATAL, "Shutting down after failure");

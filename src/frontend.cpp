@@ -57,6 +57,7 @@
 #include "droid.h"
 #include "frend.h"
 #include "frontend.h"
+#include "menufootage2126.h"
 #include "visualbench.h"
 #include "group.h"
 #include "hci.h"
@@ -687,6 +688,9 @@ static void displayTitleBitmap(WZ_DECL_UNUSED WIDGET *psWidget, WZ_DECL_UNUSED U
 		// don't bother drawing when the dimensions are <= 0,0
 		return;
 	}
+
+	// Warzone 2126: battle footage behind the menus (over the classic backdrop)
+	menu_footage::draw();
 
 	assert(psWidget->pUserData != nullptr);
 	TitleBitmapCache& cache = *static_cast<TitleBitmapCache*>(psWidget->pUserData);

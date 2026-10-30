@@ -459,6 +459,11 @@ void screen_enableMapPreview(int width, int height, Vector2i *playerpositions)
 	}
 }
 
+bool screen_mapPreviewActive()
+{
+	return mappreview;
+}
+
 void screen_disableMapPreview()
 {
 	mappreview = false;

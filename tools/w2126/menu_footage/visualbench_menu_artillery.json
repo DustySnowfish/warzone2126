@@ -1,0 +1,53 @@
+{
+	"challenge": {
+		"map": "Random-Arizona-2",
+		"randomMapCode": "128A2-0AAAAAA0-1",
+		"maxPlayers": 2,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 1,
+		"bases": 2,
+		"name": "Menu footage - a base under artillery in a dust storm",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "menu_artillery.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1,
+		"ai": "none"
+	},
+	"visualbench": {
+		"localAI": "none",
+		"warmupGameSeconds": 22,
+		"warmupSpeed": 1,
+		"settleSeconds": 0.2,
+		"record": {
+			"fps": 30,
+			"warmupStepMs": 250
+		},
+		"timeOfDay": 2,
+		"weather": "dust",
+		"weatherStrength": 0.7,
+		"shots": [
+			{
+				"name": "artillery",
+				"anchor": "tile",
+				"offset": [
+					16,
+					108
+				],
+				"distance": 2400,
+				"pitch": -30,
+				"yaw": 40,
+				"orbit": 3,
+				"hold": 16
+			}
+		]
+	}
+}

@@ -654,8 +654,21 @@ void wzShowMouse(bool visible)
 	}
 }
 
+static bool ticksOverrideEnabled = false;
+static uint32_t ticksOverride = 0;
+
+void wzSetTicksOverride(bool enabled, uint32_t ticks)
+{
+	ticksOverrideEnabled = enabled;
+	ticksOverride = ticks;
+}
+
 uint32_t wzGetTicks()
 {
+	if (ticksOverrideEnabled)
+	{
+		return ticksOverride;
+	}
 	return static_cast<uint32_t>(SDL_GetTicks());
 }
 

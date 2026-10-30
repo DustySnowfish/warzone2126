@@ -824,6 +824,7 @@ bool loadConfig()
 	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
 	war_setHeatShimmer(iniGetBool("heatShimmer2126", war_getHeatShimmer()).value());
 	war_setIdleIndicators(iniGetBool("idleIndicators2126", war_getIdleIndicators()).value());
+	war_setMenuFootage2126(iniGetBool("menuFootage2126", war_getMenuFootage2126()).value());
 	war_setTruckAutoHelp(iniGetBool("truckAutoHelp2126", war_getTruckAutoHelp()).value());
 	war_setAutoUpgradeDesigns(iniGetBool("autoUpgradeDesigns2126", war_getAutoUpgradeDesigns()).value());
 	war_setInterface2126(iniGetBool("interface2126", war_getInterface2126()).value());
@@ -1175,6 +1176,7 @@ bool saveConfig()
 	iniSetBool("hitFlash2126", war_getHitFlash());
 	iniSetBool("heatShimmer2126", war_getHeatShimmer());
 	iniSetBool("idleIndicators2126", war_getIdleIndicators());
+	iniSetBool("menuFootage2126", war_getMenuFootage2126());
 	iniSetBool("truckAutoHelp2126", war_getTruckAutoHelp());
 	iniSetBool("autoUpgradeDesigns2126", war_getAutoUpgradeDesigns());
 	iniSetBool("interface2126", war_getInterface2126());

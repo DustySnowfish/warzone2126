@@ -87,6 +87,8 @@ struct State
 
 State s;
 std::minstd_rand rng(0x2126u);
+int forcedType = -1;
+float forcedLevel = 0.f;
 
 float rand01()
 {
@@ -111,6 +113,14 @@ Type scriptedType()
 
 void runDirector(const environment_light::WeatherConfig& cfg, float dt)
 {
+	if (forcedType >= 0)
+	{
+		s.type = forcedType == 1 ? Type::Rain : forcedType == 2 ? Type::Snow : forcedType == 3 ? Type::Dust : Type::None;
+		s.target = s.type == Type::None ? 0.f : forcedLevel;
+		s.level = s.target;
+		s.started = true;
+		return;
+	}
 	const Type scripted = scriptedType();
 	if (scripted != Type::None)
 	{
@@ -471,6 +481,12 @@ glm::vec3 lightTint(LIGHTING_TYPE light)
 float intensity()
 {
 	return s.level;
+}
+
+void setForced(int type, float level)
+{
+	forcedType = type;
+	forcedLevel = std::max(0.f, std::min(1.f, level));
 }
 
 void reset()

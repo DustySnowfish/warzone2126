@@ -3009,6 +3009,7 @@ LoadingTask<> loadGame(ResourceLoadingController& controller, const GameLoadDeta
 		// The settings always apply (benchmarks set theirs with "randomMapCode"); only the seed differs
 		applyRandomMapScriptOptions2126(game.randomMap);
 		data = gameToLoad.getMap(useLobbySeed ? game.randomMap.seed : syncedSeed);
+		debug(LOG_INFO, "Map generation seed (script-generated maps): %u", useLobbySeed ? game.randomMap.seed : syncedSeed);
 		if (useLobbySeed)
 		{
 			markRandomMapSeedUsed2126();

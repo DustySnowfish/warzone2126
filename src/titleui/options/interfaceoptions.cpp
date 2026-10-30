@@ -217,6 +217,26 @@ std::shared_ptr<OptionsForm> makeInterfaceOptionsForm(bool inGame, const std::fu
 		result->addOption(optionInfo, valueChanger, true);
 	}
 
+	{
+		auto optionInfo = OptionInfo("interface.general.menuFootage2126", N_("Main Menu Background"), N_("Battle Footage: clips of battles recorded in the game play behind the menus. Classic Pictures: the original still backdrops."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Classic Pictures"), "", false },
+					{ _("Battle Footage"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getMenuFootage2126());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setMenuFootage2126(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+
 	result->addSection(OptionsSection(N_("Game UI"), ""), true);
 	{
 		auto optionInfo = OptionInfo("interface.game.idleIndicators2126", N_("Idle Indicators"), N_("Buttons beside the minimap counting idle trucks, factories and research facilities; click to go to the next one."));

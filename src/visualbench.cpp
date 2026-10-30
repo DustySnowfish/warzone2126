@@ -47,6 +47,10 @@
 #include "version.h"
 #include "warcam.h"
 #include "wzjsonhelpers.h"
+#include "hci.h"
+#include "weather.h"
+#include "warzoneconfig.h"
+#include "lib/framework/wzapp.h"
 
 #include <algorithm>
 #include <chrono>
@@ -93,6 +97,15 @@ enum class Phase
 	Finishing,   // last screenshot requested, waiting for the save thread
 	Done
 };
+
+// Recording (Warzone 2126 menu footage): "record": { "fps": 30 } runs the whole bench on a virtual
+// clock that advances a fixed step per rendered frame, and saves every frame of every shot as
+// <shot name>/f00000.png, so the frames can be made into a smooth video however slowly they render.
+bool recording = false;
+double recordFps = 30.0;
+double virtualMs = 0.0;
+double warmupStepMs = 100.0; // virtual time per frame during the warm-up (not recorded)
+uint32_t recordFrame = 0;
 
 bool active = false;
 std::string benchName;
@@ -174,6 +187,23 @@ bool loadConfig()
 			shot.hold = std::max(1.f, jsonFloat(s, "hold", shot.hold));
 			shots.push_back(shot);
 		}
+	}
+	// Recordings: weather and time of day for the scene
+	if (vb.contains("weather") && vb["weather"].is_string())
+	{
+		const std::string w = vb["weather"].get<std::string>();
+		const int type = w == "rain" ? 1 : w == "snow" ? 2 : w == "dust" ? 3 : 0;
+		weather::setForced(type, jsonFloat(vb, "weatherStrength", 0.8f));
+	}
+	if (vb.contains("timeOfDay") && vb["timeOfDay"].is_number_integer())
+	{
+		war_setTimeOfDay(std::clamp(vb["timeOfDay"].get<int>(), 0, 5));
+	}
+	if (vb.contains("record") && vb["record"].is_object())
+	{
+		recording = true;
+		recordFps = std::clamp(static_cast<double>(jsonFloat(vb["record"], "fps", 30.f)), 10.0, 120.0);
+		warmupStepMs = std::clamp(static_cast<double>(jsonFloat(vb["record"], "warmupStepMs", 100.f)), 10.0, 1000.0);
 	}
 	if (shots.empty())
 	{
@@ -333,14 +363,21 @@ void writeResults()
 	fflush(stdout);
 }
 
+double phaseStartVirtualMs = 0.0;
+
 void enterPhase(Phase p)
 {
 	phase = p;
 	phaseStart = Clock::now();
+	phaseStartVirtualMs = virtualMs;
 }
 
 float secondsInPhase()
 {
+	if (recording && phase != Phase::Finishing)
+	{
+		return static_cast<float>((virtualMs - phaseStartVirtualMs) / 1000.0);
+	}
 	return std::chrono::duration<float>(Clock::now() - phaseStart).count();
 }
 
@@ -422,6 +459,18 @@ void visualBenchLevelLoaded()
 		enableGodMode();
 	}
 
+	if (recording)
+	{
+		virtualMs = static_cast<double>(wzGetTicks());
+		wzSetTicksOverride(true, static_cast<uint32_t>(virtualMs));
+		intHideInterface();
+		intSetCleanFrames2126(true);
+		for (const auto &shot : shots)
+		{
+			PHYSFS_mkdir((outDir + shot.name).c_str());
+		}
+	}
+
 	results.clear();
 	haveLastFrame = false;
 	gameTimeSetMod(Rational(static_cast<int>(warmupSpeed)));
@@ -435,6 +484,14 @@ void visualBenchFrame()
 	if (!active || phase == Phase::Idle || phase == Phase::Done)
 	{
 		return;
+	}
+
+	if (recording && phase != Phase::Finishing)
+	{
+		// Advance the virtual clock one step per rendered frame (the frame just drawn showed the
+		// previous step); the warm-up runs in bigger steps since it is not recorded
+		virtualMs += phase == Phase::Warmup ? warmupStepMs : 1000.0 / recordFps;
+		wzSetTicksOverride(true, static_cast<uint32_t>(virtualMs));
 	}
 
 	const Clock::time_point now = Clock::now();
@@ -470,8 +527,15 @@ void visualBenchFrame()
 			const float t = secondsInPhase();
 			applyCamera(shot, t);
 			results.back().frameMs.push_back(frameMs);
+			if (recording)
+			{
+				char frameName[96];
+				snprintf(frameName, sizeof(frameName), "%s/f%05u.png", shot.name.c_str(), recordFrame++);
+				screenDumpToDiskNamed((outDir + frameName).c_str(), true);
+			}
 			if (t >= shot.hold)
 			{
+				recordFrame = 0;
 				size_t units = 0;
 				for (unsigned player = 0; player < MAX_PLAYERS; ++player)
 				{
@@ -508,7 +572,11 @@ void visualBenchFrame()
 
 		case Phase::Finishing:
 			// Give the background thread time to encode and save the last screenshot.
-			if (secondsInPhase() >= 3.f)
+			if (recording)
+			{
+				wzSetTicksOverride(false);
+			}
+			if (secondsInPhase() >= (recording ? 20.f : 3.f))
 			{
 				phase = Phase::Done;
 				wzQuit(0);

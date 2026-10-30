@@ -2034,8 +2034,19 @@ static void intStopStructPosition()
 
 
 /* Display the widgets for the in game interface */
+static bool cleanFrames2126 = false;
+
+void intSetCleanFrames2126(bool clean)
+{
+	cleanFrames2126 = clean;
+}
+
 void intDisplayWidgets()
 {
+	if (cleanFrames2126)
+	{
+		return; // recording footage: the 3D scene only, no interface or messages
+	}
 	/*draw the background for the design screen and the Intelligence screen*/
 	if (intMode == INT_DESIGN || intMode == INT_INTELMAP)
 	{

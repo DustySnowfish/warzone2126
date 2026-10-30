@@ -295,6 +295,8 @@ void intRequestQuitToMainMenu();
 
 /* Display the widgets for the in game interface */
 void intDisplayWidgets();
+/// Warzone 2126 footage recording: draw no interface, console or messages over the 3D scene
+void intSetCleanFrames2126(bool clean);
 
 void intShowWidgetHelp();
 bool intHelpOverlayIsUp();
