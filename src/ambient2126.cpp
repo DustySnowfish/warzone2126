@@ -131,7 +131,7 @@ struct State
 	float surfSoundWait = 0.f;
 	float battleSoundWait = 0.f;
 	float fireSoundWait = 0.f;
-	struct PendingThunder { float delay; bool near; };
+	struct PendingThunder { float delay; bool close; }; // (not "near": a macro on Windows)
 	std::vector<PendingThunder> thunder;
 	float clock = 0.f;
 	std::vector<glm::vec3> noises;   // recent loud places: map x, y and the clock time
@@ -864,7 +864,7 @@ void updateNight(float dt)
 	}
 	const glm::vec2 c = cameraCentre();
 	const float r = viewRadius() * 1.1f;
-	auto near = [&](const BASE_OBJECT* o) {
+	auto inView = [&](const BASE_OBJECT* o) {
 		return std::abs(static_cast<float>(o->pos.x) - c.x) < r && std::abs(static_cast<float>(o->pos.y) - c.y) < r && o->visibleForLocalDisplay();
 	};
 	// Lights in the buildings of every side, and on Urban maps fires and lamps in the ruins
@@ -872,7 +872,7 @@ void updateNight(float dt)
 	{
 		for (const STRUCTURE* st : gameWorld.objects.structures[player])
 		{
-			if (st == nullptr || st->status != SS_BUILT || st->died || !near(st))
+			if (st == nullptr || st->status != SS_BUILT || st->died || !inView(st))
 			{
 				continue;
 			}
@@ -889,7 +889,7 @@ void updateNight(float dt)
 		for (const BASE_OBJECT* o : gameWorld.objects.features[0])
 		{
 			const FEATURE* f = static_cast<const FEATURE*>(o);
-			if (f == nullptr || f->died || f->psStats->subType != FEAT_BUILDING || !near(f))
+			if (f == nullptr || f->died || f->psStats->subType != FEAT_BUILDING || !inView(f))
 			{
 				continue;
 			}
@@ -991,7 +991,7 @@ void updateSound(float dt)
 			++i;
 			continue;
 		}
-		playFlat(s.thunder[i].near ? "thunder_near.ogg" : (rand01() < 0.5f ? "thunder_far1.ogg" : "thunder_far2.ogg"));
+		playFlat(s.thunder[i].close ? "thunder_near.ogg" : (rand01() < 0.5f ? "thunder_far1.ogg" : "thunder_far2.ogg"));
 		s.thunder[i] = s.thunder.back();
 		s.thunder.pop_back();
 	}
