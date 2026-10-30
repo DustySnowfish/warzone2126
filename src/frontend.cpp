@@ -251,6 +251,11 @@ void startTitleMenu()
 	widgSetTip(psWScreen, FRONTEND_HYPERLINK, _("Come visit the forums and all Warzone 2100 news! Click this link."));
 	W_BUTTON * pRightAlignedButton = addSmallTextButton(FRONTEND_DONATELINK, FRONTEND_POS9X + 360, FRONTEND_POS9Y, _("Donate: http://donations.wz2100.net/"), 0);
 	moveToParentRightEdge(pRightAlignedButton, 1);
+	if (frontendSlimMenu2126())
+	{
+		// No room for both links on one line in the slim panel
+		pRightAlignedButton->move(widgGetFromID(psWScreen, FRONTEND_HYPERLINK)->x(), FRONTEND_POS9Y + 17);
+	}
 	widgSetTip(psWScreen, FRONTEND_DONATELINK, _("Help support the project with our server costs, Click this link."));
 	pRightAlignedButton = addSmallTextButton(FRONTEND_CHATLINK, FRONTEND_POS9X + 360, 0, _("Chat with players on Discord or IRC"), 0);
 	moveToParentRightEdge(pRightAlignedButton, 6);
@@ -884,10 +889,59 @@ W_FORM *addBackdrop(const std::shared_ptr<W_SCREEN> &screen)
 }
 
 // ////////////////////////////////////////////////////////////////////////////
+// Warzone 2126: the menu screens (main, single player, multiplayer, tutorials, message boxes)
+// sit in a slim panel on the left with the logo above it, so the background shows across the
+// rest of the screen. The wide screens (options, lobby, campaign) stay centred as before.
+// The slim forms are attached to the screen's root form (the 640 x 480 backdrop would cut off
+// their mouse input) and removed together with the backdrop (changeTitleUI).
+
+static int slimMenuMargin()
+{
+	return std::max(24, std::min(64, static_cast<int>(pie_GetVideoBufferWidth()) / 30));
+}
+
+static int slimMenuTop()
+{
+	return std::max(10, std::min(48, static_cast<int>(pie_GetVideoBufferHeight()) / 22));
+}
+
+bool frontendSlimMenu2126()
+{
+	WIDGET *botForm = widgGetFromID(psWScreen, FRONTEND_BOTFORM);
+	return botForm != nullptr && botForm->parent() == psWScreen->psForm;
+}
+
+int frontendButtonWidth2126()
+{
+	WIDGET *botForm = widgGetFromID(psWScreen, FRONTEND_BOTFORM);
+	return frontendSlimMenu2126() ? static_cast<int>(botForm->width()) - 40 : FRONTEND_BUTWIDTH;
+}
+
+void removeSlimMenuForms2126()
+{
+	if (!psWScreen)
+	{
+		return;
+	}
+	for (UDWORD id : { (UDWORD)FRONTEND_TOPFORM, (UDWORD)FRONTEND_BOTFORM, (UDWORD)FRONTEND_SIDETEXT })
+	{
+		WIDGET *w = widgGetFromID(psWScreen, id);
+		if (w != nullptr && w->parent() == psWScreen->psForm)
+		{
+			widgDelete(psWScreen, id);
+		}
+	}
+}
+
+// ////////////////////////////////////////////////////////////////////////////
 void addTopForm(bool wide)
 {
 	WIDGET *parent = widgGetFromID(psWScreen, FRONTEND_BACKDROP);
 	ASSERT(parent != nullptr, "Unable to find FRONTEND_BACKDROP?");
+	if (!wide)
+	{
+		parent = psWScreen->psForm.get();
+	}
 
 	auto topForm = std::make_shared<IntFormTransparent>();
 	parent->attach(topForm);
@@ -901,7 +955,7 @@ void addTopForm(bool wide)
 	else
 	{
 		topForm->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
-			psWidget->setGeometry(FRONTEND_TOPFORMX, FRONTEND_TOPFORMY, FRONTEND_TOPFORMW, FRONTEND_TOPFORMH);
+			psWidget->setGeometry(slimMenuMargin(), slimMenuTop(), FRONTEND_SLIM_W2126, FRONTEND_SLIM_LOGOH2126);
 		}));
 	}
 
@@ -920,7 +974,7 @@ void addTopForm(bool wide)
 	{
 		dstH = imgH * dstW / imgW; // Too high.
 	}
-	sFormInit.x = (topForm->width()  - dstW) / 2;
+	sFormInit.x = wide ? (topForm->width() - dstW) / 2 : 0; // the slim menu's logo sits at the left
 	sFormInit.y = (topForm->height() - dstH) / 2;
 	sFormInit.width  = dstW;
 	sFormInit.height = dstH;
@@ -932,6 +986,10 @@ void addTopForm(bool wide)
 void addBottomForm(bool wide)
 {
 	WIDGET *parent = widgGetFromID(psWScreen, FRONTEND_BACKDROP);
+	if (!wide)
+	{
+		parent = psWScreen->psForm.get();
+	}
 
 	auto botForm = std::make_shared<IntFormAnimated>();
 	parent->attach(botForm);
@@ -945,8 +1003,9 @@ void addBottomForm(bool wide)
 	}
 	else
 	{
+		botForm->flatStyle2126 = true;
 		botForm->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
-			psWidget->setGeometry(FRONTEND_BOTFORMX, FRONTEND_BOTFORMY, FRONTEND_BOTFORMW, FRONTEND_BOTFORMH);
+			psWidget->setGeometry(slimMenuMargin(), slimMenuTop() + FRONTEND_SLIM_LOGOH2126 + 14, FRONTEND_SLIM_W2126, FRONTEND_BOTFORMH + 22);
 		}));
 	}
 }
@@ -1008,6 +1067,20 @@ W_LABEL *addSideText(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD formId, U
 
 W_LABEL *addSideText(UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
 {
+	if (id == FRONTEND_SIDETEXT && frontendSlimMenu2126())
+	{
+		// The slim menu has no room for the sideways title at its left; it goes across the top of
+		// the panel instead
+		WIDGET *bot = widgGetFromID(psWScreen, FRONTEND_BOTFORM);
+		auto label = std::make_shared<W_LABEL>();
+		bot->attach(label);
+		label->id = id;
+		label->setFont(font_small, WZCOL_TEXT_MEDIUM);
+		label->setString(WzString::fromUtf8(txt));
+		label->setGeometry(44, 10, 200, 16);
+		label->setTransparentToMouse(true);
+		return label.get();
+	}
 	return addSideText(psWScreen, FRONTEND_BACKDROP, id, PosX, PosY, txt);
 }
 
@@ -1066,7 +1139,7 @@ std::shared_ptr<W_BUTTON> addTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, co
 	auto button = makeTextButton(id, txt, style);
 	if (style & WBUT_TXTCENTRE)
 	{
-		button->setGeometry(PosX, PosY, FRONTEND_BUTWIDTH, button->height());
+		button->setGeometry(PosX, PosY, frontendButtonWidth2126(), button->height());
 	}
 	else
 	{
@@ -1097,7 +1170,7 @@ W_BUTTON * addSmallTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, const char *
 	else
 	{
 		sButInit.style |= WBUT_TXTCENTRE;
-		sButInit.width = FRONTEND_BUTWIDTH;
+		sButInit.width = frontendButtonWidth2126();
 	}
 
 	// Enable right clicks

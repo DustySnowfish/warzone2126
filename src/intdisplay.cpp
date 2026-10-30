@@ -746,7 +746,7 @@ void IntFormAnimated::display(int xOffset, int yOffset)
 	                   aBegin.width()  + (aEnd.width()  - aBegin.width()) * num / den,
 	                   aBegin.height() + (aEnd.height() - aBegin.height()) * num / den);
 
-	if (GetGameMode() == GS_NORMAL && intInterface2126Active())
+	if ((GetGameMode() == GS_NORMAL && intInterface2126Active()) || flatStyle2126)
 	{
 		// Warzone 2126 interface: flat dark panels with a light-blue edge, as the status strip
 		const int x0 = aCur.x(), y0 = aCur.y(), x1 = x0 + aCur.width(), y1 = y0 + aCur.height();

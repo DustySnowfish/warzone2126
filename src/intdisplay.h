@@ -232,6 +232,9 @@ public:
 	void closeAnimateDelete(const W_ANIMATED_ON_CLOSE_FUNC& onCloseAnimateFinished = nullptr);              ///< Animates the form closing, and deletes itself when done.
 	bool isClosing() const;
 
+	/// Warzone 2126: draw as a flat dark panel (as the in-game interface) instead of the classic frame
+	bool flatStyle2126 = false;
+
 private:
 	unsigned        startTime;              ///< Animation start time
 	int             currentAction;          ///< Opening/open/closing/closed.

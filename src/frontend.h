@@ -68,6 +68,12 @@ void notifyAboutMissingVideos();
 std::shared_ptr<IMAGEFILE> getFlagsImages();
 
 void addTopForm(bool wide);
+/// Warzone 2126: the menu screens' slim left panel (see frontend.cpp)
+#define FRONTEND_SLIM_W2126		400
+#define FRONTEND_SLIM_LOGOH2126	130
+bool frontendSlimMenu2126();
+int frontendButtonWidth2126();
+void removeSlimMenuForms2126();
 void addBottomForm(bool wide = false);
 W_FORM *addBackdrop();
 W_FORM *addBackdrop(const std::shared_ptr<W_SCREEN> &screen);

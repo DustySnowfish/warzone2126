@@ -26,6 +26,7 @@
 #include "titleui.h"
 #include "../intdisplay.h"
 #include "../hci.h"
+#include "../frontend.h"
 
 std::shared_ptr<WzTitleUI> wzTitleUICurrent;
 
@@ -44,6 +45,8 @@ void changeTitleUI(std::shared_ptr<WzTitleUI> target)
 	{
 		// Deletes the backdrop, which in turn deletes the rest of the UI from whatever was on screen before this UI
 		widgDelete(psWScreen, FRONTEND_BACKDROP);
+		// (the slim menu panel is on the root form, not the backdrop)
+		removeSlimMenuForms2126();
 	}
 	if (target)
 	{

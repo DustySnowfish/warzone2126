@@ -48,8 +48,9 @@ WzMsgBoxTitleUI::WzMsgBoxTitleUI(WzString title, WzString text, std::shared_ptr<
 void WzMsgBoxTitleUI::start()
 {
 	addBackdrop();
-	addTopForm(false);
-	addBottomForm();
+	// Centred (wide forms): message boxes keep their classic size rather than the slim menu panel
+	addTopForm(true);
+	addBottomForm(true);
 
 	addMultiBut(psWScreen, FRONTEND_BOTFORM, WZ_MSGBOX_TUI_LEAVE, FRONTEND_BOTFORMW - (MULTIOP_OKW * 2), FRONTEND_BOTFORMH - (MULTIOP_OKH * 2), MULTIOP_OKW, MULTIOP_OKH, _("Continue"), IMAGE_OK, IMAGE_OK, true);
 
