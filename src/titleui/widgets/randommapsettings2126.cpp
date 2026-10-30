@@ -37,6 +37,12 @@
 #include "src/multirecv.h"
 #include "src/multiint.h"
 #include "src/randommap2126.h"
+#include "src/randompreview2126.h"
+#include "src/randommapexport2126.h"
+#include "src/radar.h"
+#include "src/component.h"
+#include "lib/framework/input.h"
+#include "lib/ivis_opengl/piestate.h"
 #include "src/hci/hud2126_style.h"
 
 #include <array>
@@ -45,10 +51,13 @@ namespace
 {
 
 constexpr int kPad = 14;
-constexpr int kRowH = 30;
+constexpr int kRowH = 26;
 constexpr int kLabelW = 150;
 constexpr int kValueW = 40;
-constexpr int kPanelW = 470;
+constexpr int kLeftW = 470;       // the settings column
+constexpr int kPreviewS = 380;    // the preview square
+constexpr int kPanelW = kLeftW + kPreviewS + kPad;
+constexpr int kLegendH = 40;
 constexpr int kControlH = 24;
 constexpr uint32_t kSendDelayMs = 350; // slider drags settle before the options go out
 
@@ -175,7 +184,7 @@ public:
 			game.randomMap.style = static_cast<uint8_t>(index.value());
 			self->changed();
 		});
-		styleDropdown->setTip(_("The kind of landscape. Random picks one of the first five for each new map; Islands puts every player on their own island (hover and air units cross the sea)."));
+		styleDropdown->setTip(_("The kind of landscape. Random picks one of the first five for each new map; Islands puts every player on their own island (hover and air units cross the sea). River valleys runs a river between neighbouring players (or between the teams), crossed at bridges and fords, with open ground in the middle. The Water slider sets how wide the rivers are."));
 
 		// Tileset: switches to the Random map with the same number of slots
 		tilesetLabel = makeLabel(_("Tileset"), font_regular, hud2126::text());
@@ -309,6 +318,37 @@ public:
 		});
 		terrainDropdown->setTip(_("Mirrored: every player's part of the map is a turned copy of the first, for strictly fair games. Natural: one landscape, so routes differ between players."));
 
+		// Start positions: ring, two teams facing, four corners
+		layoutLabel = makeLabel(_("Start positions"), font_regular, hud2126::text());
+		attach(layoutLabel);
+		layoutDropdown = std::make_shared<DropdownWidget>();
+		attach(layoutDropdown);
+		layoutDropdown->setListBackgroundColor(pal_RGBA(18, 24, 30, 245));
+		{
+			std::vector<std::string> names;
+			for (int i = 0; i < RandomMapSettings2126::LAYOUT_COUNT; ++i)
+			{
+				names.push_back(gettext(randomMapLayoutName2126(i)));
+			}
+			fillDropdown(*layoutDropdown, names);
+		}
+		layoutDropdown->setCanChange([](DropdownWidget &, size_t, std::shared_ptr<WIDGET>) { return canEdit(); });
+		layoutDropdown->setOnChange([weakSelf](DropdownWidget &dropdown) {
+			auto self = weakSelf.lock();
+			auto index = dropdown.getSelectedIndex();
+			if (!self || !index.has_value() || !canEdit())
+			{
+				return;
+			}
+			game.randomMap.layout = static_cast<uint8_t>(index.value());
+			self->changed(true);
+			if (!randomMapLayoutFits2126(game.randomMap.layout, game.maxPlayers))
+			{
+				self->setMessage(game.randomMap.layout == 1 ? _("Two teams need an even number of players, 4 or more: this map uses the ring") : _("Four corners need 8 players: this map uses the ring"), true);
+			}
+		});
+		layoutDropdown->setTip(_("Where the players start. Ring: around the map, every player for themselves. Two teams facing: the first half of the slots along one side, the second half along the other (2v2, 4v4, 5v5). Four corners: pairs of slots (0-1, 2-3, 4-5, 6-7) in the corners, for 8 players. Put teammates in the same group."));
+
 		// Sliders
 		for (int i = 0; i < RandomMapSettings2126::SLIDER_COUNT; ++i)
 		{
@@ -420,6 +460,31 @@ public:
 		});
 		attach(defaultsButton);
 
+		saveButton = std::make_shared<FlatButton>(_("Save as map"));
+		saveButton->setTip(_("Save this map as an ordinary map file in your maps folder, to share it as a file, play it without the generator or open it in a map editor"));
+		saveButton->addOnClickHandler([weakSelf](W_BUTTON &) {
+			auto self = weakSelf.lock();
+			if (!self)
+			{
+				return;
+			}
+			const auto result = exportRandomMap2126();
+			if (result.ok)
+			{
+				self->setMessage(astringf(_("Saved as %s in your maps folder"), result.name.c_str()).c_str(), false);
+				debug(LOG_INFO, "Random map saved: %s", result.path.c_str());
+			}
+			else if (result.alreadySaved)
+			{
+				self->setMessage(astringf(_("Already saved as %s"), result.name.c_str()).c_str(), false);
+			}
+			else
+			{
+				self->setMessage(result.error.c_str(), true);
+			}
+		});
+		attach(saveButton);
+
 		if (!canEdit())
 		{
 			pasteButton->setState(WBUT_DISABLE);
@@ -437,24 +502,28 @@ public:
 	int32_t idealWidth() override { return kPanelW; }
 	int32_t idealHeight() override
 	{
-		return kPad + 22 + 18 + 10 + kRowH * (5 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + kPad;
+		const int left = kPad + 22 + 18 + 10 + kRowH * (6 + RandomMapSettings2126::SLIDER_COUNT) + 10 + kRowH + 22 + kRowH + 18 + kPad;
+		const int right = kPad + 22 + 18 + 10 + kPreviewS + 8 + kLegendH + kPad;
+		return std::max(left, right);
 	}
 
 	void geometryChanged() override
 	{
-		const int w = width() - 2 * kPad;
+		const int w = kLeftW - 2 * kPad;
 		int y = kPad;
 		title->setGeometry(kPad, y, w, 20);
 		y += 22;
-		subtitle->setGeometry(kPad, y, w, 16);
+		subtitle->setGeometry(kPad, y, width() - 2 * kPad, 16);
 		y += 18 + 10;
+		previewX = kLeftW;
+		previewY = y;
 		const int controlX = kPad + kLabelW;
 		const int controlW = w - kLabelW - kValueW;
 		styleLabel->setGeometry(kPad, y + (kControlH - styleLabel->height()) / 2, kLabelW, styleLabel->height());
 		styleDropdown->setGeometry(controlX, y, controlW, kControlH);
 		y += kRowH;
 		const std::pair<std::shared_ptr<W_LABEL>, std::shared_ptr<DropdownWidget>> extraRows[] = {
-			{ tilesetLabel, tilesetDropdown }, { playersLabel, playersDropdown }, { sizeLabel, sizeDropdown }, { terrainLabel, terrainDropdown } };
+			{ tilesetLabel, tilesetDropdown }, { playersLabel, playersDropdown }, { sizeLabel, sizeDropdown }, { terrainLabel, terrainDropdown }, { layoutLabel, layoutDropdown } };
 		for (const auto &row : extraRows)
 		{
 			row.first->setGeometry(kPad, y + (kControlH - row.first->height()) / 2, kLabelW, row.first->height());
@@ -479,7 +548,8 @@ public:
 		newButton->setGeometry(kPad + boxW + gap + 2 * (bw + gap), y, bw, kControlH);
 		y += kRowH;
 		defaultsButton->setGeometry(kPad, y, 90, kControlH);
-		message->setGeometry(kPad + 100, y + 4, w - 100, 16);
+		saveButton->setGeometry(kPad + 96, y, 110, kControlH);
+		message->setGeometry(kPad, y + kRowH, w, 16);
 	}
 
 	void run(W_CONTEXT *) override
@@ -498,7 +568,7 @@ public:
 		pie_UniTransBoxFill(x0, y0, x0 + width(), y0 + height(), pal_RGBA(14, 19, 24, 245));
 		iV_Box(x0, y0, x0 + width() - 1, y0 + height() - 1, hud2126::accent());
 		// The dropdowns' boxes and arrows (the dropdown itself only draws its items)
-		for (const auto &dropdown : { styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown })
+		for (const auto &dropdown : { styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown, layoutDropdown })
 		{
 			const int dx0 = x0 + dropdown->x(), dy0 = y0 + dropdown->y();
 			const int dx1 = dx0 + dropdown->width(), dy1 = dy0 + dropdown->height();
@@ -516,13 +586,213 @@ public:
 		{
 			const uint8_t v = game.randomMap.sliders[i];
 			valueText[i].setText(WzString::number(v), font_regular);
-			const int vx = x0 + width() - kPad - valueText[i]->width();
+			const int vx = x0 + kLeftW - kPad - valueText[i]->width();
 			const int vy = y0 + sliderRowY[i] + (kControlH - valueText[i]->lineSize()) / 2 - valueText[i]->aboveBase();
 			valueText[i]->render(vx, vy, v == RandomMapSettings2126::SLIDER_DEFAULT ? hud2126::label() : hud2126::value());
 		}
+		displayPreview(x0 + previewX, y0 + previewY);
+	}
+
+	~RandomMapPanel() override
+	{
+		delete previewTexture;
+		previewTexture = nullptr;
 	}
 
 private:
+	/// Colour of the player who starts at map position `slot` (as in the lobby preview)
+	static PIELIGHT slotColour(int slot)
+	{
+		for (int i = 0; i < MAX_PLAYERS; ++i)
+		{
+			if (NetPlay.players[i].position == slot)
+			{
+				const int colour = getPlayerColour(i);
+				return colour == 3 ? WZCOL_GREY : clanColours[colour];
+			}
+		}
+		return WZCOL_GREY;
+	}
+
+	void displayPreview(int px, int py)
+	{
+		const RandomPreview2126 &preview = randomPreview2126();
+		const int S = kPreviewS;
+		pie_UniTransBoxFill(px, py, px + S, py + S, pal_RGBA(6, 9, 12, 255));
+		iV_Box(px - 1, py - 1, px + S, py + S, hud2126::border());
+		if (preview.width <= 0 || preview.height <= 0)
+		{
+			previewNote.setText(_("Pick one of the Random maps to see it here"), font_small);
+			previewNote->render(px + (S - previewNote->width()) / 2, py + S / 2, hud2126::label());
+			return;
+		}
+		if (!previewTexture || previewVersion != preview.version)
+		{
+			delete previewTexture;
+			previewTexture = nullptr;
+			iV_Image image;
+			if (image.allocate(static_cast<unsigned>(preview.width), static_cast<unsigned>(preview.height), 4, false))
+			{
+				std::copy(preview.rgba.begin(), preview.rgba.end(), image.bmp_w());
+				previewTexture = gfx_api::context::get().loadTextureFromUncompressedImage(std::move(image), gfx_api::texture_type::user_interface, "mem::randomMapPreview2126");
+			}
+			previewVersion = preview.version;
+		}
+		// Fit the map in the square (random maps are square, but keep the aspect anyway)
+		const float scale = static_cast<float>(S) / static_cast<float>(std::max(preview.width, preview.height));
+		const int mw = static_cast<int>(preview.width * scale), mh = static_cast<int>(preview.height * scale);
+		const int mx = px + (S - mw) / 2, my = py + (S - mh) / 2;
+		if (previewTexture)
+		{
+			iV_DrawImageAnisotropic(*previewTexture, Vector2i(mx, my), Vector2f(0.f, 0.f), Vector2f(static_cast<float>(mw), static_cast<float>(mh)), 0.f, WZCOL_WHITE);
+		}
+		auto toScreen = [&](const Vector2i &tile) {
+			return Vector2i(mx + static_cast<int>((tile.x + 0.5f) * scale), my + static_cast<int>((tile.y + 0.5f) * scale));
+		};
+
+		// Scavenger camps: red squares with a dark rim
+		for (const auto &c : preview.camps)
+		{
+			const Vector2i p = toScreen(c);
+			pie_UniTransBoxFill(p.x - 5, p.y - 5, p.x + 5, p.y + 5, pal_RGBA(20, 6, 6, 230));
+			pie_UniTransBoxFill(p.x - 4, p.y - 4, p.x + 4, p.y + 4, pal_RGBA(200, 40, 30, 255));
+			pie_UniTransBoxFill(p.x - 1, p.y - 3, p.x + 1, p.y + 3, pal_RGBA(20, 6, 6, 255));
+		}
+		// Oil wells (those at the bases after the base markers, so they stay visible)
+		auto drawOil = [&](bool atBases) {
+		for (const auto &o : preview.oil)
+		{
+			if ((o.kind == RandomPreview2126::OilKind::Base) != atBases)
+			{
+				continue;
+			}
+			const Vector2i p = toScreen(o.tile);
+			const PIELIGHT colour = oilColour(o.kind);
+			const int r = o.kind == RandomPreview2126::OilKind::Centre ? 3 : 2;
+			pie_UniTransBoxFill(p.x - r - 1, p.y - r - 1, p.x + r + 1, p.y + r + 1, pal_RGBA(0, 0, 0, 220));
+			pie_UniTransBoxFill(p.x - r, p.y - r, p.x + r, p.y + r, colour);
+		}
+		};
+		drawOil(false);
+		// Start positions: the player's colour with the slot number; the one under the mouse
+		// gets a card with its numbers
+		const RandomPreview2126::Base *hover = nullptr;
+		Vector2i hoverPos;
+		for (const auto &b : preview.bases)
+		{
+			const Vector2i p = toScreen(b.tile);
+			const bool hot = std::abs(mouseX() - p.x) <= 9 && std::abs(mouseY() - p.y) <= 9;
+			const int r = hot ? 8 : 6;
+			pie_UniTransBoxFill(p.x - r - 1, p.y - r - 1, p.x + r + 1, p.y + r + 1, hot ? hud2126::value() : pal_RGBA(0, 0, 0, 230));
+			pie_UniTransBoxFill(p.x - r, p.y - r, p.x + r, p.y + r, slotColour(b.player));
+			if (b.player < static_cast<int>(slotNumbers.size()))
+			{
+				WzCachedText &t = slotNumbers[static_cast<size_t>(b.player)];
+				t.setText(WzString::number(b.player), font_small);
+				const int tx = p.x - t->width() / 2, ty = p.y - t->lineSize() / 2 - t->aboveBase();
+				t->render(tx + 1, ty + 1, pal_RGBA(0, 0, 0, 255));
+				t->render(tx, ty, WZCOL_WHITE);
+			}
+			if (hot)
+			{
+				hover = &b;
+				hoverPos = p;
+			}
+		}
+
+		drawOil(true);
+
+		// Legend under the map
+		const int ly = py + S + 8;
+		struct LegendItem { PIELIGHT colour; const char *text; };
+		const LegendItem items[] = {
+			{ oilColour(RandomPreview2126::OilKind::Base), N_("Base oil") },
+			{ oilColour(RandomPreview2126::OilKind::Field), N_("Field oil") },
+			{ oilColour(RandomPreview2126::OilKind::Centre), N_("Centre oil") },
+			{ oilColour(RandomPreview2126::OilKind::Offshore), N_("Offshore oil") },
+			{ pal_RGBA(200, 40, 30, 255), N_("Scavengers") },
+		};
+		int lx = px;
+		int row = 0;
+		for (size_t k = 0; k < legendText.size() && k < sizeof(items) / sizeof(items[0]); ++k)
+		{
+			legendText[k].setText(gettext(items[k].text), font_small);
+			const int itemW = 14 + legendText[k]->width() + 14;
+			if (lx + itemW > px + S)
+			{
+				lx = px;
+				++row;
+			}
+			const int iy = ly + row * 18;
+			pie_UniTransBoxFill(lx, iy + 3, lx + 9, iy + 12, pal_RGBA(0, 0, 0, 220));
+			pie_UniTransBoxFill(lx + 1, iy + 4, lx + 8, iy + 11, items[k].colour);
+			legendText[k]->render(lx + 14, iy + 13 - legendText[k]->lineSize() / 2 - legendText[k]->aboveBase() / 2 - 3, hud2126::label());
+			lx += itemW;
+		}
+
+		if (hover)
+		{
+			displayBaseCard(*hover, hoverPos, px, py, S);
+		}
+	}
+
+	static PIELIGHT oilColour(RandomPreview2126::OilKind kind)
+	{
+		switch (kind)
+		{
+		case RandomPreview2126::OilKind::Base: return pal_RGBA(255, 244, 160, 255);
+		case RandomPreview2126::OilKind::Field: return pal_RGBA(255, 160, 0, 255);
+		case RandomPreview2126::OilKind::Centre: return pal_RGBA(255, 255, 255, 255);
+		case RandomPreview2126::OilKind::Offshore: return pal_RGBA(70, 220, 255, 255);
+		case RandomPreview2126::OilKind::Camp: return pal_RGBA(150, 60, 50, 255);
+		}
+		return WZCOL_WHITE;
+	}
+
+	void displayBaseCard(const RandomPreview2126::Base &b, const Vector2i &at, int px, int py, int S)
+	{
+		std::vector<std::string> lines;
+		lines.push_back(astringf(_("Player %d start"), b.player));
+		lines.push_back(astringf(_("Oil at the base: %d"), b.oilAtBase));
+		if (b.offshore > 0)
+		{
+			lines.push_back(astringf(_("Oil nearest this base: %d (%d offshore)"), b.oilNearest, b.offshore));
+		}
+		else
+		{
+			lines.push_back(astringf(_("Oil nearest this base: %d"), b.oilNearest));
+		}
+		lines.push_back(astringf(_("Nearest other base: %d tiles"), b.neighbourTiles));
+		if (b.campTiles >= 0)
+		{
+			lines.push_back(astringf(_("Nearest scavenger camp: %d tiles"), b.campTiles));
+		}
+		int cardW = 0;
+		for (size_t k = 0; k < lines.size() && k < cardText.size(); ++k)
+		{
+			cardText[k].setText(WzString::fromUtf8(lines[k]), k == 0 ? font_regular_bold : font_small);
+			cardW = std::max(cardW, cardText[k]->width());
+		}
+		cardW += 16;
+		const int lineH = 17;
+		const int cardH = 10 + static_cast<int>(std::min(lines.size(), cardText.size())) * lineH + 4;
+		// Beside the base, inside the preview
+		int cx = at.x + 16, cy = at.y - cardH / 2;
+		if (cx + cardW > px + S)
+		{
+			cx = at.x - 16 - cardW;
+		}
+		cy = std::max(py + 2, std::min(py + S - cardH - 2, cy));
+		pie_UniTransBoxFill(cx, cy, cx + cardW, cy + cardH, pal_RGBA(10, 14, 18, 240));
+		iV_Box(cx, cy, cx + cardW - 1, cy + cardH - 1, hud2126::accent());
+		int ty = cy + 8;
+		for (size_t k = 0; k < lines.size() && k < cardText.size(); ++k)
+		{
+			cardText[k]->render(cx + 8, ty - cardText[k]->aboveBase(), k == 0 ? hud2126::value() : hud2126::text());
+			ty += lineH;
+		}
+	}
+
 	std::string currentCode() const
 	{
 		auto identity = randomMapIdentity2126(game.map, game.maxPlayers);
@@ -668,6 +938,10 @@ private:
 		{
 			terrainDropdown->setSelectedIndex(shown.mirror);
 		}
+		if (layoutDropdown->getSelectedIndex().value_or(99) != shown.layout)
+		{
+			layoutDropdown->setSelectedIndex(shown.layout);
+		}
 		const std::string code = currentCode();
 		if (!codeBox->isEditing())
 		{
@@ -683,12 +957,13 @@ private:
 			subtitle->setString(_("Pick one of the Random maps to use these settings"));
 		}
 		copyButton->setState(code.empty() ? WBUT_DISABLE : 0);
+		saveButton->setState(code.empty() ? WBUT_DISABLE : 0);
 	}
 
 	std::function<void()> onChanged;
 	std::shared_ptr<W_LABEL> title, subtitle, styleLabel, codeLabel, message;
-	std::shared_ptr<DropdownWidget> styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown;
-	std::shared_ptr<W_LABEL> tilesetLabel, playersLabel, sizeLabel, terrainLabel;
+	std::shared_ptr<DropdownWidget> styleDropdown, tilesetDropdown, playersDropdown, sizeDropdown, terrainDropdown, layoutDropdown;
+	std::shared_ptr<W_LABEL> tilesetLabel, playersLabel, sizeLabel, terrainLabel, layoutLabel;
 	std::vector<int> sizeValues;
 	int sizeForPlayers = -1;
 	std::array<std::shared_ptr<W_LABEL>, RandomMapSettings2126::SLIDER_COUNT> sliderLabels;
@@ -696,9 +971,16 @@ private:
 	std::array<int, RandomMapSettings2126::SLIDER_COUNT> sliderRowY = {};
 	std::array<WzCachedText, RandomMapSettings2126::SLIDER_COUNT> valueText;
 	std::shared_ptr<W_EDITBOX> codeBox;
-	std::shared_ptr<FlatButton> copyButton, pasteButton, newButton, defaultsButton;
+	std::shared_ptr<FlatButton> copyButton, pasteButton, newButton, defaultsButton, saveButton;
 	RandomMapSettings2126 shown;
 	std::string shownMap;
+	int previewX = 0, previewY = 0;
+	gfx_api::texture *previewTexture = nullptr;
+	uint32_t previewVersion = 0;
+	WzCachedText previewNote;
+	std::array<WzCachedText, 16> slotNumbers;
+	std::array<WzCachedText, 5> legendText;
+	std::array<WzCachedText, 6> cardText;
 	bool pendingSend = false;
 	uint32_t lastChange = 0;
 	uint32_t messageTime = 0;
@@ -725,6 +1007,14 @@ std::string randomMapSettingsSummary2126()
 	if (tuned)
 	{
 		s += ", " + std::string(_("tuned"));
+	}
+	if (game.randomMap.layout == 1 && randomMapLayoutFits2126(1, game.maxPlayers))
+	{
+		s += ", " + std::string(_("teams"));
+	}
+	else if (game.randomMap.layout == 2 && randomMapLayoutFits2126(2, game.maxPlayers))
+	{
+		s += ", " + std::string(_("corners"));
 	}
 	return s;
 }

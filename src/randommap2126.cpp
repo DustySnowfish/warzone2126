@@ -125,6 +125,10 @@ void RandomMapSettings2126::sanitise()
 		size = static_cast<uint16_t>(best);
 	}
 	mirror = mirror ? 1 : 0;
+	if (layout >= LAYOUT_COUNT)
+	{
+		layout = 0;
+	}
 	for (auto &v : sliders)
 	{
 		v = static_cast<uint8_t>(std::min<int>(100, (v + SLIDER_STEP / 2) / SLIDER_STEP * SLIDER_STEP));
@@ -141,19 +145,28 @@ std::vector<std::pair<std::string, int32_t>> RandomMapSettings2126::scriptOption
 		{ "oil", sliders[OIL] },
 		{ "trees", sliders[TREES] },
 		{ "scale", sliders[SCALE] },
+		{ "scavengers", sliders[SCAVENGERS] },
+		{ "ruins", sliders[RUINS] },
 		{ "size", size },
 		{ "mirror", mirror },
+		{ "layout", layout },
 	};
 }
 
 std::string RandomMapSettings2126::toStorageString() const
 {
+	// The first six sliders, size and mirror in their original places; later sliders after them
 	std::string s = std::to_string(seed) + "," + std::to_string(style);
-	for (uint8_t v : sliders)
+	for (int i = 0; i < SLIDER_COUNT_V1; ++i)
 	{
-		s += "," + std::to_string(v);
+		s += "," + std::to_string(sliders[i]);
 	}
 	s += "," + std::to_string(size) + "," + std::to_string(mirror);
+	for (int i = SLIDER_COUNT_V1; i < SLIDER_COUNT; ++i)
+	{
+		s += "," + std::to_string(sliders[i]);
+	}
+	s += "," + std::to_string(layout);
 	return s;
 }
 
@@ -181,20 +194,31 @@ RandomMapSettings2126 RandomMapSettings2126::fromStorageString(const std::string
 			return RandomMapSettings2126(); // malformed: defaults
 		}
 	}
-	if (values.size() != 2 + SLIDER_COUNT && values.size() != 4 + SLIDER_COUNT)
+	// seed, style, six sliders [, size, mirror [, later sliders, layout]]
+	const size_t v1 = 2 + SLIDER_COUNT_V1;
+	const size_t full = v1 + 2 + (SLIDER_COUNT - SLIDER_COUNT_V1) + 1;
+	if (values.size() != v1 && values.size() != v1 + 2 && values.size() != full)
 	{
 		return RandomMapSettings2126();
 	}
-	if (values.size() == 4 + SLIDER_COUNT)
+	if (values.size() >= v1 + 2)
 	{
-		r.size = static_cast<uint16_t>(std::min<uint64_t>(values[2 + SLIDER_COUNT], 512));
-		r.mirror = static_cast<uint8_t>(std::min<uint64_t>(values[3 + SLIDER_COUNT], 1));
+		r.size = static_cast<uint16_t>(std::min<uint64_t>(values[v1], 512));
+		r.mirror = static_cast<uint8_t>(std::min<uint64_t>(values[v1 + 1], 1));
 	}
 	r.seed = static_cast<uint32_t>(std::min<uint64_t>(values[0], UINT32_MAX));
 	r.style = static_cast<uint8_t>(std::min<uint64_t>(values[1], 255));
-	for (int i = 0; i < SLIDER_COUNT; ++i)
+	for (int i = 0; i < SLIDER_COUNT_V1; ++i)
 	{
 		r.sliders[i] = static_cast<uint8_t>(std::min<uint64_t>(values[2 + i], 255));
+	}
+	if (values.size() > v1 + 2)
+	{
+		for (int i = SLIDER_COUNT_V1; i < SLIDER_COUNT; ++i)
+		{
+			r.sliders[i] = static_cast<uint8_t>(std::min<uint64_t>(values[v1 + 2 + (i - SLIDER_COUNT_V1)], 255));
+		}
+		r.layout = static_cast<uint8_t>(std::min<uint64_t>(values[full - 1], 255));
 	}
 	r.sanitise();
 	return r;
@@ -284,11 +308,20 @@ std::string encodeRandomMapCode2126(const RandomMapIdentity2126 &identity, const
 	settings.sanitise();
 	std::string code = std::to_string(randomMapResolvedSize2126(settings, identity.players)) + identity.tileset + std::to_string(identity.players) + "-";
 	code += kBase36[settings.style];
-	for (uint8_t v : settings.sliders)
+	// The later sliders only when one of them is not at its default, so codes stay as they were
+	int count = RandomMapSettings2126::SLIDER_COUNT_V1;
+	for (int i = RandomMapSettings2126::SLIDER_COUNT_V1; i < RandomMapSettings2126::SLIDER_COUNT; ++i)
 	{
-		code += kBase36[v / RandomMapSettings2126::SLIDER_STEP];
+		if (settings.sliders[i] != RandomMapSettings2126::SLIDER_DEFAULT)
+		{
+			count = RandomMapSettings2126::SLIDER_COUNT;
+		}
 	}
-	code += kBase36[settings.mirror];
+	for (int i = 0; i < count; ++i)
+	{
+		code += kBase36[settings.sliders[i] / RandomMapSettings2126::SLIDER_STEP];
+	}
+	code += kBase36[settings.mirror + 2 * settings.layout];
 	code += "-" + toBase36(settings.seed);
 	return code;
 }
@@ -340,8 +373,27 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		return nullopt;
 	}
 
-	// Settings: style, six sliders, then (from the second version on) the terrain digit
-	if (settingsPart.size() != 1 + RandomMapSettings2126::SLIDER_COUNT && settingsPart.size() != 2 + RandomMapSettings2126::SLIDER_COUNT)
+	// Settings: style, six sliders, then (from the second version on) the terrain digit; or style,
+	// all the sliders and the terrain digit
+	const int v1 = RandomMapSettings2126::SLIDER_COUNT_V1;
+	int sliderCount;
+	bool hasMirror;
+	if (settingsPart.size() == static_cast<size_t>(1 + v1))
+	{
+		sliderCount = v1;
+		hasMirror = false;
+	}
+	else if (settingsPart.size() == static_cast<size_t>(2 + v1))
+	{
+		sliderCount = v1;
+		hasMirror = true;
+	}
+	else if (settingsPart.size() == static_cast<size_t>(2 + RandomMapSettings2126::SLIDER_COUNT))
+	{
+		sliderCount = RandomMapSettings2126::SLIDER_COUNT;
+		hasMirror = true;
+	}
+	else
 	{
 		return nullopt;
 	}
@@ -352,7 +404,7 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		return nullopt;
 	}
 	settings.style = static_cast<uint8_t>(style);
-	for (int i = 0; i < RandomMapSettings2126::SLIDER_COUNT; ++i)
+	for (int i = 0; i < sliderCount; ++i)
 	{
 		const int step = base36Digit(settingsPart[1 + i]);
 		if (step < 0 || step > 100 / RandomMapSettings2126::SLIDER_STEP)
@@ -361,14 +413,15 @@ optional<std::pair<RandomMapIdentity2126, RandomMapSettings2126>> decodeRandomMa
 		}
 		settings.sliders[i] = static_cast<uint8_t>(step * RandomMapSettings2126::SLIDER_STEP);
 	}
-	if (settingsPart.size() == 2 + RandomMapSettings2126::SLIDER_COUNT)
+	if (hasMirror)
 	{
-		const int mirror = base36Digit(settingsPart[1 + RandomMapSettings2126::SLIDER_COUNT]);
-		if (mirror < 0 || mirror > 1)
+		const int terrain = base36Digit(settingsPart[1 + sliderCount]);
+		if (terrain < 0 || terrain >= 2 * RandomMapSettings2126::LAYOUT_COUNT)
 		{
 			return nullopt;
 		}
-		settings.mirror = static_cast<uint8_t>(mirror);
+		settings.mirror = static_cast<uint8_t>(terrain % 2);
+		settings.layout = static_cast<uint8_t>(terrain / 2);
 	}
 	// Size: one of the choices, big enough for the players
 	const auto &choices = randomMapSizeChoices2126();
@@ -399,13 +452,30 @@ uint32_t newRandomMapSeed2126()
 
 const char *randomMapStyleName2126(int style)
 {
-	static const char *names[] = { N_("Random"), N_("Rolling hills"), N_("Plateaus"), N_("Lakes"), N_("Canyons"), N_("Highlands"), N_("Islands") };
+	static const char *names[] = { N_("Random"), N_("Rolling hills"), N_("Plateaus"), N_("Lakes"), N_("Canyons"), N_("Highlands"), N_("Islands"), N_("River valleys") };
 	return (style >= 0 && style < RandomMapSettings2126::STYLE_COUNT) ? names[style] : names[0];
+}
+
+const char *randomMapLayoutName2126(int layout)
+{
+	static const char *names[] = { N_("Ring (free for all)"), N_("Two teams facing"), N_("Four corners (pairs)") };
+	return (layout >= 0 && layout < RandomMapSettings2126::LAYOUT_COUNT) ? names[layout] : names[0];
+}
+
+bool randomMapLayoutFits2126(int layout, int players)
+{
+	// As in the map script (tools/w2126/mapgen/random_map.js, LAYOUT)
+	switch (layout)
+	{
+	case 1: return players >= 4 && players % 2 == 0;
+	case 2: return players >= 8 && players % 4 == 0;
+	default: return true;
+	}
 }
 
 const char *randomMapSliderName2126(int slider)
 {
-	static const char *names[] = { N_("Water"), N_("Height"), N_("Cliffs"), N_("Oil"), N_("Trees and rocks"), N_("Feature size") };
+	static const char *names[] = { N_("Water"), N_("Height"), N_("Cliffs"), N_("Oil"), N_("Trees and rocks"), N_("Feature size"), N_("Scavengers"), N_("Ruins and wrecks") };
 	return (slider >= 0 && slider < RandomMapSettings2126::SLIDER_COUNT) ? names[slider] : "";
 }
 
@@ -416,8 +486,10 @@ const char *randomMapSliderTip2126(int slider)
 		N_("Hills and plateaus: 0 is nearly flat, 100 is as tall and steep as the engine allows"),
 		N_("Cliff lines and terraces: 0 is open slopes, 100 is more levels with fewer ramps between them"),
 		N_("Oil sites around each base: 0 is half the usual number, 100 is half as many again (base and centre oil stay the same)"),
-		N_("Trees, rocks and wrecks: 0 is bare ground, 100 is twice the usual"),
+		N_("Trees and rocks: 0 is bare ground, 100 is twice the usual"),
 		N_("Size of hills, valleys and lakes: 0 is small and busy, 100 is big and sweeping"),
+		N_("Scavenger camps (when scavengers are on): 0 is none (their oil is free), up to 30 small outposts, 50 the usual camps, 70 fortified camps, 85 and up a second ring of camps nearer the centre"),
+		N_("Ruined buildings, wrecked vehicles and city blocks: 0 is none, 100 is twice the usual"),
 	};
 	return (slider >= 0 && slider < RandomMapSettings2126::SLIDER_COUNT) ? tips[slider] : "";
 }

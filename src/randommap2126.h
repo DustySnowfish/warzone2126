@@ -20,15 +20,20 @@
 /// map code that reproduces a generated map exactly.
 ///
 /// The settings are part of the synchronised game options. They reach the map script as the
-/// global object `mapOptions` (style, water, height, cliffs, oil, trees, scale), and the seed
+/// global object `mapOptions` (style, water, height, cliffs, oil, trees, scale, scavengers, ruins), and the seed
 /// replaces the game's random seed for generating the map, so the lobby preview, every player's
 /// game and anyone who enters the same code all get the same map.
 ///
-/// Map code: <size><tileset><players>-<style><six sliders><terrain>-<seed>, e.g. 512R15-2AAAAAA0-1BX9QZ
+/// Map code: <size><tileset><players>-<style><sliders><terrain>-<seed>, e.g. 512R15-2AAAAAA0-1BX9QZ
 ///   size     map size in tiles; tileset A Arizona, U Urban, R Rockies; players the player count
-///   style    0 random, 1 rolling hills, 2 plateaus, 3 lakes, 4 canyons, 5 highlands, 6 islands
-///   sliders  water, height, cliffs, oil, trees, scale; one base-36 digit each, 0-K for 0-100 in steps of 5
-///   terrain  0 natural, 1 mirrored (optional: codes without it are natural)
+///   style    0 random, 1 rolling hills, 2 plateaus, 3 lakes, 4 canyons, 5 highlands, 6 islands,
+///            7 river valleys
+///   sliders  water, height, cliffs, oil, trees, scale, then scavengers and ruins; one base-36 digit
+///            each, 0-K for 0-100 in steps of 5. Scavengers and ruins are left out when both are at
+///            50, so such codes are the same as before they were added.
+///   terrain  mirrored (1) plus twice the start layout: 0 natural ring, 1 mirrored ring, 2 natural
+///            sides, 3 mirrored sides, 4 natural corners, 5 mirrored corners (optional: codes
+///            without it are a natural ring)
 ///   seed     base 36. Letters are case-insensitive; spaces are ignored.
 /// The Random maps are one per tileset and player count ("Random-Rockies-15"); the size
 /// comes from the settings (0 = that player count's default).
@@ -55,27 +60,35 @@ struct RandomMapSettings2126
 		OIL,
 		TREES,
 		SCALE,
+		SCAVENGERS, ///< scavenger camps: none, outposts, camps, fortified camps, a second ring
+		RUINS,      ///< ruins, wrecks and city blocks
 		SLIDER_COUNT
 	};
-	static constexpr int STYLE_COUNT = 7; // including 0, random
+	static constexpr int STYLE_COUNT = 8; // including 0, random
 	static constexpr uint8_t SLIDER_DEFAULT = 50;
 	static constexpr uint8_t SLIDER_STEP = 5;
 
 	uint32_t seed = 0; ///< 0 until a random map is chosen in the lobby
 	uint8_t style = 0;
-	std::array<uint8_t, SLIDER_COUNT> sliders = {SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT};
+	std::array<uint8_t, SLIDER_COUNT> sliders = {SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT, SLIDER_DEFAULT};
+	/// Sliders in the first map codes and savegames (water to scale); the rest were added later
+	static constexpr int SLIDER_COUNT_V1 = 6;
 	uint16_t size = 0;  ///< map size in tiles, 0 = the player count's default
 	uint8_t mirror = 0; ///< 1 = mirrored terrain (every player's slice the same)
+	/// Start positions: 0 a ring, 1 two teams on facing sides, 2 four corners (see LAYOUT_COUNT)
+	uint8_t layout = 0;
+	static constexpr int LAYOUT_COUNT = 3;
 
 	/// Bring every value into range (style, sliders 0-100 on a step of 5, size one of the choices or 0)
 	void sanitise();
-	bool operator==(const RandomMapSettings2126 &o) const { return seed == o.seed && style == o.style && sliders == o.sliders && size == o.size && mirror == o.mirror; }
+	bool operator==(const RandomMapSettings2126 &o) const { return seed == o.seed && style == o.style && sliders == o.sliders && size == o.size && mirror == o.mirror && layout == o.layout; }
 	bool operator!=(const RandomMapSettings2126 &o) const { return !(*this == o); }
 
 	/// The `mapOptions` handed to the map script
 	std::vector<std::pair<std::string, int32_t>> scriptOptions() const;
 
-	/// "seed,style,water,height,cliffs,oil,trees,scale,size,mirror" for savegames, replays and config
+	/// "seed,style,water,height,cliffs,oil,trees,scale,size,mirror,scavengers,ruins,layout" for savegames,
+	/// replays and config
 	std::string toStorageString() const;
 	/// Parse toStorageString(); anything missing or invalid keeps the defaults
 	static RandomMapSettings2126 fromStorageString(const std::string &s);
@@ -114,6 +127,10 @@ uint32_t newRandomMapSeed2126();
 
 /// Display names (untranslated, for gettext) of the landscape styles, index = style
 const char *randomMapStyleName2126(int style);
+/// Display names (untranslated) of the start layouts, and whether a layout works with a player
+/// count (otherwise the map uses the ring)
+const char *randomMapLayoutName2126(int layout);
+bool randomMapLayoutFits2126(int layout, int players);
 /// Display names (untranslated) of the sliders
 const char *randomMapSliderName2126(int slider);
 const char *randomMapSliderTip2126(int slider);

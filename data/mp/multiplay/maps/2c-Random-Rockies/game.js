@@ -24,7 +24,7 @@ const TS = {"name":"rockie","ground":["r_water","r_cliff","r_snowcliff","r_tiles
 //   5. Every base, oil site and camp is made reachable by ground: ramps are cut through cliffs
 //      and fords laid across water along the cheapest routes.
 //   6. Ground types per corner, then tiles chosen whose corners match (smooth transitions).
-//   7. Bases, oil, scavengers, trees, rocks and wrecks.
+//   7. Bases, oil, scavengers (mapOptions.scavengers), trees and rocks, ruins and wrecks (mapOptions.ruins).
 
 'use strict';
 
@@ -34,6 +34,10 @@ const TS = {"name":"rockie","ground":["r_water","r_cliff","r_snowcliff","r_tiles
 const OPT = (typeof mapOptions === "object" && mapOptions !== null) ? mapOptions : {};
 const N = (typeof OPT.size === "number" && OPT.size >= 64 && OPT.size <= 512) ? OPT.size : MAP_SIZE;
 const MIRROR = OPT.mirror === 1;
+// Start layout: 0 a ring (every player for themselves), 1 two teams on facing sides (an even number
+// of players, 4 or more; slots in the first half against the second), 2 four corners of two or more
+// players each (8 players: slots 0-1, 2-3, 4-5, 6-7). Other player counts use the ring.
+const LAYOUT = (OPT.layout === 1 && PLAYERS >= 4 && PLAYERS % 2 === 0) ? 1 : (OPT.layout === 2 && PLAYERS >= 8 && PLAYERS % 4 === 0) ? 2 : 0;
 const AREA = N * N;
 const PI = 3.141592653589793;
 
@@ -106,6 +110,9 @@ const STYLES = {
 	highlands: { weight: 2, terraces: 5, water: 0.00, relief: 1.00, ridged: false, cliff: 80, label: "Highlands" },
 	// Not in the random pick (weight 0): each player on an island; only hover and air units cross
 	islands:   { weight: 0, terraces: 0, water: 0.00, relief: 0.60, ridged: false, cliff: 150, label: "Islands", islands: true },
+	// Not in the random pick: rivers run from the middle to the edge between the players, crossed
+	// at paved causeways ("bridges") and shallow fords; the middle is open ground joining everyone
+	rivers:    { weight: 0, terraces: 0, water: 0.00, relief: 0.70, ridged: false, cliff: 150, label: "River valleys", rivers: true },
 };
 function chooseStyle() {
 	const names = Object.keys(STYLES);
@@ -119,7 +126,7 @@ function chooseStyle() {
 	return names[0];
 }
 function optv(name) { const v = OPT[name]; return (typeof v === "number") ? clamp(v, 0, 100) : 50; }
-const STYLE_KEYS = ["", "rolling", "plateaus", "lakes", "canyons", "highlands", "islands"];
+const STYLE_KEYS = ["", "rolling", "plateaus", "lakes", "canyons", "highlands", "islands", "rivers"];
 // The random pick is always drawn, so locking the style a random map came out with keeps the
 // rest of that map the same
 const randomStyleName = chooseStyle();
@@ -129,6 +136,7 @@ const style = {};
 for (const k of Object.keys(baseStyle)) { style[k] = baseStyle[k]; }
 const S_WATER = optv("water"), S_HEIGHT = optv("height"), S_CLIFFS = optv("cliffs");
 const S_OIL = optv("oil"), S_TREES = optv("trees"), S_SCALE = optv("scale");
+const S_SCAVS = optv("scavengers"), S_RUINS = optv("ruins");
 // Water: 0 dry, 50 the style's share, 100 about four times it (and some lakes even in dry styles)
 style.water = clamp(baseStyle.water * (S_WATER / 50) * (S_WATER / 50) + Math.max(0, S_WATER - 50) / 50 * 0.08, 0, 0.45);
 // Height: 0 nearly flat; above 50 taller (up to the engine's limit) with more contrast
@@ -147,8 +155,14 @@ if (S_CLIFFS <= 10) {
 const rampThreshold = 0.62 + (S_CLIFFS - 50) / 50 * 0.12;
 // Oil sites per player: half to one and a half times the usual
 const oilFactor = 0.5 + S_OIL / 100;
-// Trees, rocks and wrecks: none to twice the usual
+// Trees and rocks: none to twice the usual
 const decorFactor = S_TREES / 50;
+// Ruins, wrecks and city blocks: none to twice the usual
+const ruinFactor = S_RUINS / 50;
+// Scavenger camps: 0 none, up to 30 small outposts, 35-65 the usual camp, 70 and up fortified
+// camps, 85 and up a second ring of camps nearer the centre
+const scavTier = S_SCAVS === 0 ? 0 : S_SCAVS <= 30 ? 1 : S_SCAVS <= 65 ? 2 : 3;
+const scavSecondRing = S_SCAVS >= 85;
 // Feature size: half to twice the size of the big landscape shapes
 // (2^((s - 50) / 50) for s = 0, 5 .. 100, as constants: Math.pow is not exactly specified)
 const SCALE_STEPS = [0.5, 0.5358867313, 0.5743491775, 0.6155722067, 0.6597539554, 0.7071067812, 0.7578582833,
@@ -158,7 +172,8 @@ const scaleFactor = SCALE_STEPS[Math.round(S_SCALE / 5)];
 function scaled(base) { return Math.max(8, Math.round(base * scaleFactor / 8) * 8); }
 log("W2126 random map: " + N + "x" + N + ", " + PLAYERS + " players, " + TS.name + ", " + style.label +
 	", water " + S_WATER + " height " + S_HEIGHT + " cliffs " + S_CLIFFS + " oil " + S_OIL + " trees " + S_TREES + " scale " + S_SCALE +
-	(MIRROR ? ", mirrored" : ""));
+	" scavengers " + S_SCAVS + " ruins " + S_RUINS +
+	(MIRROR ? ", mirrored" : "") + (OPT.layout ? ", layout " + OPT.layout : ""));
 
 // ---------------------------------------------------------------------------------------------
 // Tileset look: ground types from low to high ground, plus special grounds.
@@ -177,6 +192,7 @@ const LOOKS = {
 		shore: "u_stone", water: "u_water", pad: "u_gray",
 		trees: ["Tree1", "Tree2", "Tree3"],
 		rocks: ["Wreck0", "Wreck1", "Wreck2", "Wreck3", "BlueCar", "Chevy", "Pickup", "WreckedSuzukiJeep", "barrier"],
+		rocksAreWrecks: true, // wrecked cars and barriers: they follow the ruins setting
 		wrecks: ["Ruin1", "Ruin3", "Ruin4", "Ruin5", "Ruin6", "Ruin7", "Ruin8", "Ruin9", "Ruin10", "Pylon", "WreckedTankerV", "OilTower"],
 		blocks: ["building1", "building2", "building3", "building7", "building8", "building11", "building10", "building12", "WreckedBuilding9", "WreckedBuilding16", "WreckedBuilding17", "bigcooltowr"],
 		treeDensity: 0.003, rockDensity: 0.004, wreckDensity: 0.004,
@@ -284,11 +300,46 @@ const C = (N - 1) / 2;
 const edgeMargin = Math.max(14, Math.round(N * 0.06));
 
 let theta0;
-if (PLAYERS === 2) { theta0 = pick([PI / 4, 3 * PI / 4, PI / 4, 3 * PI / 4, 0, PI / 2]); }
+if (LAYOUT === 1) { theta0 = pick([0, PI / 2, PI, 3 * PI / 2]); } // the first team's side
+else if (LAYOUT === 2) { theta0 = PI / 4 + pick([0, PI / 2, PI, 3 * PI / 2]); } // the first pair's corner
+else if (PLAYERS === 2) { theta0 = pick([PI / 4, 3 * PI / 4, PI / 4, 3 * PI / 4, 0, PI / 2]); }
 else if (PLAYERS === 4) { theta0 = PI / 4 + (randf() - 0.5) * 0.3; }
 else { theta0 = randf() * 2 * PI; }
 
-function playerAngle(p) { return theta0 + 2 * PI * p / PLAYERS; }
+// Rotational symmetry of the start positions: every player in a ring, two sides or four corners.
+// Group g (of GROUP players each) is group 0 turned by g / SYM of a full turn.
+const SYM = LAYOUT === 1 ? 2 : LAYOUT === 2 ? 4 : PLAYERS;
+const GROUP = PLAYERS / SYM;
+// Team layouts: each player's position as an angle and radius about the centre
+let teamStarts = null;
+if (LAYOUT !== 0) {
+	const reach = N / 2 - edgeMargin;
+	const ux = cosT(theta0), uy = sinT(theta0), vx = -uy, vy = ux;
+	const group0 = [];
+	if (LAYOUT === 1) {
+		// Spread along the side, facing the other team
+		const d = reach * 0.95, span = reach * 0.78;
+		for (let i = 0; i < GROUP; ++i) {
+			const off = -span + 2 * span * (i + 0.5) / GROUP;
+			group0.push([ux * d + vx * off, uy * d + vy * off]);
+		}
+	} else {
+		// Side by side across the corner's diagonal
+		const d = (reach - 16) * Math.SQRT2, gap = 17;
+		for (let i = 0; i < GROUP; ++i) {
+			const off = -gap * (GROUP - 1) + 2 * gap * i;
+			group0.push([ux * d + vx * off, uy * d + vy * off]);
+		}
+	}
+	teamStarts = [];
+	for (let p = 0; p < PLAYERS; ++p) {
+		const q = group0[p % GROUP];
+		const a = atan2T(q[1], q[0]) + 2 * PI * Math.floor(p / GROUP) / SYM;
+		teamStarts.push({ a: a, r: Math.sqrt(q[0] * q[0] + q[1] * q[1]) });
+	}
+}
+
+function playerAngle(p) { return teamStarts ? teamStarts[p].a : theta0 + 2 * PI * p / PLAYERS; }
 
 // Largest radius at which every player's point stays inside the map
 function fitRadius(angleOffset, margin) {
@@ -300,7 +351,12 @@ function fitRadius(angleOffset, margin) {
 	}
 	return r;
 }
-const ringR = fitRadius(0, edgeMargin) * (0.93 + 0.05 * randf());
+let ringR = fitRadius(0, edgeMargin) * (0.93 + 0.05 * randf());
+if (teamStarts) {
+	// Oil and camps are laid out out to about the bases' distance from the centre
+	ringR = 0;
+	for (const t of teamStarts) { ringR += t.r / PLAYERS; }
+}
 
 function polar(p, angleOffset, radius) {
 	const a = playerAngle(p) + angleOffset;
@@ -308,7 +364,47 @@ function polar(p, angleOffset, radius) {
 }
 
 const starts = [];
-for (let p = 0; p < PLAYERS; ++p) { starts.push(polar(p, 0, ringR)); }
+for (let p = 0; p < PLAYERS; ++p) { starts.push(polar(p, 0, teamStarts ? teamStarts[p].r : ringR)); }
+
+// River valleys: one river along each border between players (team layouts: between the teams),
+// from near the middle to the map edge, winding the same way on every border so the map stays
+// rotationally symmetric. riverDist gives the distance from a tile to the nearest river's
+// centre line, and where along that river it is.
+const RIVERS = !!style.rivers;
+const riverRays = [];
+const riverStart = 14; // tiles from the centre: the middle stays open ground
+if (RIVERS) {
+	if (LAYOUT === 1) { riverRays.push(theta0 + PI / 2, theta0 - PI / 2); }
+	else if (LAYOUT === 2) { for (let k = 0; k < 4; ++k) { riverRays.push(theta0 + PI / 4 + k * PI / 2); } }
+	else if (PLAYERS > 1) { for (let p = 0; p < PLAYERS; ++p) { riverRays.push(playerAngle(p) + PI / PLAYERS); } }
+}
+const riverHalfW = 1.6 + S_WATER / 100 * 2.4;           // channel half width in tiles
+const riverValleyW = riverHalfW + Math.round(9 * scaleFactor); // valley half width
+const riverAmp = Math.min(9, 3 + N / 64) * scaleFactor; // winding, tiles to each side
+const riverPeriod = 60 * scaleFactor;                   // winding wavelength along the river
+const riverPhase = RIVERS ? randf() * 2 * PI : 0; // drawn only for rivers, so other maps keep their sequence
+function riverWiggle(r) { return riverAmp * sinT(r / riverPeriod * 2 * PI + riverPhase) * clamp((r - riverStart) / 20, 0, 1); }
+// {d: distance to the centre line, r: distance from the map centre, k: river index}
+function riverDist(x, y) {
+	let best = 1e9, bestK = -1;
+	const dx = x - C, dy = y - C;
+	const r = Math.sqrt(dx * dx + dy * dy);
+	if (r < riverStart - 4) { return { d: 1e9, r: r, k: -1 }; }
+	const a = atan2T(dy, dx);
+	for (let k = 0; k < riverRays.length; ++k) {
+		let da = a - riverRays[k];
+		da -= Math.floor((da + PI) / (2 * PI)) * 2 * PI; // -PI..PI
+		if (Math.abs(da) > PI / 2) { continue; }
+		const lateral = Math.abs(sinT(da) * r - riverWiggle(r));
+		if (lateral < best) { best = lateral; bestK = k; }
+	}
+	return { d: best, r: r, k: bestK };
+}
+// Crossings: fractions of each river's length, the same on every river. Bridges are paved
+// causeways three tiles wide; fords are wider shallows.
+const riverLen = N / 2 - 4 - riverStart;
+const CROSSINGS = N >= 256 ? [[0.26, "bridge"], [0.52, "ford"], [0.8, "bridge"]] : [[0.32, "bridge"], [0.7, "ford"]];
+function riverClear(x, y, margin) { return !RIVERS || riverDist(x, y).d > riverValleyW * 0.5 + margin; }
 
 // Pads: flat areas for bases, oil sites and camps
 const pads = []; // {x, y, r, kind}
@@ -344,6 +440,7 @@ const sitePattern = []; // {da, rad, oils}
 			for (const s of starts) { if (dist(q[0], q[1], s[0], s[1]) < baseR + 8) { ok = false; } }
 			for (const sp of pads) { if (sp.kind !== "base" && dist(q[0], q[1], sp.x, sp.y) < 12) { ok = false; } }
 			if (dist(q[0], q[1], C, C) < 10) { ok = false; }
+			if (!riverClear(q[0], q[1], 5)) { ok = false; }
 		}
 		if (!ok) { continue; }
 		sitePattern.push({ da: da, rad: rad, oils: oils });
@@ -363,9 +460,10 @@ const camps = [];
 		let ok = true;
 		for (let p = 0; p < PLAYERS && ok; ++p) {
 			// (On islands the camps sit inside each player's slice, so the sea lanes between players stay open)
-			const q = polar(p, style.islands ? wedge * 0.55 : wedge, ringR * f);
+			const q = polar(p, style.islands || style.rivers ? wedge * 0.55 : wedge, ringR * f);
 			ok = inMap(q[0], q[1], edgeMargin);
 			for (const sp of pads) { if (dist(q[0], q[1], sp.x, sp.y) < sp.r + 8) { ok = false; } }
+				if (!riverClear(q[0], q[1], 7)) { ok = false; }
 			pts.push(q);
 		}
 		if (!ok) { continue; }
@@ -375,13 +473,35 @@ const camps = [];
 		}
 		break;
 	}
+	// A second ring, nearer the centre and in line with the players' own slices, on the way to the
+	// centre oil. Positions come from the slider, not the random sequence.
+	if (scavSecondRing && PLAYERS > 1) {
+		for (const f of [0.38, 0.32, 0.45, 0.28]) {
+			const pts = [];
+			let ok = true;
+			for (let p = 0; p < PLAYERS && ok; ++p) {
+				const q = polar(p, style.islands ? wedge * 0.25 : wedge * 0.35, ringR * f);
+				ok = inMap(q[0], q[1], edgeMargin) && dist(q[0], q[1], C, C) > 14;
+				for (const sp of pads) { if (dist(q[0], q[1], sp.x, sp.y) < sp.r + 8) { ok = false; } }
+				if (!riverClear(q[0], q[1], 7)) { ok = false; }
+				pts.push(q);
+			}
+			if (!ok) { continue; }
+			for (const q of pts) {
+				q.second = true;
+				camps.push(q);
+				pads.push({ x: q[0], y: q[1], r: 6, kind: "camp", owner: -1 });
+			}
+			break;
+		}
+	}
 }
 
 // Mirrored terrain: every player's slice of the map is a copy of player 0's, turned with them (and
 // each slice is mirror-symmetric about its player's axis, so the slices join smoothly).
 // The noise is resampled from the first slice, then the height field is rebuilt from it.
 if (MIRROR && PLAYERS > 1) {
-	const sector = 2 * PI / PLAYERS;
+	const sector = 2 * PI / SYM;
 	const source = new Array(AREA);
 	for (let y = 0; y < N; ++y) {
 		for (let x = 0; x < N; ++x) {
@@ -406,7 +526,7 @@ if (MIRROR && PLAYERS > 1) {
 const decorSalt = MIRROR ? rand(1 << 30) : 0; // drawn only when mirrored, so other maps keep their sequence
 function mirroredTile(x, y) {
 	if (!MIRROR || PLAYERS < 2) { return [x, y]; }
-	const sector = 2 * PI / PLAYERS;
+	const sector = 2 * PI / SYM;
 	const dx = x - C, dy = y - C;
 	const r = Math.sqrt(dx * dx + dy * dy);
 	let a = atan2T(dy, dx) - theta0 + sector / 2;
@@ -444,9 +564,20 @@ if (ISLANDS) {
 			if (PLAYERS > 1) {
 				const dx = x - C, dy = y - C;
 				const r = Math.sqrt(dx * dx + dy * dy);
-				let a = atan2T(dy, dx) - theta0 + sector / 2;
-				a = Math.abs(a - Math.floor(a / sector) * sector - sector / 2); // 0 on a player's axis
-				const toBorder = (sector / 2 - a) * r;
+				let toBorder;
+				if (teamStarts) {
+					// Halfway between the two nearest bases
+					let d1 = 1e9, d2 = 1e9;
+					for (const st of starts) {
+						const d = dist(x, y, st[0], st[1]);
+						if (d < d1) { d2 = d1; d1 = d; } else if (d < d2) { d2 = d; }
+					}
+					toBorder = (d2 - d1) / 2;
+				} else {
+					let a = atan2T(dy, dx) - theta0 + sector / 2;
+					a = Math.abs(a - Math.floor(a / sector) * sector - sector / 2); // 0 on a player's axis
+					toBorder = (sector / 2 - a) * r;
+				}
 				if (r > centreR + 2 && toBorder < 3) { land = Math.min(land, -0.15); }
 				if (r > centreR + 2 && r < centreR + 6) { land = Math.min(land, -0.15); }
 			}
@@ -461,9 +592,59 @@ if (ISLANDS) {
 	const sector = 2 * PI / Math.max(1, PLAYERS);
 	for (let y = 0; y < N; ++y) {
 		for (let x = 0; x < N; ++x) {
+			if (teamStarts) {
+				// The nearest base's
+				let best = 0, bestD = 1e9;
+				starts.forEach((st, p) => { const d = dist(x, y, st[0], st[1]); if (d < bestD) { bestD = d; best = p; } });
+				sliceOf[idx(x, y)] = best;
+				continue;
+			}
 			let a = atan2T(y - C, x - C) - theta0 + sector / 2;
 			a = a - Math.floor(a / (2 * PI)) * 2 * PI;
 			sliceOf[idx(x, y)] = Math.floor(a / sector) % PLAYERS;
+		}
+	}
+}
+
+// River valleys: lower the ground into a valley along each river and cut the channel below the
+// water; crossings keep a causeway (bridge) or shallow ground (ford) across it
+const crossing = RIVERS ? new Array(AREA).fill(0) : null; // 1 bridge, 2 ford
+if (RIVERS && riverRays.length) {
+	if (waterLevel < 0) {
+		// No lakes asked for: lift the land a little so the rivers have room below it
+		for (let i = 0; i < AREA; ++i) { elev[i] = 0.08 + elev[i] * 0.92; }
+		waterLevel = 0.05;
+	}
+	const floor = waterLevel + 0.05, bed = waterLevel - 0.04;
+	const crossAt = CROSSINGS.map((c) => ({ r: riverStart + riverLen * c[0], kind: c[1] }));
+	for (let y = 0; y < N; ++y) {
+		for (let x = 0; x < N; ++x) {
+			const i = idx(x, y);
+			const rv = riverDist(x, y);
+			if (rv.d >= riverValleyW + 2) { continue; }
+			// Narrow near the spring, wider towards the edge of the map
+			const grow = 0.7 + 0.6 * clamp((rv.r - riverStart) / riverLen, 0, 1);
+			const halfW = riverHalfW * grow, valleyW = riverValleyW + (grow - 1) * 4;
+			if (rv.d >= valleyW) { continue; }
+			// Valley: smooth slopes down to a floor beside the channel
+			let v = 1 - clamp((rv.d - halfW) / (valleyW - halfW), 0, 1);
+			v = v * v * (3 - 2 * v);
+			// The river fades in from its spring near the middle
+			const spring = clamp((rv.r - riverStart) / 6, 0, 1);
+			v *= spring;
+			elev[i] = elev[i] * (1 - v) + Math.min(elev[i], floor) * v;
+			if (rv.d < halfW && spring > 0.5) {
+				let kind = 0;
+				for (const c of crossAt) {
+					const along = Math.abs(rv.r - c.r);
+					if (c.kind === "bridge" && along < 2.1) { kind = 1; }
+					else if (c.kind === "ford" && along < 3.6) { kind = 2; }
+				}
+				if (kind === 1) { elev[i] = floor; }
+				else if (kind === 2) { elev[i] = waterLevel + 0.012; }
+				else { elev[i] = bed; }
+				crossing[i] = kind;
+			}
 		}
 	}
 }
@@ -831,6 +1012,10 @@ const vground = new Array(AREA);
 			if (nearWater) { vground[i] = G[look.shore]; }
 		}
 	}
+	// Bridges: paved causeways across the rivers
+	if (crossing) {
+		for (let i = 0; i < AREA; ++i) { if (crossing[i] === 1 && !water[i]) { vground[i] = G[look.pad]; } }
+	}
 	// Paved base centres
 	for (const s of starts) {
 		for (let dy = -6; dy <= 7; ++dy) {
@@ -1111,16 +1296,38 @@ const CAMP_LAYOUT = [
 	["A0BaBaRocketPit", 2, -3, 1, 1],
 	["A0BaBaFlameTower", 0, 3, 1, 1],
 ];
+// Which of CAMP_LAYOUT each strength builds (small outposts: the factory and one gun tower)
+const CAMP_SMALL = [true, false, true, false, false, false, false];
+// Fortified camps add these around the usual layout
+const CAMP_EXTRA = [
+	["A0BaBaMortarPit", -4, 0, 1, 1],
+	["A0CannonTower", 4, -1, 1, 1],
+	["A0BaBaRocketPitAT", -1, -4, 1, 1],
+	["A0CannonTower", 2, 4, 1, 1],
+	["A0BaBaGunTower", -4, 3, 1, 1],
+];
+// Directions of anything beyond the usual camps come from the tile hash, so the random sequence
+// (and so the rest of the map) stays the same whatever the scavenger setting
+function hashDir(x, y) { return Math.floor(hash01(x, y, 7177) * 4) * 0x4000; }
 for (const c of camps) {
-	for (const s of CAMP_LAYOUT) {
+	CAMP_LAYOUT.forEach((s, k) => {
 		const x = c[0] + s[1], y = c[1] + s[2];
-		if (free(x, y, s[3], s[4])) { addStructure(s[0], x, y, s[3], s[4], rand(4) * 0x4000, 0, SCAV); }
+		if (!free(x, y, s[3], s[4])) { return; }
+		const dir = c.second ? hashDir(x, y) : rand(4) * 0x4000;
+		if (scavTier >= 2 || (scavTier === 1 && CAMP_SMALL[k])) { addStructure(s[0], x, y, s[3], s[4], dir, 0, SCAV); }
+	});
+	if (scavTier >= 3) {
+		for (const s of CAMP_EXTRA) {
+			const x = c[0] + s[1], y = c[1] + s[2];
+			if (free(x, y, s[3], s[4])) { addStructure(s[0], x, y, s[3], s[4], hashDir(x, y), 0, SCAV); }
+		}
 	}
 	const o = nearFree(c[0] + 1, c[1] + 1, 1, 1, 3);
 	if (o) {
 		take(o[0], o[1], 1, 1);
 		features.push({ name: "OilResource", position: centrePos(o[0], o[1], 1, 1), direction: 0 });
-		structures.push({ name: "A0ResourceExtractor", position: centrePos(o[0], o[1], 1, 1), direction: 0, modules: 0, player: SCAV });
+		// With no scavengers the camp's oil is free for the taking
+		if (scavTier > 0) { structures.push({ name: "A0ResourceExtractor", position: centrePos(o[0], o[1], 1, 1), direction: 0, modules: 0, player: SCAV }); }
 	}
 	markClear(c[0], c[1], 5);
 }
@@ -1129,6 +1336,7 @@ for (const c of camps) {
 // city blocks on urban maps. Skipped for the lobby preview.
 if (!preview) {
 	const snowLine = minH + reliefH * 0.7;
+	const rockFactor = look.rocksAreWrecks ? ruinFactor : decorFactor;
 	for (let y = BORDER + 1; y < N - BORDER - 1; ++y) {
 		for (let x = BORDER + 1; x < N - BORDER - 1; ++x) {
 			const i = idx(x, y);
@@ -1155,16 +1363,16 @@ if (!preview) {
 			if (r < treeChance) {
 				const list = look.snowTrees && hgt[i] > snowLine ? look.snowTrees : look.trees;
 				addFeature(choose(list), x, y);
-			} else if (r < treeChance + look.rockDensity * decorFactor) {
+			} else if (r < treeChance + look.rockDensity * rockFactor) {
 				addFeature(choose(look.rocks), x, y);
-			} else if (r < treeChance + (look.rockDensity + look.wreckDensity) * decorFactor) {
+			} else if (r < treeChance + look.rockDensity * rockFactor + look.wreckDensity * ruinFactor) {
 				addFeature(choose(look.wrecks), x, y);
 			}
 		}
 	}
 	// Ruined city blocks: small grids of buildings with streets between
 	if (look.blocks.length) {
-		const districts = Math.round(AREA / 9000 * decorFactor);
+		const districts = Math.round(AREA / 9000 * ruinFactor);
 		for (let d = 0; d < districts; ++d) {
 			const cx = BORDER + 8 + rand(N - 2 * BORDER - 16), cy = BORDER + 8 + rand(N - 2 * BORDER - 16);
 			if (keepClear[idx(cx, cy)]) { continue; }

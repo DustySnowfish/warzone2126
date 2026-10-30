@@ -108,6 +108,7 @@
 
 #include "multiplay.h"
 #include "multiint.h"
+#include "randompreview2126.h"
 #include "multijoin.h"
 #include "buildprovenance/wzdatacheck.h"
 #include "multistat.h"
@@ -850,6 +851,26 @@ static void loadMapPreview(bool hideInterface, std::string mapName, const Sha256
 	}
 
 	std::unique_ptr<WzMap::LoggingProtocol> generatePreviewLogger(new WzMapDebugLogger());
+	// Warzone 2126: the large preview in the Random map settings (terrain only; it draws its own markers)
+	if (useLobbySeed)
+	{
+		previewColorScheme.drawOptions.drawStructures = false;
+		previewColorScheme.drawOptions.drawOil = false;
+		auto terrainOnly = WzMap::generate2DMapPreview(*data, previewColorScheme, WzMap::MapStatsConfiguration(WzMap::MapType::SKIRMISH), generatePreviewLogger.get());
+		if (terrainOnly)
+		{
+			randomPreview2126Build(*data, *terrainOnly);
+		}
+		else
+		{
+			randomPreview2126Clear();
+		}
+		previewColorScheme.drawOptions.set(true);
+	}
+	else
+	{
+		randomPreview2126Clear();
+	}
 	auto mapPreviewResult = WzMap::generate2DMapPreview(*data, previewColorScheme, WzMap::MapStatsConfiguration(WzMap::MapType::SKIRMISH), generatePreviewLogger.get());
 	if (!mapPreviewResult || mapPreviewResult->width == 0 || mapPreviewResult->height == 0)
 	{
