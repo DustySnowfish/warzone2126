@@ -677,7 +677,7 @@ private:
 		// Start positions: the player's colour with the slot number; the one under the mouse
 		// gets a card with its numbers
 		const RandomPreview2126::Base *hover = nullptr;
-		Vector2i hoverPos;
+		Vector2i hoverPos(0, 0);
 		for (const auto &b : preview.bases)
 		{
 			const Vector2i p = toScreen(b.tile);
