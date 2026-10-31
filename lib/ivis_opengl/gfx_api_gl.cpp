@@ -896,9 +896,10 @@ enum SHADER_VERSION_ES
 	VERSION_ES_310
 };
 
-// Terrain claims units 0 to 12, so the light data samplers sit above that and still inside the required 16 minimum.
-constexpr GLint lightDataTextureUnit = 13;
-constexpr GLint lightIndexTextureUnit = 14;
+// Terrain claims units 0 to 13 (Warzone 2126: unit 13 is the terrain fields texture), so the light data samplers
+// sit above that and still inside the required 16 minimum.
+constexpr GLint lightDataTextureUnit = 14;
+constexpr GLint lightIndexTextureUnit = 15;
 // 16 per stage is the minimum every target guarantees
 static_assert(lightDataTextureUnit < 16 && lightIndexTextureUnit < 16,
 	"Light data samplers must stay inside the 16 texture image units the spec minimum guarantees");

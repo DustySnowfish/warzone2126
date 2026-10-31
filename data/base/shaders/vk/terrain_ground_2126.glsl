@@ -74,6 +74,67 @@ vec3 wz2126GeometricNormal()
 	return n;
 }
 
+// Smooth ground boundaries (terrain realism A1): the four strongest ground types here and their
+// weights, from the blurred per-vertex ground masks (WZ_GROUND_MASK(k, uv) samples mask texture k,
+// four ground types per texture). The sample position is warped by a low-frequency noise and each
+// ground type gets its own fine noise, so edges meander naturally instead of following the tile
+// grid. Returns false when there are no masks (the tile-corner weights are used then).
+#ifdef WZ_GROUND_MASK
+bool wz2126GroundsFromMasks(vec2 uvMask, vec2 texSize, out uvec4 grounds, out vec4 weights)
+{
+	vec3 p = WZ_POS_MODEL;
+	// Warp of up to about 0.45 tiles, in two octaves
+	vec2 warp = vec2(wz2126Noise(p.xz / 220.0 + vec2(3.1, 7.7)), wz2126Noise(p.xz / 220.0 + vec2(11.3, 1.9))) - 0.5;
+	warp += (vec2(wz2126Noise(p.xz / 70.0 + vec2(5.3, 2.2)), wz2126Noise(p.xz / 70.0 + vec2(9.1, 4.4))) - 0.5) * 0.45;
+	vec2 uv = uvMask + warp * (0.75 / texSize);
+	vec4 m0 = WZ_GROUND_MASK(0, uv);
+	vec4 m1 = WZ_GROUND_MASK(1, uv);
+	vec4 m2 = WZ_GROUND_MASK(2, uv);
+	float m[12] = float[12](m0.r, m0.g, m0.b, m0.a, m1.r, m1.g, m1.b, m1.a, m2.r, m2.g, m2.b, m2.a);
+	float total = 0.0;
+	for (int g = 0; g < 12; ++g)
+	{
+		total += m[g];
+	}
+	if (total < 0.5)
+	{
+		return false; // no masks bound (all zero)
+	}
+	// Fine per-ground noise roughens the edges: tufts and fingers rather than smooth curves
+	for (int g = 0; g < 12; ++g)
+	{
+		if (m[g] > 0.004)
+		{
+			float n = wz2126Noise(p.xz / 34.0 + vec2(float(g) * 17.13, float(g) * 5.71)) * 0.6
+				+ wz2126Noise(p.xz / 13.0 + vec2(float(g) * 3.37, float(g) * 9.91)) * 0.4;
+			m[g] = max(m[g] + (n - 0.5) * 0.45 * min(1.0, m[g] * 4.0), 0.0);
+		}
+	}
+	// The four strongest
+	grounds = uvec4(0u);
+	weights = vec4(0.0);
+	for (int k = 0; k < 4; ++k)
+	{
+		int bestG = 0;
+		float bestM = -1.0;
+		for (int g = 0; g < 12; ++g)
+		{
+			if (m[g] > bestM)
+			{
+				bestM = m[g];
+				bestG = g;
+			}
+		}
+		grounds[k] = uint(bestG);
+		weights[k] = max(bestM, 0.0);
+		m[bestG] = -2.0;
+	}
+	float s = weights.x + weights.y + weights.z + weights.w;
+	weights /= max(s, 1e-4);
+	return true;
+}
+#endif
+
 // Sets colour, tangent-space normal and gloss of the blended ground.
 void wz2126SampleGround(out vec4 outColour, out vec3 outN, out float outGloss)
 {

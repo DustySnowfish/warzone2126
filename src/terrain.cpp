@@ -151,6 +151,7 @@ static size_t lightmapHeight;
 static std::unique_ptr<iV_Image> lightmapPixmap;
 // Warzone 2126: crater depth below the original ground per tile corner (red channel), lightmap layout
 static gfx_api::texture* deform_texture = nullptr;
+// Warzone 2126: smoothed ground type masks, one texel per map vertex, 4 ground types per texture
 static std::unique_ptr<iV_Image> deformPixmap;
 static unsigned deformChangeSeen = ~0u;
 /// Lightmap values
@@ -1357,6 +1358,79 @@ void reloadTerrainTextures()
  * Check what the videocard + drivers support and divide the loaded map into sectors that can be drawn.
  * It also determines the lightmap size.
  */
+/// Warzone 2126: smoothed ground type masks (terrain realism A1).
+///
+/// The map stores one ground type per vertex (tile corner), and the renderer blended them across
+/// a single tile, so patches of different ground had staircase edges one tile wide. These masks
+/// hold, per vertex, how much of each ground type is there after a light blur over the
+/// neighbouring vertices; the High terrain shader samples them per pixel (bilinear) with a noise
+/// warp and per-ground noise, so boundaries become smooth, irregular natural edges.
+/// Layout: each block matches the lightmap (texel x, y = vertex x, y); the masks are blocks 1-3 of
+/// the terrain fields texture (block 0 is the crater depth), four ground types per block.
+static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
+{
+	// (W2126_NO_GROUND_MASKS=1 leaves the masks empty, so the shader uses the tile corners: for comparisons)
+	const bool disabled = getenv("W2126_NO_GROUND_MASKS") != nullptr;
+	const size_t numGrounds = disabled ? 0 : std::min<size_t>(getNumGroundTypes(), 12);
+	const int W = static_cast<int>(mapState.width), H = static_cast<int>(mapState.height);
+	const size_t texW = lightmapWidth, texH = lightmapHeight;
+	std::vector<float> field(static_cast<size_t>(W + 1) * (H + 1));
+	std::vector<float> tmp(field.size());
+	if (fields.width() != texW || fields.height() != texH * 4)
+	{
+		return;
+	}
+	auto vertexGround = [&](int x, int y) -> unsigned {
+		x = std::max(0, std::min(W - 1, x));
+		y = std::max(0, std::min(H - 1, y));
+		return mapTile(mapState, x, y)->ground;
+	};
+	const int FW = W + 1;
+	for (size_t g = 0; g < numGrounds; ++g)
+	{
+		for (int y = 0; y <= H; ++y)
+		{
+			for (int x = 0; x <= W; ++x)
+			{
+				field[static_cast<size_t>(y) * FW + x] = vertexGround(x, y) == g ? 1.f : 0.f;
+			}
+		}
+		// A 1-4-1 blur along each axis (about 0.6 tiles): diagonal staircases become straight-ish
+		// edges, while a single vertex of a ground type still shows
+		for (int y = 0; y <= H; ++y)
+		{
+			for (int x = 0; x <= W; ++x)
+			{
+				const float l = field[static_cast<size_t>(y) * FW + std::max(0, x - 1)];
+				const float r = field[static_cast<size_t>(y) * FW + std::min(W, x + 1)];
+				tmp[static_cast<size_t>(y) * FW + x] = (l + 4.f * field[static_cast<size_t>(y) * FW + x] + r) / 6.f;
+			}
+		}
+		for (int y = 0; y <= H; ++y)
+		{
+			for (int x = 0; x <= W; ++x)
+			{
+				const float u = tmp[static_cast<size_t>(std::max(0, y - 1)) * FW + x];
+				const float d = tmp[static_cast<size_t>(std::min(H, y + 1)) * FW + x];
+				field[static_cast<size_t>(y) * FW + x] = (u + 4.f * tmp[static_cast<size_t>(y) * FW + x] + d) / 6.f;
+			}
+		}
+		unsigned char *out = fields.bmp_w() + (1 + g / 4) * texW * texH * 4;
+		const size_t channel = g % 4;
+		for (int y = 0; y <= H && static_cast<size_t>(y) < texH; ++y)
+		{
+			for (int x = 0; x <= W && static_cast<size_t>(x) < texW; ++x)
+			{
+				// The vertex's own ground keeps most of its weight there, so isolated patches stay
+				// as small rounded blobs instead of being blurred away
+				const float blurred = field[static_cast<size_t>(y) * FW + x];
+				const float v = vertexGround(x, y) == g ? 1.f : blurred * 0.7f;
+				out[(static_cast<size_t>(y) * texW + x) * 4 + channel] = static_cast<unsigned char>(std::lround(std::max(0.f, std::min(1.f, v)) * 255.f));
+			}
+		}
+	}
+}
+
 bool initTerrain(WorldMapState& mapState)
 {
 	const uint32_t initStartTime = wzGetTicks();
@@ -1731,12 +1805,14 @@ bool initTerrain(WorldMapState& mapState)
 	lightmap_texture->upload(0, *(lightmapPixmap.get()));
 
 	deformPixmap = std::make_unique<iV_Image>();
-	if (deformPixmap == nullptr || !deformPixmap->allocate(lightmapWidth, lightmapHeight, 4, true))
+	// (4 blocks: crater depth, then the smoothed ground masks; see buildGroundMasks)
+	if (deformPixmap == nullptr || !deformPixmap->allocate(lightmapWidth, lightmapHeight * 4, 4, true))
 	{
 		debug(LOG_FATAL, "Out of memory!");
 		abort();
 		return false;
 	}
+	buildGroundMasks(mapState, *deformPixmap);
 	delete deform_texture;
 	deform_texture = gfx_api::context::get().create_texture(1, deformPixmap->width(), deformPixmap->height(), deformPixmap->pixel_format(), "mem::terraindeform");
 	deform_texture->upload(0, *(deformPixmap.get()));

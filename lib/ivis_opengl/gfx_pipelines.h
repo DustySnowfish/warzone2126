@@ -325,7 +325,7 @@ namespace gfx_api
 	texture_description<10, sampler_type::bilinear, kSampler_terrainBakedHeight>,
 	texture_description<11, sampler_type::bilinear, kSampler_terrainBakedOffset>,
 	texture_description<12, sampler_type::bilinear, kSampler_terrainBakedNormal>,
-	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: crater depth (same layout as the lightmap)
+	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: terrain fields: crater depth, then the smoothed ground masks (4 lightmap-sized blocks stacked vertically)
 	>, shader>;
 
 	using TerrainCombined_Classic = TerrainCombinedTemplate<REND_ALPHA, SHADER_TERRAIN_COMBINED_CLASSIC>;
@@ -366,7 +366,7 @@ namespace gfx_api
 	tess_texture_description<10, sampler_type::bilinear, kSampler_terrainBakedHeight>, // baked terrain height
 	tess_texture_description<11, sampler_type::bilinear, kSampler_terrainBakedOffset>, // baked terrain outline offset
 	tess_texture_description<12, sampler_type::bilinear, kSampler_terrainBakedNormal>,  // baked terrain normal
-	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: crater depth (same layout as the lightmap)
+	texture_description<13, sampler_type::bilinear, kSampler_terrainDeform> // Warzone 2126: terrain fields: crater depth, then the smoothed ground masks (4 lightmap-sized blocks stacked vertically)
 	>, shader>;
 
 	using TerrainCombinedTess_Medium = TerrainCombinedTessTemplate<SHADER_TERRAIN_COMBINED_MEDIUM_TESS>;

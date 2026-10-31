@@ -91,8 +91,13 @@ out vec4 FragColor;
 #include "pointlights.frag"
 
 #define WZ_TEXARR(tex, uvw) texture2DArray(tex, uvw, WZ_MIP_LOAD_BIAS)
-#define WZ_GROUND_NO(i) fgrounds[i]
-#define WZ_GROUND_WEIGHT(i) fgroundWeights[i]
+// Ground types and weights per pixel: from the smoothed masks when there are any, else the tile corners
+uvec4 wzGrounds;
+vec4 wzGroundWeights;
+#define WZ_GROUND_NO(i) wzGrounds[i]
+#define WZ_GROUND_WEIGHT(i) wzGroundWeights[i]
+// (the terrain fields texture: block 0 crater depth, blocks 1-3 the ground masks)
+#define WZ_GROUND_MASK(k, uv) texture(terrainDeform, vec2((uv).x, ((uv).y + float(k) + 1.0) * 0.25), 0.f)
 #define WZ_UV_GROUND uvGround
 #define WZ_POS_MODEL posModelSpace
 #include "terrain_ground_2126.glsl"
@@ -172,6 +177,17 @@ vec4 doBumpMapping(BumpData b, vec3 groundLightDir, vec3 groundHalfVec) {
 
 vec4 main_bumpMapping() {
 	BumpData bump;
+	wzGrounds = fgrounds;
+	wzGroundWeights = fgroundWeights;
+	{
+		uvec4 g;
+		vec4 w;
+		if (wz2126GroundsFromMasks(uvLightmap, vec2(textureSize(lightmap_tex, 0)), g, w))
+		{
+			wzGrounds = g;
+			wzGroundWeights = w;
+		}
+	}
 	// Warzone 2126: height blending, cliff side projection and anti-tiling
 	wz2126SampleGround(bump.color, bump.N, bump.gloss);
 
@@ -192,7 +208,7 @@ vec4 main_bumpMapping() {
 	// Every lighting term below assumes unit length - but a weighted sum of unit normals is shorter than unit when they disagree (so normalize)
 	// Warzone 2126: deep craters stay dark, churned and rough after the scorch mark fades
 	{
-		float crater = texture(terrainDeform, uvLightmap, 0.f).r;
+		float crater = texture(terrainDeform, vec2(uvLightmap.x, uvLightmap.y * 0.25), 0.f).r;
 		if (crater > 0.02)
 		{
 			float k = smoothstep(0.04, 0.45, crater);
@@ -209,7 +225,7 @@ vec4 main_bumpMapping() {
 	// Warzone 2126 weather: wet ground darkens and shines (most in hollows); snow settles on flat ground
 	if (weatherGround > 0.0)
 	{
-		float hollow = clamp(texture(terrainDeform, uvLightmap, 0.f).r * 3.0, 0.0, 1.0);
+		float hollow = clamp(texture(terrainDeform, vec2(uvLightmap.x, uvLightmap.y * 0.25), 0.f).r * 3.0, 0.0, 1.0);
 		float wet = weatherGround * (0.75 + 0.25 * hollow);
 		bump.color.rgb *= 1.0 - 0.25 * wet;
 		bump.gloss = mix(bump.gloss, 1.0, wet * (0.55 + 0.45 * hollow));
