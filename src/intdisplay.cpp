@@ -911,6 +911,15 @@ void intDisplayEditBox(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	UDWORD          iXLeft = xOffset + psWidget->x(),
 	                iYLeft = yOffset + psWidget->y();
 
+	if (GetGameMode() == GS_NORMAL && intInterface2126Active())
+	{
+		// Warzone 2126: a flat field, lit edge while hovered or typing
+		const int x0 = iXLeft, y0 = iYLeft, x1 = x0 + psWidget->width(), y1 = y0 + psWidget->height();
+		pie_UniTransBoxFill(x0, y0, x1, y1, pal_RGBA(8, 12, 16, 235));
+		iV_Box(x0, y0, x1 - 1, y1 - 1, (psEditBox->state & WEDBS_HILITE) ? hud2126::accent() : hud2126::border());
+		return;
+	}
+
 	if (psEditBox->state & WEDBS_HILITE)
 	{
 		iImageIDLeft  = IMAGE_DES_EDITBOXLEFTH;

@@ -69,6 +69,11 @@
 #include "multiplay.h"
 #include "qtscript.h"
 #include "animation.h"
+#include "hci/hud2126_style.h"
+#include "lib/ivis_opengl/textdraw.h"
+
+#include <cmath>
+#include <map>
 
 #if defined(__clang__)
 #pragma clang diagnostic ignored "-Wcast-align"	// TODO: FIXME!
@@ -382,6 +387,73 @@ static DROID_TEMPLATE sShadowDesign;
 static void intDisplayStatForm(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 static void intDisplayViewForm(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 
+// MARK: - Warzone 2126 look (interface phase 3 part 2)
+// With the Warzone 2126 interface the design screen keeps its layout and behaviour but is drawn
+// as flat dark panels: text tabs for the parts (Body, Propulsion, Turret 1-3) instead of the
+// picture buttons, a shaded preview stage with a floor grid, flat stat bars with the values and
+// the hovered part's difference, and text Store / Delete buttons.
+
+static bool des2126()
+{
+	return intInterface2126Active();
+}
+
+/// Width of the preview; with the 2126 look the part tabs beside it need more room
+static int des3DViewWidth()
+{
+	return des2126() ? 216 : DES_3DVIEWWIDTH;
+}
+
+static bool desStoredState2126 = false;
+static std::map<UDWORD, bool> desFlash2126;
+static std::map<UDWORD, WzText> desTabText2126;
+
+static void displayPartTab2126(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
+{
+	const int x0 = xOffset + psWidget->x(), y0 = yOffset + psWidget->y();
+	const int x1 = x0 + psWidget->width(), y1 = y0 + psWidget->height();
+	const unsigned state = static_cast<W_BUTTON *>(psWidget)->getState();
+	const bool selected = (state & (WBUT_CLICKLOCK | WBUT_LOCK)) != 0;
+	const bool hot = (state & WBUT_HIGHLIGHT) != 0;
+	const bool flashing = desFlash2126[psWidget->id];
+	const char *label = "";
+	switch (psWidget->id)
+	{
+	case IDDES_BODYBUTTON: label = _("Body"); break;
+	case IDDES_PROPBUTTON: label = _("Propulsion"); break;
+	case IDDES_SYSTEMBUTTON: label = _("Turret"); break;
+	case IDDES_WPABUTTON: label = _("Turret 2"); break;
+	case IDDES_WPBBUTTON: label = _("Turret 3"); break;
+	case IDDES_STOREBUTTON: label = desStoredState2126 ? _("Stored") : _("Store"); break;
+	case IDDES_BIN: label = _("Delete"); break;
+	default: break;
+	}
+	pie_UniTransBoxFill(x0, y0, x1, y1, selected ? hud2126::tabActive() : hot ? hud2126::tabHover() : hud2126::tab());
+	PIELIGHT edge = selected || hot ? hud2126::accent() : hud2126::border();
+	if (flashing && !selected)
+	{
+		// Waiting for a part: a slow pulse on the edge
+		const int a = 80 + static_cast<int>(120 * (0.5f + 0.5f * std::sin(realTime / 220.f)));
+		edge = pal_RGBA(79, 179, 232, static_cast<UBYTE>(a));
+	}
+	iV_Box(x0, y0, x1 - 1, y1 - 1, edge);
+	if (selected)
+	{
+		pie_UniTransBoxFill(x0, y0, x0 + 2, y1, hud2126::accent());
+	}
+	WzText &text = desTabText2126[psWidget->id];
+	text.setText(label, font_small);
+	const PIELIGHT colour = psWidget->id == IDDES_BIN && hot ? hud2126::bad() : selected ? hud2126::value() : hud2126::text();
+	text.render(x0 + (psWidget->width() - text.width()) / 2, y0 + (psWidget->height() - text.lineSize()) / 2 - text.aboveBase(), colour);
+}
+
+/// A flat dark panel with a faint edge
+static void displayFlatPanel2126(int x0, int y0, int x1, int y1)
+{
+	pie_UniTransBoxFill(x0, y0, x1, y1, pal_RGBA(16, 22, 28, 232));
+	iV_Box(x0, y0, x1 - 1, y1 - 1, hud2126::border());
+}
+
 class DesignStatsBar: public W_BARGRAPH
 {
 public:
@@ -407,9 +479,21 @@ protected:
 		auto iY = y0 + (iV_GetImageHeight(IntImages, IMAGE_DES_STATSCURR) - valueText.lineSize()) / 2 - valueText.aboveBase();
 
 		//draw current value section
-		int barWidth = width() - maxValueTextWidth - 2 * PADDING;
+		const bool flat = intInterface2126Active();
+		// (the 2126 look keeps room at the end of the bar for the hovered part's difference)
+		int barWidth = width() - maxValueTextWidth - 2 * PADDING - (flat ? static_cast<int>(maxDeltaTextWidth) : 0);
 		auto filledWidth = std::min<int>((int)majorSize * barWidth / 100, barWidth);
-		iV_DrawImageRepeatX(IntImages, IMAGE_DES_STATSCURR, iX, y0, filledWidth, defaultProjectionMatrix(), true);
+		const int barH = std::max(4, static_cast<int>(height()) - 2 * static_cast<int>(PADDING));
+		if (flat)
+		{
+			// Warzone 2126: a flat track and fill
+			pie_UniTransBoxFill(iX, y0, iX + barWidth, y0 + barH, hud2126::tab());
+			pie_UniTransBoxFill(iX, y0, iX + filledWidth, y0 + barH, hud2126::accent());
+		}
+		else
+		{
+			iV_DrawImageRepeatX(IntImages, IMAGE_DES_STATSCURR, iX, y0, filledWidth, defaultProjectionMatrix(), true);
+		}
 
 		valueText.render(x0, iY, WZCOL_TEXT_BRIGHT);
 
@@ -421,7 +505,19 @@ protected:
 		//draw the comparison value - only if not zero
 		updateAnimation();
 		filledWidth = std::min<int>(static_cast<int>(minorAnimation.getCurrent() * barWidth / 100), barWidth);
-		iV_DrawImage(IntImages, IMAGE_DES_STATSCOMP, iX + filledWidth, y0 - 1);
+		if (flat)
+		{
+			// The hovered part's value: a bright tick, with the gained or lost stretch shaded
+			const int cur = std::min<int>((int)majorSize * barWidth / 100, barWidth);
+			const int a = std::min(cur, filledWidth), b = std::max(cur, filledWidth);
+			const bool better = (filledWidth < cur) == lessIsBetter;
+			pie_UniTransBoxFill(iX + a, y0, iX + b, y0 + barH, better ? pal_RGBA(111, 207, 122, 150) : pal_RGBA(229, 87, 79, 150));
+			pie_UniTransBoxFill(iX + filledWidth - 1, y0 - 2, iX + filledWidth + 1, y0 + barH + 2, hud2126::value());
+		}
+		else
+		{
+			iV_DrawImage(IntImages, IMAGE_DES_STATSCOMP, iX + filledWidth, y0 - 1);
+		}
 
 		auto delta = minorValue - majorValue;
 		if (delta != 0)
@@ -448,6 +544,7 @@ protected:
 	WzText valueText;
 	WzText deltaText;
 	uint32_t maxValueTextWidth = iV_GetTextWidth("00000", font_regular);
+	uint32_t maxDeltaTextWidth = iV_GetTextWidth("+00000", font_small) + 4;
 	Animation<float> minorAnimation = Animation<float>(realTime, EASE_IN, 200).setInitialData(0).setFinalData(0);
 	const uint32_t PADDING = 3;
 	bool lessIsBetter = false;
@@ -470,8 +567,11 @@ protected:
 	{
 		auto x0 = xOffset + x();
 		auto y0 = yOffset + y();
-		iV_DrawImage(IntImages, IMAGE_DES_POWERBAR_LEFT, x0, y0);
-		iV_DrawImage(IntImages, IMAGE_DES_POWERBAR_RIGHT, x0 + width() - iV_GetImageWidth(IntImages, IMAGE_DES_POWERBAR_RIGHT), y0);
+		if (!intInterface2126Active())
+		{
+			iV_DrawImage(IntImages, IMAGE_DES_POWERBAR_LEFT, x0, y0);
+			iV_DrawImage(IntImages, IMAGE_DES_POWERBAR_RIGHT, x0 + width() - iV_GetImageWidth(IntImages, IMAGE_DES_POWERBAR_RIGHT), y0);
+		}
 		DesignStatsBar::display(xOffset, yOffset);
 	}
 };
@@ -722,7 +822,7 @@ bool intAddDesign(bool bShowCentreScreen)
 	sFormInit.style = WFORM_PLAIN;
 	sFormInit.x = DES_3DVIEWX;
 	sFormInit.y = DES_3DVIEWY;
-	sFormInit.width = DES_3DVIEWWIDTH;
+	sFormInit.width = des3DViewWidth();
 	sFormInit.height = DES_3DVIEWHEIGHT;
 	sFormInit.pDisplay = intDisplayViewForm;
 	if (!widgAddForm(psWScreen, &sFormInit))
@@ -734,10 +834,10 @@ bool intAddDesign(bool bShowCentreScreen)
 	sFormInit.formID = IDDES_FORM;
 	sFormInit.id = IDDES_PARTFORM;
 	sFormInit.style = WFORM_PLAIN;
-	sFormInit.x = DES_PARTFORMX;
+	sFormInit.x = des2126() ? DES_3DVIEWX + des3DViewWidth() + 4 : DES_PARTFORMX;
 	sFormInit.y = DES_PARTFORMY;
-	sFormInit.width = (UWORD)(iV_GetImageWidth(IntImages, IMAGE_DES_TURRET) +
-	                          2 * DES_PARTSEPARATIONX);
+	sFormInit.width = des2126() ? DES_CENTERFORMWIDTH - (DES_3DVIEWX + des3DViewWidth() + 4) - DES_3DVIEWX
+	                  : (UWORD)(iV_GetImageWidth(IntImages, IMAGE_DES_TURRET) + 2 * DES_PARTSEPARATIONX);
 	sFormInit.height = DES_PARTFORMHEIGHT;
 	sFormInit.pDisplay = intDisplayDesignForm;
 	if (!widgAddForm(psWScreen, &sFormInit))
@@ -889,6 +989,41 @@ bool intAddDesign(bool bShowCentreScreen)
 	if (bMultiPlayer && !widgAddButton(psWScreen, &sButInit))
 	{
 		return false;
+	}
+
+	// Warzone 2126 look: the part buttons become a column of text tabs beside the preview, the
+	// warship mount grid sits where the turret tabs are, Store and Delete at the bottom
+	if (des2126())
+	{
+		WIDGET *partForm = widgGetFromID(psWScreen, IDDES_PARTFORM);
+		const int w = static_cast<int>(partForm->width()) - 8;
+		const UDWORD tabs[] = { IDDES_BODYBUTTON, IDDES_PROPBUTTON, IDDES_SYSTEMBUTTON, IDDES_WPABUTTON, IDDES_WPBBUTTON };
+		for (int k = 0; k < 5; ++k)
+		{
+			if (WIDGET *b = widgGetFromID(psWScreen, tabs[k]))
+			{
+				b->setGeometry(4, 4 + k * 26, w, 23);
+				b->displayFunction = displayPartTab2126;
+			}
+		}
+		const int cellW = (w - 3) / 2;
+		for (int i = 0; i < MAX_WEAPONS; ++i)
+		{
+			if (WIDGET *m = widgGetFromID(psWScreen, IDDES_MOUNTBUTTON0 + i))
+			{
+				m->setGeometry(4 + (i % 2) * (cellW + 3), 56 + (i / 2) * 21, cellW, 18);
+			}
+		}
+		if (WIDGET *bin = widgGetFromID(psWScreen, IDDES_BIN))
+		{
+			bin->setGeometry(4, DES_PARTFORMHEIGHT - 4 - 22, w, 22);
+			bin->displayFunction = displayPartTab2126;
+		}
+		if (WIDGET *store = widgGetFromID(psWScreen, IDDES_STOREBUTTON))
+		{
+			store->setGeometry(4, DES_PARTFORMHEIGHT - 4 - 22 - 26, w, 22);
+			store->displayFunction = displayPartTab2126;
+		}
 	}
 
 	/* add central stats form */
@@ -3144,6 +3279,12 @@ static void intSetButtonFlash(UDWORD id, bool bFlash)
 
 	ASSERT_OR_RETURN(, psWidget->type == WIDG_BUTTON, "Not a button");
 
+	if (des2126())
+	{
+		desFlash2126[id] = bFlash;
+		psWidget->displayFunction = displayPartTab2126;
+		return;
+	}
 	psWidget->displayFunction = bFlash ? intDisplayButtonFlash : intDisplayButtonHilight;
 }
 
@@ -3958,10 +4099,24 @@ static void intDisplayStatForm(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	//scale the object around the BUTTON_RADIUS so that half size objects are draw are draw 75% the size of normal objects
 	SDWORD falseScale = (DESIGN_COMPONENT_SCALE * COMPONENT_RADIUS) / templateRadius / 2 + (DESIGN_COMPONENT_SCALE / 2);
 
+	if (des2126())
+	{
+		// A flat card with the part's name over its model
+		pie_UniTransBoxFill(x0, y0, x0 + Form->width(), y0 + Form->height(), hud2126::tab());
+		iV_Box(x0, y0, x0 + Form->width() - 1, y0 + Form->height() - 1, (Form->getState() & WBUT_HIGHLIGHT) ? hud2126::accent() : hud2126::border());
+		static WzText partName;
+		// The empty parts ("ZNULL...") are not named
+		const bool none = psStats == nullptr || psStats->id.startsWith("ZNULL") || psStats->id.startsWith("Z NULL");
+		partName.setText(none ? WzString::fromUtf8(_("No part chosen")) : WzString::fromUtf8(getLocalizedStatsName(psStats)), font_small);
+		partName.render(x0 + 6, y0 + 4 - partName.aboveBase(), hud2126::value());
+	}
+	else
+	{
 	iV_DrawImage(IntImages, (UWORD)(IMAGE_DES_STATBACKLEFT), x0, y0);
 	iV_DrawImageRepeatX(IntImages, IMAGE_DES_STATBACKMID, x0 + iV_GetImageWidth(IntImages, IMAGE_DES_STATBACKLEFT), y0,
 	                    Form->width() - iV_GetImageWidth(IntImages, IMAGE_DES_STATBACKLEFT) - iV_GetImageWidth(IntImages, IMAGE_DES_STATBACKRIGHT), defaultProjectionMatrix(), true);
 	iV_DrawImage(IntImages, IMAGE_DES_STATBACKRIGHT, x0 + Form->width() - iV_GetImageWidth(IntImages, IMAGE_DES_STATBACKRIGHT), y0);
+	}
 
 	/* display current component */
 	pie_SetGeometricOffset(xOffset + psWidget->width() / 4, yOffset + psWidget->height() / 2);
@@ -3988,9 +4143,47 @@ static void intDisplayViewForm(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	int x1 = x0 + Form->width();
 	int y1 = y0 + Form->height();
 
-	RenderWindowFrame(FRAME_NORMAL, x0, y0, x1 - x0, y1 - y0);
+	if (des2126())
+	{
+		// A stage: dark shading from top to bottom and a floor grid under the vehicle
+		const int bands = 12;
+		for (int b = 0; b < bands; ++b)
+		{
+			const int ya = y0 + (y1 - y0) * b / bands, yb = y0 + (y1 - y0) * (b + 1) / bands;
+			const int c = 30 - b * 18 / bands;
+			pie_UniTransBoxFill(x0, ya, x1, yb, pal_RGBA(static_cast<UBYTE>(c - 6), static_cast<UBYTE>(c + 2), static_cast<UBYTE>(c + 10), 245));
+		}
+		const int horizon = y0 + (y1 - y0) * 52 / 100;
+		for (int k = 0; k < 7; ++k)
+		{
+			// Lines closer together towards the horizon
+			const float t = static_cast<float>(k) / 6.f;
+			const int ly = horizon + static_cast<int>((y1 - horizon) * t * t);
+			pie_UniTransBoxFill(x0 + 1, ly, x1 - 1, ly + 1, pal_RGBA(79, 179, 232, static_cast<UBYTE>(18 + 22 * t)));
+		}
+		const int cx = (x0 + x1) / 2;
+		for (int k = -6; k <= 6; ++k)
+		{
+			// Lines fanning out from the vanishing point, drawn as short steps
+			for (int step = 0; step < 16; ++step)
+			{
+				const float t0 = step / 16.f;
+				const int ly = horizon + static_cast<int>((y1 - horizon) * t0);
+				const int lx = cx + static_cast<int>(k * (x1 - x0) / 10.f * (0.15f + t0));
+				if (lx > x0 && lx < x1 - 1)
+				{
+					pie_UniTransBoxFill(lx, ly, lx + 1, ly + (y1 - horizon) / 16, pal_RGBA(79, 179, 232, static_cast<UBYTE>(14 + 24 * t0)));
+				}
+			}
+		}
+		iV_Box(x0, y0, x1 - 1, y1 - 1, hud2126::border());
+	}
+	else
+	{
+		RenderWindowFrame(FRAME_NORMAL, x0, y0, x1 - x0, y1 - y0);
+	}
 
-	pie_SetGeometricOffset((DES_CENTERFORMX + DES_3DVIEWX) + (DES_3DVIEWWIDTH / 2),
+	pie_SetGeometricOffset((DES_CENTERFORMX + DES_3DVIEWX) + (des3DViewWidth() / 2),
 	                       (DES_CENTERFORMY + DES_3DVIEWY) + (DES_3DVIEWHEIGHT / 4) + 32);
 
 	Vector3i Rotation = {-30, iRY, 0};
@@ -4018,6 +4211,11 @@ static void intDisplayDesignForm(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffse
 	int x1 = x0 + psWidget->width();
 	int y1 = y0 + psWidget->height();
 
+	if (des2126())
+	{
+		displayFlatPanel2126(x0, y0, x1, y1);
+		return;
+	}
 	RenderWindowFrame(FRAME_NORMAL, x0, y0, x1 - x0, y1 - y0);
 }
 
@@ -4235,4 +4433,5 @@ void updateStoreButton(bool isStored)
 	}
 
 	widgSetUserData2(psWScreen, IDDES_STOREBUTTON, imageset);
+	desStoredState2126 = isStored;
 }
