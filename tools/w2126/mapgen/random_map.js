@@ -495,9 +495,11 @@ const camps = [];
 // Mirrored terrain: every player's slice of the map is a copy of player 0's, turned with them (and
 // each slice is mirror-symmetric about its player's axis, so the slices join smoothly).
 // The noise is resampled from the first slice, then the height field is rebuilt from it.
+let mirrorSource = null; // kept for the erosion pass, which must stay symmetric
 if (MIRROR && PLAYERS > 1) {
 	const sector = 2 * PI / SYM;
 	const source = new Array(AREA);
+	mirrorSource = source;
 	for (let y = 0; y < N; ++y) {
 		for (let x = 0; x < N; ++x) {
 			const dx = x - C, dy = y - C;
@@ -643,6 +645,141 @@ if (RIVERS && riverRays.length) {
 		}
 	}
 }
+
+// ---------------------------------------------------------------------------------------------
+// 3b. Erosion (terrain realism D1): water running downhill cuts channels where it gathers and drops
+// what it carries where the slope eases (fans at the foot of hills, filled hollows), and loose
+// ground slides off over-steep slopes into scree. Grid based and in a fixed order, so it is
+// deterministic; mirrored maps copy the first slice back afterwards. Not on Islands (shaped by
+// hand), lighter on terraced styles so their cliffs and shelves survive.
+const EROSION = styleName === "islands" ? 0 : style.terraces >= 4 ? 0.55 : style.terraces > 0 ? 0.75 : 1;
+function erodeTerrain(strength) {
+	// Big maps erode on a half-resolution grid (the script engine is slow), and the change is
+	// added back to the full grid
+	const F = N > 192 ? 2 : 1;
+	const M = Math.floor(N / F), MA = M * M;
+	const iters = N <= 128 ? 26 : N <= 192 ? 22 : N <= 256 ? 26 : 18;
+	const Kc = 0.022 * strength * F;    // carrying capacity per sqrt(drainage) per unit slope
+	const rate = 0.32;                  // how fast the load moves towards the capacity
+	const floorE = waterLevel >= 0 ? waterLevel + 0.015 : -1; // land never cut below the water
+	const relief = Math.max(60, Math.min(486, Math.round(470 * style.relief))); // as reliefH below
+	const talus = 46 * F / relief;   // height step (per cell) above which loose ground slides
+	const steepKeep = Math.max(talus * 1.5, (style.cliff * 0.9) / relief); // cliffs stay cliffs
+	// Lakes, river channels and crossings stay as they are (land is never cut below the water,
+	// so this stays true throughout)
+	const fixedFull = (i) => (waterLevel >= 0 && elev[i] < waterLevel) || (crossing !== null && crossing[i] !== 0);
+	// (precomputed: the script engine is slow at calls in the inner loops)
+	const fx = new Array(MA).fill(0);
+	let e;
+	if (F === 1) {
+		e = elev; // worked in place (the script has a memory cap)
+		for (let i = 0; i < AREA; ++i) { fx[i] = fixedFull(i) ? 1 : 0; }
+	} else {
+		e = new Array(MA).fill(0);
+		for (let cy = 0; cy < M; ++cy) {
+			for (let cx = 0; cx < M; ++cx) {
+				let sum = 0, any = 0;
+				for (let dy = 0; dy < F; ++dy) { for (let dx = 0; dx < F; ++dx) { const i = idx(cx * F + dx, cy * F + dy); sum += elev[i]; if (fixedFull(i)) { any = 1; } } }
+				e[cy * M + cx] = sum / (F * F);
+				fx[cy * M + cx] = any;
+			}
+		}
+	}
+	const before = F === 1 ? null : e.slice();
+	const order = new Array(MA).fill(0), rec = new Array(MA).fill(-1);
+	const acc = new Array(MA).fill(0), sed = new Array(MA).fill(0); // sed doubles as the slide buffer
+	const BUCKETS = 1 << 16;
+	const count = new Array(BUCKETS + 1).fill(0);
+	const OFF = [-M - 1, -M, -M + 1, -1, 1, M - 1, M, M + 1];
+	const OFFD = [1.4142, 1, 1.4142, 1, 1, 1.4142, 1, 1.4142];
+	const bucket = (v) => BUCKETS - 1 - Math.min(BUCKETS - 1, Math.max(0, Math.floor(v * (BUCKETS - 1))));
+	for (let it = 0; it < iters; ++it) {
+		// Highest first (a counting sort on the quantised height: linear time)
+		count.fill(0);
+		for (let i = 0; i < MA; ++i) { ++count[bucket(e[i])]; }
+		for (let b = 0, run = 0; b <= BUCKETS; ++b) { const c = count[b]; count[b] = run; run += c; }
+		for (let i = 0; i < MA; ++i) { order[count[bucket(e[i])]++] = i; }
+		// Steepest way down from each cell; drainage: its own rain plus everything above it
+		for (let i = 0; i < MA; ++i) {
+			rec[i] = -1;
+			acc[i] = 1;
+			sed[i] = 0;
+			const x = i % M;
+			if (x === 0 || x === M - 1 || i < M || i >= MA - M) { continue; }
+			let best = 0;
+			const h = e[i];
+			for (let k = 0; k < 8; ++k) {
+				const sl = (h - e[i + OFF[k]]) / OFFD[k];
+				if (sl > best) { best = sl; rec[i] = k; }
+			}
+		}
+		for (let o = 0; o < MA; ++o) {
+			const i = order[o];
+			if (rec[i] >= 0) { acc[i + OFF[rec[i]]] += acc[i]; }
+		}
+		// Carry, cut and drop, from the top down
+		for (let o = 0; o < MA; ++o) {
+			const i = order[o];
+			const k = rec[i];
+			if (k < 0 || fx[i] === 1) { continue; } // lakes and sinks swallow the load
+			const r = i + OFF[k];
+			const drop = e[i] - e[r];
+			const cap = Kc * Math.sqrt(acc[i]) * (drop / OFFD[k]);
+			let load = sed[i];
+			if (load > cap) {
+				const dep = Math.min((load - cap) * rate, drop * 0.45);
+				e[i] += dep;
+				load -= dep;
+			} else {
+				let cut = Math.min((cap - load) * rate, drop * 0.35);
+				// Cliff faces wear back slowly: gullies notch them, they do not melt into slopes
+				if (drop / OFFD[k] > steepKeep) { cut *= 0.2; }
+				if (floorE >= 0) { cut = Math.min(cut, Math.max(0, e[i] - floorE)); }
+				e[i] -= cut;
+				load += cut;
+			}
+			sed[r] += load;
+		}
+		// Loose ground slides where it is steeper than the talus but not a cliff (scree aprons)
+		if (it % 2 === 1) {
+			sed.fill(0);
+			for (let y = 1; y < M - 1; ++y) {
+				for (let x = 1; x < M - 1; ++x) {
+					const i = y * M + x;
+					if (fx[i] === 1) { continue; }
+					const h = e[i];
+					for (const j of [i - 1, i + 1, i - M, i + M]) {
+						const d = h - e[j];
+						if (d > talus && d < steepKeep && fx[j] === 0) { const m = (d - talus) * 0.06; sed[i] -= m; sed[j] += m; }
+					}
+				}
+			}
+			for (let i = 0; i < MA; ++i) { e[i] = clamp(e[i] + sed[i], 0, 1); }
+		}
+	}
+	if (F > 1) {
+		// The change, sampled bilinearly back onto the full grid
+		for (let i = 0; i < MA; ++i) { e[i] -= before[i]; }
+		for (let y = 0; y < N; ++y) {
+			const fy = clamp((y + 0.5) / F - 0.5, 0, M - 1), y0 = Math.floor(fy), y1 = Math.min(M - 1, y0 + 1), ty = fy - y0;
+			for (let x = 0; x < N; ++x) {
+				const i = idx(x, y);
+				if (fixedFull(i)) { continue; }
+				const fx = clamp((x + 0.5) / F - 0.5, 0, M - 1), x0 = Math.floor(fx), x1 = Math.min(M - 1, x0 + 1), tx = fx - x0;
+				const a = e[y0 * M + x0] + (e[y0 * M + x1] - e[y0 * M + x0]) * tx;
+				const b = e[y1 * M + x0] + (e[y1 * M + x1] - e[y1 * M + x0]) * tx;
+				let v = elev[i] + a + (b - a) * ty;
+				if (floorE >= 0) { v = Math.max(v, Math.min(elev[i], floorE)); }
+				elev[i] = clamp(v, 0, 1);
+			}
+		}
+	}
+	if (mirrorSource) {
+		const copy = elev.slice();
+		for (let i = 0; i < AREA; ++i) { elev[i] = copy[mirrorSource[i]]; }
+	}
+}
+if (EROSION > 0 && OPT.erosion !== 0) { erodeTerrain(EROSION); }
 
 // ---------------------------------------------------------------------------------------------
 // 4. Flatten pads, then heights and tile categories
