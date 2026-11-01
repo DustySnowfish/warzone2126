@@ -40,6 +40,10 @@ varying vec2 texCoords;
 
 #define CLIP_FROM_TEXCOORD(t) ((t) * 2.0 - 1.0)
 
+// Aerial perspective: how far (render units, 1/e) and how strong (at most) it gets
+#define WZ2126_AERIAL_DISTANCE 13000.0
+#define WZ2126_AERIAL_STRENGTH 0.45
+
 // Distance haze: far terrain fades into the sky colour in the same direction, so the land
 // runs into the sky instead of ending in a hard (or black) edge. Display-encoded in and out.
 vec3 wzApplyHaze(vec3 encoded, vec2 t, float depth)
@@ -59,12 +63,17 @@ vec3 wzApplyHaze(vec3 encoded, vec2 t, float depth)
 	vec2 fromPivot = abs(rel.xz - hazeShape.zw);
 	float squareDistance = max(fromPivot.x, fromPivot.y);
 	float amount = smoothstep(haze.x, haze.y, squareDistance) * haze.z;
-	if (amount <= 0.0)
-	{
-		return encoded;
-	}
 	vec3 dir = normalize(rel);
+	// Warzone 2126 aerial perspective (terrain realism E3): the air between the camera and the
+	// ground scatters the sky's own colour in (blue on clear days, ochre in dust, grey in rain), more
+	// with distance, so far hills read as far instead of only the map edge fading
+	float aerial = (1.0 - exp(-length(rel) / WZ2126_AERIAL_DISTANCE)) * WZ2126_AERIAL_STRENGTH * min(haze.z, 1.0);
 	vec3 sky = wzSkyDomeColour(dir, hazeZenith.rgb, hazeHorizon.rgb, hazeGround.rgb, hazeSunDir.xyz, hazeSunColour.rgb, hazeShape.x, hazeSunColour.w, hazeShape.y);
+	// The scattered light is the sky near the horizon in that direction (looking down at the ground
+	// would otherwise pick the dark ground colour)
+	vec3 airDir = normalize(vec3(dir.x, 0.0, dir.z) + vec3(0.0, 0.05, 0.0));
+	vec3 air = wzSkyDomeColour(airDir, hazeZenith.rgb, hazeHorizon.rgb, hazeGround.rgb, hazeSunDir.xyz, hazeSunColour.rgb, hazeShape.x, hazeSunColour.w, hazeShape.y);
+	encoded = mix(encoded, air, aerial);
 	return mix(encoded, sky, amount);
 }
 
