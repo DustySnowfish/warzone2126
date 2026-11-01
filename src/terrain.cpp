@@ -34,6 +34,7 @@
 #include <string.h>
 #include <algorithm>
 #include <cmath>
+#include <chrono>
 #include <initializer_list>
 
 #include "mikktspace.h"
@@ -80,6 +81,7 @@
 #include "loop.h"
 #include "wzcrashhandlingproviders.h"
 #include "lighting.h"
+#include "visualbench.h"
 #include "scene_effect_surfaces.h"
 
 #include "profiling.h"
@@ -1683,6 +1685,60 @@ static void buildShoreField(WorldMapState& mapState, iV_Image &fields)
 	}
 }
 
+/// Warzone 2126: horizon shadowing (terrain realism E1), in the alpha of block 0 of the terrain
+/// fields texture: how much of the sun each vertex sees past the hills between it and the sun,
+/// out to about 48 tiles (well beyond the shadow maps), with a soft edge. The High terrain shader
+/// scales the sunlight by it, so a low sun throws long hill shadows across the whole map.
+/// Recomputed when the sun moves.
+static Vector3f horizonShadowSun(0.f, 0.f, 0.f);
+static void buildHorizonShadow(WorldMapState& mapState, iV_Image &fields)
+{
+	const int W = static_cast<int>(mapState.width), H = static_cast<int>(mapState.height);
+	const size_t texW = lightmapWidth, texH = lightmapHeight;
+	if (fields.width() != texW || fields.height() < texH)
+	{
+		return;
+	}
+	horizonShadowSun = getTheSun();
+	unsigned char *out = fields.bmp_w();
+	const glm::vec3 sun = glm::length(glm::vec3(horizonShadowSun.x, horizonShadowSun.y, horizonShadowSun.z)) > 0.f
+		? -glm::normalize(glm::vec3(horizonShadowSun.x, horizonShadowSun.y, horizonShadowSun.z)) : glm::vec3(0.f, 1.f, 0.f);
+	const float flat = std::sqrt(sun.x * sun.x + sun.z * sun.z);
+	const bool disabled = getenv("W2126_NO_HORIZON_SHADOW") != nullptr;
+	// Towards the sun, in tiles (render x is map x, render z is minus map y)
+	const float stepX = flat > 1e-4f ? sun.x / flat : 0.f, stepY = flat > 1e-4f ? -sun.z / flat : 0.f;
+	const float sunTan = sun.y / std::max(flat, 1e-4f);
+	auto height = [&](int x, int y) -> float {
+		return static_cast<float>(mapTile(mapState, std::max(0, std::min(W - 1, x)), std::max(0, std::min(H - 1, y)))->height);
+	};
+	static const float kDist[] = {1.5f, 2.5f, 3.5f, 5.f, 6.5f, 8.f, 10.f, 12.5f, 15.f, 18.f, 22.f, 27.f, 33.f, 40.f, 48.f};
+	for (int y = 0; y <= H && static_cast<size_t>(y) < texH; ++y)
+	{
+		for (int x = 0; x <= W && static_cast<size_t>(x) < texW; ++x)
+		{
+			float vis = 1.f;
+			if (!disabled && flat > 1e-4f && sunTan < 1.2f)
+			{
+				const float h0 = height(x, y);
+				float worst = -1e9f;
+				for (const float d : kDist)
+				{
+					const float sx = x + stepX * d, sy = y + stepY * d;
+					if (sx < 0.f || sy < 0.f || sx > W || sy > H)
+					{
+						break;
+					}
+					const float t = (height(static_cast<int>(std::lround(sx)), static_cast<int>(std::lround(sy))) - h0) / (d * TILE_UNITS);
+					worst = std::max(worst, t);
+				}
+				// Soft edge: the sun is a disc, and the height grid is coarse
+				vis = 1.f - smoothstep2126(-0.04f, 0.06f, worst - std::max(sunTan, 0.f));
+			}
+			out[(static_cast<size_t>(y) * texW + x) * 4 + 3] = static_cast<unsigned char>(std::lround(vis * 255.f));
+		}
+	}
+}
+
 /**
  * Check what the videocard + drivers support and divide the loaded map into sectors that can be drawn.
  * It also determines the lightmap size.
@@ -2070,6 +2126,7 @@ bool initTerrain(WorldMapState& mapState)
 	}
 	buildGroundMasks(mapState, *deformPixmap);
 	buildShoreField(mapState, *deformPixmap);
+	buildHorizonShadow(mapState, *deformPixmap);
 	delete deform_texture;
 	deform_texture = gfx_api::context::get().create_texture(1, deformPixmap->width(), deformPixmap->height(), deformPixmap->pixel_format(), "mem::terraindeform");
 	deform_texture->upload(0, *(deformPixmap.get()));
@@ -2539,8 +2596,16 @@ void perFrameTerrainUpdates(WorldMapState& mapState, const LightMap& lightMap)
 	}
 
 	// Warzone 2126: crater depth texture, refreshed when the ground changes (and at most as often as the lightmap)
-	if (deform_texture && deformPixmap && terrain_deform::changeCount() != deformChangeSeen && realTime - lightmapLastUpdate < LIGHTMAP_REFRESH / 2)
+	// (and the horizon shadows when the sun has moved)
+	const bool sunMoved = getTheSun() != horizonShadowSun;
+	if (deform_texture && deformPixmap && (terrain_deform::changeCount() != deformChangeSeen || sunMoved) && realTime - lightmapLastUpdate < LIGHTMAP_REFRESH / 2)
 	{
+		if (sunMoved)
+		{
+			const auto start = std::chrono::steady_clock::now();
+			buildHorizonShadow(mapState, *deformPixmap);
+			visualBenchAddCpuMs("horizonShadow", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - start).count());
+		}
 		deformChangeSeen = terrain_deform::changeCount();
 		unsigned char* px = deformPixmap->bmp_w();
 		for (int j = 0; j < mapState.height; ++j)

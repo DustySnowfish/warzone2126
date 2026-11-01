@@ -132,6 +132,8 @@ vec4 doBumpMapping(BumpData b, vec3 groundLightDir, vec3 groundHalfVec) {
 	float diffuseFactor = lambertTerm(b.N, L); // diffuse lighting
 	float visibility = getShadowVisibility(posModelSpace, posViewSpace, diffuseFactor, 0.001f);
 	diffuseFactor = min(diffuseFactor, visibility*diffuseFactor);
+	// Warzone 2126: hills between here and a low sun (terrain realism E1; fields block 0 alpha)
+	diffuseFactor *= texture(terrainDeform, vec2(uvLightmap.x, uvLightmap.y * 0.25), 0.f).a;
 
 	float specularFactor = blinnTerm(b.N, normalize(groundHalfVec), b.gloss, 16.f);
 

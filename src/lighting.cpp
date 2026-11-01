@@ -40,7 +40,10 @@
 #include "lighting.h"
 #include "visualbench.h"
 
+#include <algorithm>
 #include <chrono>
+#include <cmath>
+#include <vector>
 #include "display3d.h"
 #include "terrain.h"
 #include "warzoneconfig.h"
@@ -57,6 +60,57 @@ static Vector3f theSun_ForTileIllumination(0.f, 0.f, 0.f);
 static UDWORD calcDistToTile(UDWORD tileX, UDWORD tileY, Vector3i *pos);
 static void calcTileIllum(UDWORD tileX, UDWORD tileY);
 
+// Warzone 2126: large-scale ambient occlusion (terrain realism E1). The classic occlusion looks
+// about 7 tiles out; valleys, canyons and the foot of big hills also lose sky over 8 to 34 tiles.
+// The whole occlusion term does not depend on the sun, so it is cached per tile: a sun move (the
+// day cycle) only redoes the sun term, instead of all the occlusion rays on every tile.
+static bool sunRelight2126 = false;
+static std::vector<float> aoCache2126; // < 0: not computed yet
+static int aoCacheW2126 = -1, aoCacheH2126 = -1;
+
+static float computeLargeAO2126(const WorldMapState& mapState, int tileX, int tileY)
+{
+	const int W = mapState.width, H = mapState.height;
+	auto height = [&](int x, int y) -> float {
+		return static_cast<float>(mapState.tiles[std::max(0, std::min(W - 1, x)) + std::max(0, std::min(H - 1, y)) * W].height);
+	};
+	static const float kDist[] = {8.f, 11.f, 15.f, 20.f, 26.f, 34.f};
+	constexpr int Dirs = 8;
+	constexpr float D = 0.70710678f;
+	constexpr float dx[Dirs] = {0, D, 1, D, 0, -D, -1, -D};
+	constexpr float dy[Dirs] = {1, D, 0, -D, -1, -D, 0, D};
+	const float h0 = height(tileX, tileY);
+	float open = 0.f;
+	for (int dir = 0; dir < Dirs; ++dir)
+	{
+		float maxTangent = 0.f;
+		for (const float d : kDist)
+		{
+			const int sx = static_cast<int>(std::lround(tileX + dx[dir] * d)), sy = static_cast<int>(std::lround(tileY + dy[dir] * d));
+			maxTangent = std::max(maxTangent, (height(sx, sy) - h0) / (d * TILE_UNITS));
+		}
+		open += 1.f - maxTangent / std::sqrt(maxTangent * maxTangent + 1.f);
+	}
+	open /= Dirs;
+	// Gentler than the near occlusion: a deep valley loses up to 40% of its sky light
+	return std::max(0.6f, 1.f - (1.f - open) * 1.6f);
+}
+
+/// The cached occlusion of a tile, or a negative value when it must be computed
+static float cachedAO2126(int tileX, int tileY)
+{
+	if (aoCacheW2126 != gameWorld.map.width || aoCacheH2126 != gameWorld.map.height)
+	{
+		aoCacheW2126 = gameWorld.map.width;
+		aoCacheH2126 = gameWorld.map.height;
+		aoCache2126.assign(static_cast<size_t>(aoCacheW2126) * aoCacheH2126, -1.f);
+		return -1.f;
+	}
+	// Recomputed whenever the lighting is set up for another reason than the sun (a new map, new
+	// scroll limits), since the ground may have changed
+	return sunRelight2126 ? aoCache2126[static_cast<size_t>(tileX) + static_cast<size_t>(tileY) * aoCacheW2126] : -1.f;
+}
+
 
 
 void setTheSun(Vector3f newSun)
@@ -68,7 +122,9 @@ void setTheSun(Vector3f newSun)
 	{
 		// The sun has changed - must relcalulate lighting
 		const auto relightStart = std::chrono::steady_clock::now();
+		sunRelight2126 = true; // (the large-scale occlusion does not depend on the sun: kept)
 		initLighting(gameWorld.map, 0, 0, gameWorld.map.width, gameWorld.map.height);
+		sunRelight2126 = false;
 		visualBenchAddCpuMs("tileRelight", std::chrono::duration<double, std::milli>(std::chrono::steady_clock::now() - relightStart).count());
 	}
 }
@@ -240,27 +296,33 @@ static void calcTileIllum(UDWORD tileX, UDWORD tileY)
 	float dotProduct = glm::dot(normalise(finalVector), theSun_ForTileIllumination)/16;
 
 	// Primitive ambient occlusion calculation.
-	float ao = 0;
-	const int cx = world_coord(tileX), cy = world_coord(tileY), maxX = world_coord(gameWorld.map.width), maxY = world_coord(gameWorld.map.height);
-	float height = map_Height(gameWorld.map, clip<int>(cx, 0, maxX), clip<int>(cy, 0, maxY));
-	constexpr float I = 100;
-	constexpr float H = I*0.70710678118654752440f;  // √½
-	constexpr int Dirs = 8;
-	constexpr float dx[Dirs] = {0, H, I,  H,  0, -H, -I, -H};  // I sin(2π dir/Dirs)
-	constexpr float dy[Dirs] = {I, H, 0, -H, -I, -H,  0,  H};  // I cos(2π dir/Dirs)
+	float ao = cachedAO2126(static_cast<int>(tileX), static_cast<int>(tileY));
+	if (ao < 0.f)
+	{
+		ao = 0;
+		const int cx = world_coord(tileX), cy = world_coord(tileY), maxX = world_coord(gameWorld.map.width), maxY = world_coord(gameWorld.map.height);
+		float height = map_Height(gameWorld.map, clip<int>(cx, 0, maxX), clip<int>(cy, 0, maxY));
+		constexpr float I = 100;
+		constexpr float H = I*0.70710678118654752440f;  // √½
+		constexpr int Dirs = 8;
+		constexpr float dx[Dirs] = {0, H, I,  H,  0, -H, -I, -H};  // I sin(2π dir/Dirs)
+		constexpr float dy[Dirs] = {I, H, 0, -H, -I, -H,  0,  H};  // I cos(2π dir/Dirs)
 
-	for (int dir = 0; dir < Dirs; ++dir) {
-		float maxTangent = 0;
-		for (int dist = 1; dist < 9; ++dist) {
-			float tangent = (map_Height(gameWorld.map, clip<int>(static_cast<int>(cx + dx[dir]*dist), 0, maxX), clip<int>(static_cast<int>(cy + dy[dir]*dist), 0, maxY)) - height)/(I*dist);
-			maxTangent = std::max(maxTangent, tangent);
+		for (int dir = 0; dir < Dirs; ++dir) {
+			float maxTangent = 0;
+			for (int dist = 1; dist < 9; ++dist) {
+				float tangent = (map_Height(gameWorld.map, clip<int>(static_cast<int>(cx + dx[dir]*dist), 0, maxX), clip<int>(static_cast<int>(cy + dy[dir]*dist), 0, maxY)) - height)/(I*dist);
+				maxTangent = std::max(maxTangent, tangent);
+			}
+			// Ambient light in this direction is proportional to the integral from tan(φ) = tangent to tan(φ) = ∞ of dφ cos(φ).
+			// Indefinite integral is sin(φ), so definite integral is 1 - sin(atan(tangent)) = 1 - tangent/√(tangent² + 1).
+			ao += 1 - maxTangent/sqrtf(maxTangent*maxTangent + 1);
 		}
-		// Ambient light in this direction is proportional to the integral from tan(φ) = tangent to tan(φ) = ∞ of dφ cos(φ).
-		// Indefinite integral is sin(φ), so definite integral is 1 - sin(atan(tangent)) = 1 - tangent/√(tangent² + 1).
-		ao += 1 - maxTangent/sqrtf(maxTangent*maxTangent + 1);
+		ao *= 1.f/Dirs;
+		ao *= computeLargeAO2126(gameWorld.map, static_cast<int>(tileX), static_cast<int>(tileY));
+		ao = clip<float>(ao, 0.25f, 1.f);
+		aoCache2126[static_cast<size_t>(tileX) + static_cast<size_t>(tileY) * aoCacheW2126] = ao;
 	}
-	ao *= 1.f/Dirs;
-	ao = clip<float>(ao, 0.25f, 1.f);
 
 	MAPTILE *tile = mapTile(gameWorld.map, tileX, tileY);
 	tile->illumination = static_cast<uint8_t>(clip<int>(static_cast<int>(abs(dotProduct*ao)), 24, 254));
