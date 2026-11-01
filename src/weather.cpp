@@ -483,6 +483,11 @@ float intensity()
 	return s.level;
 }
 
+float rainFalling()
+{
+	return s.type == Type::Rain ? s.level : 0.f;
+}
+
 void setForced(int type, float level)
 {
 	forcedType = type;

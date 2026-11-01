@@ -82,7 +82,45 @@ float wz2126WaterNoise(vec2 p)
 	return mix(mix(wz2126WaterHash(i), wz2126WaterHash(i + vec2(1.0, 0.0)), u.x), mix(wz2126WaterHash(i + vec2(0.0, 1.0)), wz2126WaterHash(i + vec2(1.0, 1.0)), u.x), u.y);
 }
 
-vec4 wz2126WaterShade(vec3 N, vec3 V, vec3 L, float d, vec3 pos, float t, float sunVis, float texNoise, float envOn, vec3 ambient, vec3 diffuse, vec3 specular)
+// Raindrop rings: each cell of a grid gets a drop at a random moment in a short cycle; its ring
+// spreads and fades. Returns a model-space normal tilt (xz).
+float wz2126RainRingLight = 0.0; // brightness of the ring crests (set by wz2126RainRipples)
+vec2 wz2126RainRipples(vec2 p, float t, float rain)
+{
+	vec2 tilt = vec2(0.0);
+	wz2126RainRingLight = 0.0;
+	for (int layer = 0; layer < 2; ++layer)
+	{
+		float cellSize = layer == 0 ? 22.0 : 15.0;
+		vec2 q = p / cellSize + vec2(float(layer) * 0.37, float(layer) * 0.71);
+		vec2 cell = floor(q);
+		for (int j = -1; j <= 1; ++j)
+		{
+			for (int i = -1; i <= 1; ++i)
+			{
+				vec2 c = cell + vec2(float(i), float(j));
+				vec2 centre = c + vec2(wz2126WaterHash(c), wz2126WaterHash(c + 13.7)) * 0.8 + 0.1;
+				float period = 1.1 + wz2126WaterHash(c + 5.3) * 0.6;
+				float phaseT = fract(t / period + wz2126WaterHash(c + 2.9));
+				// only some cells drop each cycle, more in heavier rain
+				if (wz2126WaterHash(c + floor(t / period) * 0.17) > rain)
+				{
+					continue;
+				}
+				vec2 d = q - centre;
+				float r = length(d);
+				float ring = phaseT * 0.9;
+				float w = r - ring;
+				float wave = sin(w * 40.0) * exp(-w * w * 120.0) * (1.0 - phaseT);
+				tilt += (d / max(r, 1e-3)) * wave * 0.35;
+				wz2126RainRingLight += max(wave, 0.0);
+			}
+		}
+	}
+	return tilt;
+}
+
+vec4 wz2126WaterShade(vec3 N, vec3 V, vec3 L, float d, vec3 pos, float t, float sunVis, float texNoise, float envOn, vec3 ambient, vec3 diffuse, vec3 specular, float rain)
 {
 	float dist = length(cameraPos.xyz - pos);
 	// Slow swells under the ripples
@@ -95,6 +133,11 @@ vec4 wz2126WaterShade(vec3 N, vec3 V, vec3 L, float d, vec3 pos, float t, float 
 	float rough = mix(0.3, 1.15, smoothstep(0.25, 0.75, gust));
 	N = normalize(vec3(N.x * rough, N.y, N.z * rough));
 	N = normalize(mix(N, vec3(0.0, 1.0, 0.0), smoothstep(2500.0, 14000.0, dist) * 0.7));
+	if (rain > 0.02 && dist < 5000.0)
+	{
+		vec2 drops = wz2126RainRipples(pos.xz, t, rain) * (1.0 - smoothstep(2500.0, 5000.0, dist));
+		N = normalize(N + vec3(drops.x, 0.0, drops.y));
+	}
 	float NdotV = clamp(dot(N, V), 0.0, 1.0);
 	float fres = clamp((0.05 + 0.95 * pow(1.0 - NdotV, 3.0)) * 1.1, 0.0, 1.0); // (stronger than physical: reads at RTS camera angles)
 
@@ -114,6 +157,8 @@ vec4 wz2126WaterShade(vec3 N, vec3 V, vec3 L, float d, vec3 pos, float t, float 
 	vec3 col = mix(body, sky, fres);
 	alpha += (1.0 - alpha) * fres;
 
+	// Raindrop ring crests catch the light
+	col += (ambient + diffuse * 0.5) * min(wz2126RainRingLight, 1.0) * 0.4 * rain;
 	vec3 H = normalize(L + V);
 	float NdotH = max(dot(N, H), 0.0);
 	float glint = (pow(NdotH, 1200.0) * 3.5 + pow(NdotH, 140.0) * 0.18) * sunVis * step(0.0, L.y);

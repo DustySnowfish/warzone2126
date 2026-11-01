@@ -57,7 +57,7 @@ vec4 main_bumpMapping()
 	float diffuseFactor = lambertTerm(N, lightDir);
 	float visibility = getShadowVisibility(frag.posModelSpace, frag.posViewSpace, max(diffuseFactor, 0.05), 0.0f);
 	vec4 finalColor = wz2126WaterShade(N, normalize(eyeVec), normalize(lightDir), waterDepth, frag.posModelSpace, timeSec, visibility,
-		clamp(sqrt(max(noise, 0.0)) * 1.4, 0.0, 1.0), envOn, ambientLight.rgb, diffuseLight.rgb, specularLight.rgb);
+		clamp(sqrt(max(noise, 0.0)) * 1.4, 0.0, 1.0), envOn, ambientLight.rgb, diffuseLight.rgb, specularLight.rgb, rainOnWater);
 
 	vec4 lightmap = texture(lightmap_tex, uvLightmap, 0.0);
 	finalColor.rgb = blendAddEffectLighting(finalColor.rgb, (lightmap.rgb / 1.5f)); // additive color (from environmental point lights / effects)

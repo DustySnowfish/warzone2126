@@ -21,7 +21,7 @@ layout(std140, set = 0, binding = 0) uniform cbuffer {
 	int viewportHeight;
 	int bucketDimensionUsed;
 	float envOn; // Warzone 2126: 1 when TextureEnvironment holds the map environment
-	float pad2;
+	float rainOnWater; // Warzone 2126: how hard rain is falling (raindrop rings), 0..1
 	// Last because its length follows the grid dimension
 	ivec4 bucketOffsetAndSize[WZ_BUCKET_DIMENSION * WZ_BUCKET_DIMENSION];
 };

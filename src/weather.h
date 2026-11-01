@@ -51,6 +51,9 @@ glm::vec3 lightTint(LIGHTING_TYPE light);
 /// Current storm strength, 0..1 (for logs and benchmarks).
 float intensity();
 
+/// How hard rain is falling now, 0..1 (0 when the weather is not rain): raindrop rings on water.
+float rainFalling();
+
 /// Forget the current weather (level change).
 void reset();
 

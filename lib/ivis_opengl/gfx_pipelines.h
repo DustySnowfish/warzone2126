@@ -475,8 +475,8 @@ namespace gfx_api
 		int viewportWidth;
 		int viewportHeight;
 		int bucketDimensionUsed;
-		float pad1 = 0.f;
-		float pad2 = 0.f;
+		float pad1 = 0.f; // (Warzone 2126: envOn)
+		float pad2 = 0.f; // (Warzone 2126: rainOnWater)
 		// The bucket table is last because its length follows the grid dimension, which may become variable.
 		// (Anything placed after it would shift whenever that changed.)
 		std::array<glm::ivec4, max_bucket_dimension * max_bucket_dimension> bucketOffsetAndSize;
