@@ -1187,8 +1187,12 @@ function tileCat(t) { return TS.types[t] === 8 ? CLIFF : TS.types[t] === 7 ? WAT
 const byKey = [{}, {}, {}];      // category -> key -> [codes] (plain tiles)
 const byKeyDecal = [{}, {}, {}]; // same for decal tiles
 const allOfCat = [[], [], []];
+// Land tiles whose pictures are mostly transparent overlay art (a snow blob, broken edges): as
+// plain ground they showed as a grid of spots, so they are never placed
+const OVERLAY_TILES = { arizona: [30, 31, 32, 33], urban: [23, 24, 25, 26], rockie: [31, 32, 33, 73, 75] }[TS.name] || [];
 for (let t = 0; t < TS.tiles.length; ++t) {
 	const c = tileCat(t);
+	if (c === LAND && OVERLAY_TILES.indexOf(t) >= 0) { continue; }
 	for (let o = 0; o < 8; ++o) {
 		const code = t | ((o & 3) << ROTSHIFT) | (o >= 4 ? XFLIP : 0);
 		const key = tileKey(code);

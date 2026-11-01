@@ -1442,6 +1442,27 @@ static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 	};
 	auto vertexGround = [&](int x, int y) -> unsigned { return clampTile(x, y)->ground; };
 
+	std::vector<uint8_t> isolated(count, 0);
+	for (int y = 0; y <= H; ++y)
+	{
+		for (int x = 0; x <= W; ++x)
+		{
+			const unsigned own = vertexGround(x, y);
+			bool alone = true;
+			for (int dy = -1; dy <= 1 && alone; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					if ((dx || dy) && x + dx >= 0 && y + dy >= 0 && x + dx <= W && y + dy <= H && vertexGround(x + dx, y + dy) == own)
+					{
+						alone = false;
+						break;
+					}
+				}
+			}
+			isolated[at(x, y)] = alone ? 1 : 0;
+		}
+	}
 	std::vector<std::vector<float>> masks(numGrounds, std::vector<float>(count));
 	std::vector<float> tmp(count);
 	for (size_t g = 0; g < numGrounds; ++g)
@@ -1468,9 +1489,12 @@ static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 			for (int x = 0; x <= W; ++x)
 			{
 				const float blurred = (tmp[at(x, std::max(0, y - 1))] + 4.f * tmp[at(x, y)] + tmp[at(x, std::min(H, y + 1))]) / 6.f;
-				// The vertex's own ground keeps most of its weight there, so isolated patches stay
-				// as small rounded blobs instead of being blurred away
-				field[at(x, y)] = vertexGround(x, y) == g ? 1.f : blurred * 0.7f;
+				// An isolated vertex (no neighbour of the same ground) keeps most of its ground's
+				// weight, so lone patches stay as small rounded blobs instead of being blurred away.
+				// Grounds dithered vertex by vertex (several Rockies tiles) blend instead; boosting
+				// them turned the mix into a grid of dots.
+				const size_t i = at(x, y);
+				field[i] = isolated[i] ? (vertexGround(x, y) == g ? 1.f : blurred * 0.7f) : blurred;
 			}
 		}
 	}
