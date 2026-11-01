@@ -245,7 +245,7 @@ vec4 main_bumpMapping() {
 			bump.gloss = mix(bump.gloss, 0.6, wetBand * k * 0.5);
 			// Under water: the bed fades towards the water colour with depth
 			float under = smoothstep(0.0, 120.0, -above) * k;
-			bump.color.rgb = mix(bump.color.rgb, bump.color.rgb * vec3(0.64, 0.78, 0.82), under);
+			bump.color.rgb = mix(bump.color.rgb, bump.color.rgb * vec3(0.82, 0.95, 0.95), under);
 		}
 	}
 	// Warzone 2126 weather: wet ground darkens and shines (most in hollows); snow settles on flat ground

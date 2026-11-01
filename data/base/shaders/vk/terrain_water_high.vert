@@ -13,9 +13,11 @@ layout(location = 6) out vec3 eyeVec;
 layout(location = 7) out float fresnel;
 layout(location = 8) out float fresnel_alpha;
 layout(location = 9) out FragData frag;
+layout(location = 11) out float waterDepth; // Warzone 2126: water depth here (world units)
 
 void main()
 {
+	waterDepth = vertex.w;
 	depth = (vertex.w)/96.0;
 	depth = 1.0-(clamp(depth, -1.0, 1.0)*0.5+0.5);
 

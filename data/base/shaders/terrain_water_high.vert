@@ -22,6 +22,7 @@ VERTEX_INPUT vec4 vertex; // w is depth
 VERTEX_OUTPUT vec4 uv1_uv2;
 VERTEX_OUTPUT vec2 uvLightmap;
 VERTEX_OUTPUT float depth;
+VERTEX_OUTPUT float waterDepth; // Warzone 2126: water depth here (world units)
 // light in modelSpace:
 VERTEX_OUTPUT vec3 lightDir;
 VERTEX_OUTPUT vec3 eyeVec;
@@ -35,6 +36,7 @@ VERTEX_OUTPUT vec3 posViewSpace;
 
 void main()
 {
+	waterDepth = vertex.w;
 	depth = (vertex.w)/96.0;
 	depth = 1.0-(clamp(depth, -1.0, 1.0)*0.5+0.5);
 

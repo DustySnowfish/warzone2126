@@ -26,6 +26,7 @@ layout(location = 6) in vec3 eyeVec;
 layout(location = 7) in float fresnel;
 layout(location = 8) in float fresnel_alpha;
 layout(location = 9) in FragData frag;
+layout(location = 11) in float waterDepth;
 
 layout(location = 0) out vec4 FragColor;
 
@@ -36,7 +37,7 @@ layout(location = 0) out vec4 FragColor;
 #include "water_2126.glsl"
 
 vec3 blendAddEffectLighting(vec3 a, vec3 b) {
-	return min(a + b, vec3(1.0));
+	return a + b; // (Warzone 2126: not clamped, so sun glints can bloom)
 }
 
 vec4 main_bumpMapping()
@@ -46,38 +47,17 @@ vec4 main_bumpMapping()
 
 	vec3 N = wzWaterModelNormal(tex_nm, uv1, uv2, timeSec, WZ_MIP_LOAD_BIAS);
 
-	// Textures
-	float d = mix(depth * 0.1, depth, 0.5);
 	float noise = texture(tex, vec3(uv1, 0.0), WZ_MIP_LOAD_BIAS).r * texture(tex, vec3(uv2, 1.0), WZ_MIP_LOAD_BIAS).r;
-	float foam = texture(tex_sm, vec3(vec2(uv1.x, uv1.y), 0.0), WZ_MIP_LOAD_BIAS).r;
-	foam *= texture(tex_sm, vec3(vec2(uv2.x, uv2.y), 1.0), WZ_MIP_LOAD_BIAS).r;
-	foam = (foam+pow(length(N.xz),2.5)*1000.0)*d*d ;
-	foam = clamp(foam, 0.0, 0.2);
 	vec3 waterColor = vec3(0.18,0.33,0.42);
 	// Water is a mirror rather than a rough surface, so a point light on it should be mostly highlight.
 	// (But capped to keep the broader shape from washing out.)
 	const float waterGloss = 0.5f;
 
-	// Light
+	// Warzone 2126: the surface from the true depth (water_2126.glsl)
 	float diffuseFactor = lambertTerm(N, lightDir);
-	float visibility = getShadowVisibility(frag.posModelSpace, frag.posViewSpace, diffuseFactor, 0.0f);
-	diffuseFactor = min(diffuseFactor, visibility*diffuseFactor);
-	float specularFactor = blinnTerm(N, halfVec, 0.f, 128.f);
-	vec3 reflectLight = reflect(-lightDir, N);
-	float r = pow(max(dot(reflectLight, halfVec), 0.0), 14.0);
-	specularFactor = (specularFactor + r) * 0.5;
-
-	vec4 ambientColor = vec4(ambientLight.rgb * foam, 0.15);
-	vec4 diffuseColor = vec4(diffuseLight.rgb * diffuseFactor * waterColor+noise*noise*0.5, 0.35);
-	vec4 specColor = vec4(specularLight.rgb * specularFactor * diffuseFactor, fresnel_alpha);
-
-	vec4 finalColor = vec4(0.0);
-	finalColor.rgb = ambientColor.rgb + diffuseColor.rgb + specColor.rgb;
-	finalColor.rgb = mix(finalColor.rgb, (finalColor.rgb+vec3(1.0,0.8,0.63))*0.5, fresnel);
-	finalColor.a = (ambientColor.a + diffuseColor.a + specColor.a) * (1.0-depth);
-
-	// Warzone 2126: sky reflection and shoreline foam
-	finalColor = wz2126WaterSurface(finalColor, N, normalize(eyeVec), depth, sqrt(max(noise, 0.0)) * 1.4, envOn, min((ambientLight.rgb + diffuseLight.rgb) * 0.9, vec3(1.0)));
+	float visibility = getShadowVisibility(frag.posModelSpace, frag.posViewSpace, max(diffuseFactor, 0.05), 0.0f);
+	vec4 finalColor = wz2126WaterShade(N, normalize(eyeVec), normalize(lightDir), waterDepth, frag.posModelSpace, timeSec, visibility,
+		clamp(sqrt(max(noise, 0.0)) * 1.4, 0.0, 1.0), envOn, ambientLight.rgb, diffuseLight.rgb, specularLight.rgb);
 
 	vec4 lightmap = texture(lightmap_tex, uvLightmap, 0.0);
 	finalColor.rgb = blendAddEffectLighting(finalColor.rgb, (lightmap.rgb / 1.5f)); // additive color (from environmental point lights / effects)
