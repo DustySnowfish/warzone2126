@@ -1635,7 +1635,7 @@ void osSpecificPostInit_Win()
 	std::string wineHostPlatform;
 	if (winCheckIfRunningUnderWine(&wineInfoStr, &wineHostPlatform))
 	{
-		const char* pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nA native version for your platform is likely available (and will perform better).\n\nPlease visit: https://wz2100.net";
+		const char* pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2126 under Wine.\n\nA native version for your platform is likely available (and will perform better).\n\nPlease visit: https://github.com/DustySnowfish/warzone2126";
 		std::string platformSimple;
 		// Display a messagebox that a native version is available for this platform
 		if (!wineHostPlatform.empty())
@@ -1644,19 +1644,19 @@ void osSpecificPostInit_Win()
 			{
 				// macOS
 				platformSimple = "macOS";
-				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nA native version for macOS is available.\n\nPlease visit: https://wz2100.net";
+				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2126 under Wine.\n\nA native version for macOS is available.\n\nPlease visit: https://github.com/DustySnowfish/warzone2126";
 			}
 			if (strncasecmp(wineHostPlatform.c_str(), "Linux", std::min<size_t>(wineHostPlatform.size(), strlen("Linux"))) == 0)
 			{
 				// Linux
 				platformSimple = "Linux";
-				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nNative builds for Linux are available.\n\nPlease visit: https://wz2100.net";
+				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2126 under Wine.\n\nNative builds for Linux are available.\n\nPlease visit: https://github.com/DustySnowfish/warzone2126";
 			}
 		}
 
-		wzDisplayDialog(Dialog_Information, "Warzone 2100 under Wine", pWineNativeAvailableMsg);
+		wzDisplayDialog(Dialog_Information, "Warzone 2126 under Wine", pWineNativeAvailableMsg);
 
-		std::string url = "https://warzone2100.github.io/update-data/redirect/wine.html";
+		std::string url = "https://github.com/DustySnowfish/warzone2126/releases"; // (Warzone 2126: its own releases page)
 		std::string queryString;
 		if (!platformSimple.empty())
 		{

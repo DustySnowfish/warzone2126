@@ -152,32 +152,36 @@ static void moveToParentRightEdge(WIDGET *widget, int32_t right)
 
 // ////////////////////////////////////////////////////////////////////////////
 // Title Screen
+// Warzone 2126: the project's own page, and Warzone 2100's (which it is built on, and which still
+// hosts the campaign videos)
+#define W2126_PROJECT_URL "https://github.com/DustySnowfish/warzone2126"
+#define W2126_RELEASES_URL W2126_PROJECT_URL "/releases"
+#define WZ2100_SITE_URL "https://wz2100.net/"
+
 static void runUpgrdHyperlink()
 {
-	std::string link = "https://wz2100.net/versioncheck/?ver=";
-	std::string version = version_getVersionString();
-	std::string versionStr;
-	for (char ch : version)
-	{
-		versionStr += (ch == ' ') ? '_' : ch;
-	}
-	link += urlEncode(versionStr.c_str());
-	openURLInBrowser(link.c_str());
+	openURLInBrowser(W2126_RELEASES_URL);
 }
 
 static void runHyperlink()
 {
-	openURLInBrowser("https://wz2100.net/");
+	openURLInBrowser(W2126_PROJECT_URL);
 }
 
 static void rundonatelink()
 {
-	openURLInBrowser("http://donations.wz2100.net/");
+	// (the second link on the main menu: credit to Warzone 2100)
+	openURLInBrowser(WZ2100_SITE_URL);
+}
+
+static void runVideosLink2126()
+{
+	openURLInBrowser(WZ2100_SITE_URL);
 }
 
 static void runchatlink()
 {
-	openURLInBrowser("https://wz2100.net/webchat/");
+	openURLInBrowser(W2126_PROJECT_URL "/issues");
 }
 
 const char * VIDEO_TAG = "videoMissing";
@@ -197,7 +201,7 @@ void notifyAboutMissingVideos()
 		notification.tag = VIDEO_TAG;
 		notification.largeIcon = WZ_Notification_Image("images/notifications/exclamation_triangle.png");
 		notification.action = WZ_Notification_Action("Open wz2100.net", [](const WZ_Notification&) {
-			runHyperlink();
+			runVideosLink2126(); // (the campaign videos are Warzone 2100's)
 		});
 		notification.displayOptions = WZ_Notification_Display_Options::makeIgnorable("campaignVideoNotification", 2);
 
@@ -248,19 +252,19 @@ void startTitleMenu()
 	addTextButton(FRONTEND_QUIT, FRONTEND_POS8X, FRONTEND_POS8Y, _("Quit Game"), WBUT_TXTCENTRE);
 	addSideText(FRONTEND_SIDETEXT, FRONTEND_SIDEX, FRONTEND_SIDEY, _("MAIN MENU"));
 
-	addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Official site: http://wz2100.net/"), 0);
-	widgSetTip(psWScreen, FRONTEND_HYPERLINK, _("Come visit the forums and all Warzone 2100 news! Click this link."));
-	W_BUTTON * pRightAlignedButton = addSmallTextButton(FRONTEND_DONATELINK, FRONTEND_POS9X + 360, FRONTEND_POS9Y, _("Donate: http://donations.wz2100.net/"), 0);
+	addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Warzone 2126 on GitHub"), 0);
+	widgSetTip(psWScreen, FRONTEND_HYPERLINK, _("The project page: source code, releases and issues. Click this link."));
+	W_BUTTON * pRightAlignedButton = addSmallTextButton(FRONTEND_DONATELINK, FRONTEND_POS9X + 360, FRONTEND_POS9Y, _("Based on Warzone 2100"), 0);
 	moveToParentRightEdge(pRightAlignedButton, 1);
 	if (frontendSlimMenu2126())
 	{
 		// No room for both links on one line in the slim panel
 		pRightAlignedButton->move(widgGetFromID(psWScreen, FRONTEND_HYPERLINK)->x(), FRONTEND_POS9Y + 17);
 	}
-	widgSetTip(psWScreen, FRONTEND_DONATELINK, _("Help support the project with our server costs, Click this link."));
-	pRightAlignedButton = addSmallTextButton(FRONTEND_CHATLINK, FRONTEND_POS9X + 360, 0, _("Chat with players on Discord or IRC"), 0);
+	widgSetTip(psWScreen, FRONTEND_DONATELINK, _("Warzone 2126 is built on the open-source Warzone 2100 (wz2100.net). Click this link."));
+	pRightAlignedButton = addSmallTextButton(FRONTEND_CHATLINK, FRONTEND_POS9X + 360, 0, _("Feedback and bug reports"), 0);
 	moveToParentRightEdge(pRightAlignedButton, 6);
-	widgSetTip(psWScreen, FRONTEND_CHATLINK, _("Connect to Discord or Freenode through webchat by clicking this link."));
+	widgSetTip(psWScreen, FRONTEND_CHATLINK, _("Report a bug or suggest something on the project page. Click this link."));
 	addMultiBut(psWScreen, FRONTEND_BOTFORM, FRONTEND_UPGRDLINK, 7, 7, MULTIOP_BUTW, MULTIOP_BUTH, _("Check for a newer version"), IMAGE_GAMEVERSION, IMAGE_GAMEVERSION_HI, true);
 }
 
@@ -410,7 +414,7 @@ void startSinglePlayerMenu()
 	// show this only when the video sequences are not installed
 	if (!seq_hasVideos())
 	{
-		addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Campaign videos are missing! Get them from http://wz2100.net"), 0);
+		addSmallTextButton(FRONTEND_DONATELINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Campaign videos are missing! Get them from http://wz2100.net"), 0); // (opens wz2100.net)
 	}
 }
 

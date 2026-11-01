@@ -179,7 +179,7 @@ void SetStdOutToConsole_Win()
 		}
 
 		// give the new console window a nicer title
-		SetConsoleTitleW(L"Warzone 2100");
+		SetConsoleTitleW(L"Warzone 2126");
 	}
 
 	SetConsoleOutputCP(CP_UTF8);

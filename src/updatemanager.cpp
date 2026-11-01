@@ -1087,6 +1087,16 @@ void WzInfoManager::initialize()
 		}
 	}
 
+	// Warzone 2126: the update and compatibility data on wz2100.net describe Warzone 2100 releases
+	// (they would offer its updates), so they are not fetched; the compatibility check reports "no
+	// data", as when offline. The threads come back once Warzone 2126 publishes its own data.
+	constexpr bool kFetchUpdateData2126 = false;
+	if (!kFetchUpdateData2126)
+	{
+		setCompatCheckResults(CompatCheckResults(false), true);
+		return;
+	}
+
 	WZ_THREAD* updateManagerThread = wzThreadCreate(updateManagerThreadFunc, nullptr, "updateManager");
 	wzThreadStart(updateManagerThread);
 	wzThreadDetach(updateManagerThread);
