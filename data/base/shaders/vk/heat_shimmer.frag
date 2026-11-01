@@ -32,10 +32,23 @@ void main()
 		if (depth < SKY_DEPTH_THRESHOLD)
 		{
 			float viewDist = length(wzGetViewPosition(texCoords, depth, invProjectionMatrix));
-			float amount = smoothstep(heatParams.z, heatParams.w, viewDist);
+			// (near the far plane the reconstruction can overflow: no shimmer there)
+			float amount = (isnan(viewDist) || isinf(viewDist)) ? 0.0 : smoothstep(heatParams.z, heatParams.w, viewDist);
 			offset += wzHeatWobble(texCoords * vec2(70.0, 26.0), heatParams.x * 0.8) * heatParams.y * amount;
 		}
 	}
+	// Warzone 2126: an offset that is not finite, or far larger than any heat source makes, would
+	// sample a stray point of the screen (or none): no bend there
+	if (any(isnan(offset)) || any(isinf(offset)))
+	{
+		offset = vec2(0.0);
+	}
+	offset = clamp(offset, vec2(-0.03), vec2(0.03));
 	vec2 bent = clamp(uv + offset * uvScaleClamp.xy, vec2(0.0), uvScaleClamp.zw);
-	FragColor = vec4(texture(sceneTexture, bent).rgb, 1.0);
+	vec3 c = texture(sceneTexture, bent).rgb;
+	if (any(isnan(c)) || any(isinf(c)))
+	{
+		c = texture(sceneTexture, uv).rgb;
+	}
+	FragColor = vec4(c, 1.0);
 }

@@ -30,7 +30,9 @@ vec3 wzFinite(vec3 c)
 void main()
 {
 	vec2 uv = clamp(texCoords * uvScaleClamp.xy, vec2(0.0), uvScaleClamp.zw);
-	vec3 current = wzFinite(texture(currentTexture, uv).rgb);
+	vec3 currentRaw = texture(currentTexture, uv).rgb;
+	bool currentBad = any(isnan(currentRaw)) || any(isinf(currentRaw));
+	vec3 current = wzFinite(currentRaw);
 	if (params.y < 0.5)
 	{
 		// No usable history (first frame, resize, camera cut): start again from this frame
@@ -39,20 +41,38 @@ void main()
 	}
 
 	// Colour range of the 3x3 neighbourhood, in YCoCg (mean +/- deviation; tighter than min/max)
+	// (a sample that is not finite is left out, rather than counted as black)
 	vec3 m1 = vec3(0.0);
 	vec3 m2 = vec3(0.0);
+	vec3 rgbSum = vec3(0.0);
+	float n = 0.0;
 	for (int y = -1; y <= 1; ++y)
 	{
 		for (int x = -1; x <= 1; ++x)
 		{
 			vec2 sampleUV = clamp(uv + vec2(float(x), float(y)) * texelSize.xy, vec2(0.0), uvScaleClamp.zw);
-			vec3 c = wzRGBToYCoCg(wzFinite(texture(currentTexture, sampleUV).rgb));
+			vec3 raw = texture(currentTexture, sampleUV).rgb;
+			if (any(isnan(raw)) || any(isinf(raw)))
+			{
+				continue;
+			}
+			raw = max(raw, vec3(0.0));
+			vec3 c = wzRGBToYCoCg(raw);
 			m1 += c;
 			m2 += c * c;
+			rgbSum += raw;
+			n += 1.0;
 		}
 	}
-	vec3 mean = m1 / 9.0;
-	vec3 deviation = sqrt(max(m2 / 9.0 - mean * mean, vec3(0.0)));
+	n = max(n, 1.0);
+	// Warzone 2126: a pixel that is not finite (some drivers produce the odd one far away or in the
+	// sky) takes its neighbours' colour instead of turning into a black dot
+	if (currentBad)
+	{
+		current = rgbSum / n;
+	}
+	vec3 mean = m1 / n;
+	vec3 deviation = sqrt(max(m2 / n - mean * mean, vec3(0.0)));
 	vec3 boxMin = mean - params.z * deviation;
 	vec3 boxMax = mean + params.z * deviation;
 

@@ -46,7 +46,7 @@ namespace
 {
 
 constexpr float kSpriteOffset = 0.012f;  // screen uv at full strength, near fires
-constexpr float kGroundOffset = 0.0028f; // screen uv, over distant hot ground at noon
+constexpr float kGroundOffset = 0.0012f; // screen uv, over distant hot ground at noon (was 0.0028: too strong, Oliver 1 Nov)
 
 float shimmerTime()
 {
@@ -100,7 +100,7 @@ void recordApply(const gfx_api::RenderPassContext& passCtx)
 	display3d_fillPassReadUvScaleClamp(passCtx, 1, constants.offsetUvScaleClamp);
 	// Distant ground shimmers: from a little beyond the view's focus towards the horizon
 	const float viewDistance = std::max(1000.f, getViewDistance());
-	constants.heatParams = glm::vec4(shimmerTime(), groundShimmer(), viewDistance * 1.15f, viewDistance * 2.4f);
+	constants.heatParams = glm::vec4(shimmerTime(), groundShimmer(), viewDistance * 1.6f, viewDistance * 3.2f);
 	display3d_drawFullscreenTriangle<gfx_api::HeatShimmerPSO>(constants, scene, offset, depth);
 }
 

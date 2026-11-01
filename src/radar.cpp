@@ -1012,20 +1012,39 @@ bool isRadarDragging()
 	return pRadarWidget->isRadarDragging();
 }
 
+// (Worked out from the current screen size, like resizeRadar, rather than from the stored centre:
+// widgets laid out in the same resize as the radar used to see the old window size, so after
+// switching to full screen the idle buttons sat in the middle of the screen)
+static int radarExtent2126(bool horizontal)
+{
+	if (rotateRadar)
+	{
+		return static_cast<int>(MAX(radarWidth, radarHeight));
+	}
+	return static_cast<int>(horizontal ? radarWidth : radarHeight);
+}
+
+static int radarCentreX2126()
+{
+	return static_cast<int>(pie_GetVideoBufferWidth()) - BASE_GAP * 4 - radarExtent2126(true) / 2;
+}
+
+static int radarCentreY2126()
+{
+	return static_cast<int>(pie_GetVideoBufferHeight()) - BASE_GAP * 4 - radarExtent2126(false) / 2;
+}
+
 int radarLeftX2126()
 {
-	const int w = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarWidth);
-	return radarCenterX - w / 2;
+	return radarCentreX2126() - radarExtent2126(true) / 2;
 }
 
 int radarBottomY2126()
 {
-	const int h = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarHeight);
-	return radarCenterY + h / 2;
+	return radarCentreY2126() + radarExtent2126(false) / 2;
 }
 
 int radarTopY2126()
 {
-	const int h = static_cast<int>(rotateRadar ? MAX(radarWidth, radarHeight) : radarHeight);
-	return radarCenterY - h / 2;
+	return radarCentreY2126() - radarExtent2126(false) / 2;
 }

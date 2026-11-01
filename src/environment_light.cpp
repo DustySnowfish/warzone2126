@@ -712,7 +712,7 @@ void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 	// weather and with a low sun (morning mist, evening haze); the march length follows Effects Detail
 	// (off on Low). haze.w strength, grade.z camera height, grade.w steps.
 	{
-		static const float kSteps[] = {0.f, 8.f, 14.f};
+		static const float kSteps[] = {0.f, 6.f, 10.f}; // (marched over the mist layer only)
 		const int detail = std::max(0, std::min(2, war_getEffectsDetail()));
 		const float lowSun = state.sunDir.y < 0.35f ? 1.f - std::max(0.f, state.sunDir.y) / 0.35f : 0.f;
 		constants.haze.w = std::min(1.6f, 0.3f + 0.9f * weatherHazeBoost + 0.55f * lowSun);

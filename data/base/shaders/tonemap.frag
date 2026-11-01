@@ -70,29 +70,45 @@ vec3 wzApplyHaze(vec3 encoded, vec2 t, float depth)
 		int steps = int(grade.w + 0.5);
 		float len = length(rel);
 		vec3 dir = rel / max(len, 1e-3);
-		float marchLen = min(len, WZ2126_MIST_REACH);
-		float stepLen = marchLen / float(steps);
-		// Per-pixel offset of the samples (interleaved gradient noise) hides the steps
-		float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
-		float g = 0.55;
-		float cosT = dot(dir, hazeSunDir.xyz);
-		float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25;
-		vec3 sunLight = hazeSunColour.rgb * phase * step(0.0, hazeSunDir.y);
-		vec3 skyLight = hazeHorizon.rgb * 0.45;
-		float T = 1.0;
-		vec3 inscatter = vec3(0.0);
-		for (int i = 0; i < 16; ++i)
+		// Only the part of the ray inside the mist layer (below about 4 thinning heights) is marched:
+		// the camera usually sits far above it, and the steps are spent where the mist is
+		float layerTop = WZ2126_MIST_HEIGHT * 4.0;
+		float tStart = 0.0;
+		if (grade.z > layerTop)
 		{
-			if (i >= steps) { break; }
-			vec3 q = dir * ((float(i) + jitter) * stepLen);
-			float y = grade.z + q.y;
-			float density = haze.w * WZ2126_MIST_DENSITY * exp(-max(y, 0.0) / WZ2126_MIST_HEIGHT);
-			float lit = cloud.y > 0.0 ? wzCloudShadow(q, hazeSunDir.xyz, cloud, cloudOffset) : 1.0;
-			float a = density * stepLen;
-			inscatter += T * a * (sunLight * lit + skyLight);
-			T *= exp(-a);
+			tStart = dir.y < -1e-4 ? (grade.z - layerTop) / -dir.y : len;
 		}
-		encoded = encoded * T + inscatter;
+		float marchEnd = min(len, tStart + WZ2126_MIST_REACH);
+		if (marchEnd > tStart)
+		{
+			float stepLen = (marchEnd - tStart) / float(steps);
+			// Per-pixel offset of the samples (interleaved gradient noise) hides the steps
+			float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+			float g = 0.55;
+			float cosT = dot(dir, hazeSunDir.xyz);
+			float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25;
+			vec3 sunLight = hazeSunColour.rgb * phase * step(0.0, hazeSunDir.y);
+			vec3 skyLight = hazeHorizon.rgb * 0.45;
+			float T = 1.0;
+			vec3 inscatter = vec3(0.0);
+			float lit = 1.0;
+			for (int i = 0; i < 12; ++i)
+			{
+				if (i >= steps) { break; }
+				vec3 q = dir * (tStart + (float(i) + jitter) * stepLen);
+				float y = grade.z + q.y;
+				float density = haze.w * WZ2126_MIST_DENSITY * exp(-max(y, 0.0) / WZ2126_MIST_HEIGHT);
+				// (cloud shadow every other step: it changes slowly along the ray)
+				if (cloud.y > 0.0 && (i % 2) == 0)
+				{
+					lit = wzCloudShadow(q, hazeSunDir.xyz, cloud, cloudOffset);
+				}
+				float a = density * stepLen;
+				inscatter += T * a * (sunLight * lit + skyLight);
+				T *= exp(-a);
+			}
+			encoded = encoded * T + inscatter;
+		}
 	}
 	if (haze.z <= 0.0)
 	{
@@ -136,7 +152,14 @@ vec3 wzApplyGradeLut(vec3 c, float size)
 void main()
 {
 	vec2 uv = clamp(texCoords * uvScaleClamp.xy, vec2(0.0), uvScaleClamp.zw);
-	vec3 sceneEncoded = wzApplyHaze(texture(sceneTexture, uv).rgb, texCoords, texture(depthTexture, uv).r);
+	vec3 sceneRaw = texture(sceneTexture, uv).rgb;
+	vec3 sceneEncoded = wzApplyHaze(sceneRaw, texCoords, texture(depthTexture, uv).r);
+	// Warzone 2126: if the haze, mist or aerial perspective produced something that is not finite
+	// (an extreme depth value), keep the unhazed scene there
+	if (any(isnan(sceneEncoded)) || any(isinf(sceneEncoded)))
+	{
+		sceneEncoded = (any(isnan(sceneRaw)) || any(isinf(sceneRaw))) ? vec3(0.0) : sceneRaw;
+	}
 	vec3 colour = wzHdrDecode(sceneEncoded);
 	// The bloom chain covers the scene's used area across its whole extent
 	vec3 bloom = texture(bloomTexture, texCoords).rgb / max(params.w, 1.0);
