@@ -33,6 +33,10 @@ void tipInitialise();
 /* Update and possibly display the tip */
 void tipDisplay();
 
+/// Flat tooltip style (Warzone 2126 interface): a flat panel with a thin border and an accent line
+/// on top instead of the bevelled grey box
+void tipSetFlatStyle(bool flat);
+
 /* Shut down the tool tip module */
 void tipShutdown();
 

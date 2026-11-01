@@ -29,6 +29,7 @@
 #include "tip.h"
 #include "lib/ivis_opengl/pieblitfunc.h"
 #include "lib/gamelib/gtime.h"
+#include "widgtheme.h"
 
 
 W_BUTINIT::W_BUTINIT()
@@ -670,11 +671,11 @@ void PopoverMenuButtonDisplayFunc(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffs
 	PIELIGHT backgroundColor;
 	if (isDown)
 	{
-		backgroundColor = pal_RGBA(10, 0, 70, 250); //WZCOL_FORM_DARK;
+		backgroundColor = widget_theme::get().fillDark; //WZCOL_FORM_DARK;
 	}
 	else if (isHighlight)
 	{
-		backgroundColor = pal_RGBA(25, 0, 110, 220); //WZCOL_TEXT_MEDIUM;
+		backgroundColor = widget_theme::get().fill; //WZCOL_TEXT_MEDIUM;
 	}
 	if (!backgroundColor.isTransparent())
 	{

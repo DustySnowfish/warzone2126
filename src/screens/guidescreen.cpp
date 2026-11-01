@@ -48,6 +48,7 @@
 #include "../activity.h"
 #include "../feature.h"
 #include "../mission.h"
+#include "lib/widget/widgtheme.h"
 
 #include <unordered_map>
 #include <locale>
@@ -1998,7 +1999,7 @@ void WzGuideSidebarTopicButton::display(int xOffset, int yOffset)
 	if (isNew)
 	{
 		const int indicatorSize = 10;
-		PIELIGHT indicatorColor = pal_RGBA(35, 82, 252, 255); //pal_RGBA(35,252,115,255);
+		PIELIGHT indicatorColor = widget_theme::get().flat ? pal_RGBA(79, 179, 232, 255) : pal_RGBA(35, 82, 252, 255); //pal_RGBA(35,252,115,255);
 		int newIndicatorX0 = x0 + (w - indicatorSize - rightPadding);
 		int newIndicatorY0 = y0 + ((h - indicatorSize) / 2);
 		if (IntImages)
@@ -2406,7 +2407,7 @@ void WzGuideForm::display(int xOffset, int yOffset)
 	pie_UniTransBoxFill((float)dropShadowX0, (float)dropShadowY0, (float)dropShadowX1, (float)dropShadowY1, pal_RGBA(0, 0, 0, 40));
 
 	// draw background + border
-	pie_UniTransBoxFill((float)x0, (float)y0, (float)x1, (float)y1, pal_RGBA(5, 0, 15, 170));
+	pie_UniTransBoxFill((float)x0, (float)y0, (float)x1, (float)y1, widget_theme::get().flat ? pal_RGBA(8, 11, 14, 190) : pal_RGBA(5, 0, 15, 170));
 	iV_Box(x0, y0, x1, y1, pal_RGBA(255, 255, 255, 150));
 }
 

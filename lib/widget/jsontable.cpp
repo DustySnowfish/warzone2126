@@ -31,6 +31,7 @@
 #include "lib/framework/input.h"
 #include "lib/framework/math_ext.h"
 #include "lib/ivis_opengl/pieblitfunc.h"
+#include "widgtheme.h"
 
 // MARK: - PathBarWidget
 
@@ -62,7 +63,7 @@ void PathBarWidget::display(int xOffset, int yOffset)
 	int y1 = y0 + height();
 
 	// Draw the path bar background
-	iV_ShadowBox(x0, y0, x1, y1, 0, pal_RGBA(20, 0, 88, 230), WZCOL_FORM_DARK, pal_RGBA(20, 0, 88, 230));
+	iV_ShadowBox(x0, y0, x1, y1, 0, widget_theme::get().panel, WZCOL_FORM_DARK, widget_theme::get().panel);
 
 	if (pathComponents.size() <= 1) { return; }
 	// Draw the path separator between all path components
@@ -617,7 +618,7 @@ static void JsonActionButtonDisplayFunc(WIDGET *psWidget, UDWORD xOffset, UDWORD
 
 	// Display the button.
 	auto light_border = pal_RGBA(255, 255, 255, 80);
-	auto fill_color = isDown || isDisabled ? pal_RGBA(10, 0, 70, 250) : pal_RGBA(25, 0, 110, 220);
+	auto fill_color = isDown || isDisabled ? widget_theme::get().fillDark : widget_theme::get().fill;
 	iV_ShadowBox(x0, y0, x1, y1, 0, isDown ? pal_RGBA(0,0,0,0) : light_border, isDisabled ? light_border : WZCOL_FORM_DARK, fill_color);
 	if (isHighlight)
 	{

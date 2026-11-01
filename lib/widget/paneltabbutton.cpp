@@ -19,12 +19,10 @@
 
 #include "lib/ivis_opengl/pieblitfunc.h"
 #include "paneltabbutton.h"
+#include "widgtheme.h"
 
 constexpr int QCFORM_PANEL_TABS_PADDING = 20;
 constexpr int QCFORM_PANEL_TABS_HEIGHT = 20;
-const PIELIGHT WZCOL_PANELTABS_FILL_COLOR = pal_RGBA(25, 0, 110, 220);
-const PIELIGHT WZCOL_PANELTABS_FILL_COLOR_DARK = pal_RGBA(10, 0, 70, 250);
-const PIELIGHT WZCOL_PANELTABS_BORDER_LIGHT = pal_RGBA(255, 255, 255, 150);
 
 std::shared_ptr<WzPanelTabButton> WzPanelTabButton::make(const WzString& text)
 {
@@ -50,8 +48,9 @@ void WzPanelTabButton::display(int xOffset, int yOffset)
 	bool isHighlight = !isDisabled && ((getState() & WBUT_HIGHLIGHT) != 0);
 
 	// Display the button.
-	auto light_border = WZCOL_PANELTABS_BORDER_LIGHT;
-	auto fill_color = isDown || isDisabled ? WZCOL_PANELTABS_FILL_COLOR_DARK : WZCOL_PANELTABS_FILL_COLOR;
+	const auto &theme = widget_theme::get();
+	auto light_border = theme.border;
+	auto fill_color = isDown || isDisabled ? theme.fillDark : theme.fill;
 	iV_ShadowBox(x0, y0, x1, y1, 0, isDown || isHighlight ? light_border : WZCOL_FORM_DARK, isDown || isHighlight ? light_border : WZCOL_FORM_DARK, fill_color);
 
 	if (haveText)

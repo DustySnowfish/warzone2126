@@ -46,6 +46,8 @@
 #include "src/hci/quickchat.h"
 
 #include "lib/ivis_opengl/pieblitfunc.h"
+#include "../../hci/hud2126_style.h"
+#include "../../hci.h"
 
 struct DisplayPlayerCache {
 	std::string	fullMainText;	// the “full” main text (used for storing the full player name when displaying a player)
@@ -129,7 +131,7 @@ void ReadyBoxContainerWidget::display(int xOffset, int yOffset)
 	{
 		const int scale = 2500;
 		int f = realTime % scale;
-		PIELIGHT mix = pal_RGBA(3, 15, 252, 255);
+		PIELIGHT mix = intInterface2126Active() ? hud2126::accent() : pal_RGBA(3, 15, 252, 255);
 		mix.byte.a = 155 + iSinR(65536 * f / scale, 75);
 
 		pie_UniTransBoxFill(x0 + 2, y0 + 1, x0 + w - 1, y0 + h - 1, mix);

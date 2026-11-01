@@ -28,6 +28,8 @@
 #include "multiplay.h"
 #include "lib/ivis_opengl/piestate.h"
 #include "lib/ivis_opengl/piepalette.h"
+#include "lib/widget/tip.h"
+#include "lib/widget/widgtheme.h"
 #include "lib/sound/sounddefs.h"
 #include "lib/netplay/connection_provider_registry.h"
 #include "advvis.h"
@@ -1105,9 +1107,55 @@ bool war_getInterface2126()
 	return warGlobs.interface2126;
 }
 
+/// Warzone 2126 interface: the shared menu and form colours in the 2126 scheme (dark slate panels,
+/// a light-blue accent) instead of the classic blues and purples, so the lobby, options, load and
+/// save screens and the classic widgets match the 2126 panels.
+static void applyPalette2126()
+{
+	tipSetFlatStyle(warGlobs.interface2126);
+	widget_theme::Theme theme; // (the classic purples)
+	if (warGlobs.interface2126)
+	{
+		theme.flat = true;
+		theme.fill = pal_RGBA(27, 34, 40, 235);
+		theme.fillDark = pal_RGBA(42, 58, 70, 245);
+		theme.border = pal_RGBA(79, 179, 232, 255);
+		theme.panel = pal_RGBA(24, 32, 40, 240);
+	}
+	widget_theme::set(theme);
+	if (!warGlobs.interface2126)
+	{
+		return;
+	}
+	auto set = [](PIELIGHT &c, uint8_t r, uint8_t g, uint8_t b, uint8_t a) { c = pal_RGBA(r, g, b, a); };
+	set(WZCOL_MENU_BACKGROUND, 18, 24, 30, 255);
+	set(WZCOL_MENU_BORDER, 60, 74, 86, 255);
+	set(WZCOL_MENU_SCORES_INTERIOR, 14, 19, 24, 255);
+	set(WZCOL_MENU_SEPARATOR, 60, 72, 82, 255);
+	set(WZCOL_TEXT_MEDIUM, 196, 206, 214, 255);
+	set(WZCOL_TEXT_DARK, 140, 156, 168, 255);
+	set(WZCOL_FRAME_BORDER_NORMAL, 79, 179, 232, 255);
+	set(WZCOL_DBLUE, 27, 34, 40, 255);
+	set(WZCOL_LBLUE, 79, 179, 232, 255);
+	set(WZCOL_TRANSPARENT_BOX, 16, 22, 28, 215);
+	set(WZCOL_NOTIFICATION_BOX, 16, 22, 28, 235);
+	set(WZCOL_MENU_LOAD_BORDER, 60, 74, 86, 255);
+	set(WZCOL_MENU_SCORE_BUILT, 38, 72, 96, 255); // (also the selected tab and row in Options)
+}
+
+void war_initPalette2126()
+{
+	pal_SetPostInitHook(applyPalette2126);
+}
+
 void war_setInterface2126(bool enabled)
 {
+	const bool changed = warGlobs.interface2126 != enabled;
 	warGlobs.interface2126 = enabled;
+	if (changed && pal_Loaded())
+	{
+		pal_Init(); // reloads the classic colours, then applies the 2126 ones when on
+	}
 }
 
 int war_getTimeOfDay()

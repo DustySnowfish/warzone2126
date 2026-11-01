@@ -200,6 +200,13 @@ static void handleTipInactive()
 	}
 }
 
+static bool tipFlat = false;
+
+void tipSetFlatStyle(bool flat)
+{
+	tipFlat = flat;
+}
+
 static void handleTipActive()
 {
 	if (mousePressed(MOUSE_LMB))
@@ -216,7 +223,16 @@ static void handleTipActive()
 	}
 
 	/* Draw the tool tip */
-	iV_ShadowBox(tipRect.x(), tipRect.y(), tipRect.right(), tipRect.bottom(), 1, WZCOL_FORM_LIGHT, WZCOL_FORM_DARK, WZCOL_FORM_TIP_BACKGROUND);
+	if (tipFlat)
+	{
+		pie_UniTransBoxFill(tipRect.x(), tipRect.y(), tipRect.right(), tipRect.bottom(), pal_RGBA(16, 22, 28, 245));
+		iV_Box(tipRect.x(), tipRect.y(), tipRect.right() - 1, tipRect.bottom() - 1, pal_RGBA(255, 255, 255, 40));
+		pie_UniTransBoxFill(tipRect.x() + 1, tipRect.y() + 1, tipRect.right() - 1, tipRect.y() + 3, pal_RGBA(79, 179, 232, 255));
+	}
+	else
+	{
+		iV_ShadowBox(tipRect.x(), tipRect.y(), tipRect.right(), tipRect.bottom(), 1, WZCOL_FORM_LIGHT, WZCOL_FORM_DARK, WZCOL_FORM_TIP_BACKGROUND);
+	}
 
 	size_t n = 0;
 	for (auto &line: displayCache.wzTip)

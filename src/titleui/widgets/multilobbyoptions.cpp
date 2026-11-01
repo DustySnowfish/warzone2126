@@ -61,6 +61,8 @@
 
 #include <chrono>
 #include <tuple>
+#include "../../hci/hud2126_style.h"
+#include "../../hci.h"
 
 
 // MARK: -
@@ -391,8 +393,9 @@ public:
 		const bool isDown = ((state & (WBUT_DOWN | WBUT_LOCK | WBUT_CLICKLOCK)) != 0) || showSelected;
 		const bool isDisabled = (state & WBUT_DISABLE) != 0;
 		const bool isHighlight = (state & WBUT_HIGHLIGHT) != 0;
-		pie_UniTransBoxFill(x0, y0, x1, y1, isDown ? pal_RGBA(20, 70, 120, 230) : pal_RGBA(10, 20, 45, 200));
-		iV_Box(x0, y0, x1 - 1, y1 - 1, isDown ? pal_RGBA(120, 200, 255, 255) : isHighlight ? WZCOL_TEXT_BRIGHT : pal_RGBA(70, 90, 130, 255));
+		const bool flat = intInterface2126Active(); // (Warzone 2126 look)
+		pie_UniTransBoxFill(x0, y0, x1, y1, flat ? (isDown ? hud2126::tabActive() : isHighlight ? hud2126::tabHover() : hud2126::tab()) : isDown ? pal_RGBA(20, 70, 120, 230) : pal_RGBA(10, 20, 45, 200));
+		iV_Box(x0, y0, x1 - 1, y1 - 1, flat ? (isDown || isHighlight ? hud2126::accent() : hud2126::border()) : isDown ? pal_RGBA(120, 200, 255, 255) : isHighlight ? WZCOL_TEXT_BRIGHT : pal_RGBA(70, 90, 130, 255));
 		const int tx = x0 + (width() - labelText->width()) / 2;
 		const int ty = y0 + (height() - labelText->lineSize()) / 2 - labelText->aboveBase();
 		labelText->render(tx, ty, isDisabled ? WZCOL_TEXT_MEDIUM : (isDown || isHighlight) ? WZCOL_TEXT_BRIGHT : WZCOL_FORM_TEXT);
@@ -825,7 +828,7 @@ static void displayWrappedOptionSectionItem(WIDGET *psWidget, UDWORD xOffset, UD
 	int y0 = yOffset + psWidget->y();
 	int w = psWidget->width();
 	int h = psWidget->height();
-	pie_UniTransBoxFill(x0, y0, x0 + w, y0 + h, pal_RGBA(14,12,55,255));
+	pie_UniTransBoxFill(x0, y0, x0 + w, y0 + h, intInterface2126Active() ? pal_RGBA(24, 32, 40, 255) : pal_RGBA(14,12,55,255));
 }
 
 static void displayInlineEditBox(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)

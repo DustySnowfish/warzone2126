@@ -37,6 +37,7 @@
 #include "../cheat.h"
 #include "../hci/quickchat.h"
 #include "../hci/chatoptions.h"
+#include "lib/widget/widgtheme.h"
 
 class WzInGameChatScreen_CLICKFORM;
 struct WzInGameChatScreen;
@@ -102,8 +103,9 @@ public:
 		bool isHighlight = !isDisabled && ((getState() & WBUT_HIGHLIGHT) != 0);
 
 		// Display the button.
-		auto border_color = !isDisabled ? pal_RGBA(100, 100, 255, 120) : WZCOL_FORM_DARK;
-		auto fill_color = isDown || isDisabled ? pal_RGBA(0, 0, 45, 250) : pal_RGBA(0, 0, 67, 220);
+		const bool flat = widget_theme::get().flat; // (Warzone 2126 look)
+		auto border_color = !isDisabled ? (flat ? widget_theme::get().border : pal_RGBA(100, 100, 255, 120)) : WZCOL_FORM_DARK;
+		auto fill_color = flat ? (isDown || isDisabled ? widget_theme::get().fillDark : widget_theme::get().fill) : isDown || isDisabled ? pal_RGBA(0, 0, 45, 250) : pal_RGBA(0, 0, 67, 220);
 		iV_ShadowBox(x0, y0, x1, y1, 0, border_color, border_color, fill_color);
 		if (isHighlight)
 		{

@@ -2285,6 +2285,7 @@ int realmain(int argc, char *argv[])
 	bool fogConfigOption = pie_GetFogEnabled();
 	pie_SetFogStatus(false);
 
+	war_initPalette2126(); // Warzone 2126: interface colours applied after every palette load
 	pal_Init();
 
 	pie_LoadBackDrop(SCREEN_RANDOMBDROP);

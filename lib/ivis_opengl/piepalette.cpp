@@ -24,6 +24,18 @@
 #include "screen.h"
 
 PIELIGHT psPalette[WZCOL_MAX];
+static void (*palPostInitHook)() = nullptr;
+static bool palLoaded = false;
+
+void pal_SetPostInitHook(void (*hook)())
+{
+	palPostInitHook = hook;
+}
+
+bool pal_Loaded()
+{
+	return palLoaded;
+}
 
 void pal_Init()
 {
@@ -70,6 +82,11 @@ void pal_Init()
 			psPalette[i].byte.a = a;
 		}
 		free(pFileData);
+		palLoaded = true;
+		if (palPostInitHook != nullptr)
+		{
+			palPostInitHook();
+		}
 	}
 	else
 	{

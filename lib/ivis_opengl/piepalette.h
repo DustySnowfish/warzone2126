@@ -134,6 +134,10 @@ extern PIELIGHT		psPalette[];
 //*************************************************************************
 
 void pal_Init();
+/// Called at the end of every pal_Init (the game's own colour overrides, e.g. an interface style)
+void pal_SetPostInitHook(void (*hook)());
+/// Whether palette.txt has been read
+bool pal_Loaded();
 void pal_ShutDown();
 PIELIGHT pal_GetTeamColour(int team);
 

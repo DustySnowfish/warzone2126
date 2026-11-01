@@ -52,6 +52,8 @@
 #include <vector>
 #include <optional>
 #include <unordered_set>
+#include "../../hci/hud2126_style.h"
+#include "../../hci.h"
 
 static constexpr uint32_t LOB_DEFAULT_BEHAVIOR_CHECKSUM = 2462613339;
 
@@ -1554,8 +1556,8 @@ void LobbyBrowser::populateTableFromGameList(bool force)
 		{
 			const bool blindSimpleLobby = isBlindSimpleLobby(blindModeFromLobbyGameDetails(gameInfo.blindMode).value_or(BLIND_MODE::NONE));
 			row->setHighlightsOnMouseOver(true);
-			row->setHighlightColor(pal_RGBA(5,29,245,200));
-			row->setBackgroundColor(blindSimpleLobby ? pal_RGBA(0,20,130,50) : pal_RGBA(0,0,0,50));
+			row->setHighlightColor(intInterface2126Active() ? pal_RGBA(42, 58, 70, 220) : pal_RGBA(5,29,245,200));
+			row->setBackgroundColor(blindSimpleLobby ? (intInterface2126Active() ? pal_RGBA(79, 179, 232, 30) : pal_RGBA(0,20,130,50)) : pal_RGBA(0,0,0,50));
 		}
 		else
 		{

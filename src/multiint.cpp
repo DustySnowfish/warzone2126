@@ -148,6 +148,7 @@
 #include <deque>
 #include <set>
 #include "3rdparty/gsl_finally.h"
+#include "hci/hud2126_style.h"
 
 #define MAP_PREVIEW_DISPLAY_TIME 2500	// number of milliseconds to show map in preview
 #define LOBBY_DISABLED_TAG       "lobbyDisabled"
@@ -328,7 +329,8 @@ public:
 
 		// Display the button.
 		auto border_color = !isDisabled ? pal_RGBA(255, 255, 255, 120) : WZCOL_FORM_DARK;
-		auto fill_color = isDown || isDisabled ? pal_RGBA(10, 0, 70, 250) : pal_RGBA(25, 0, 110, 220);
+		auto fill_color = intInterface2126Active() ? (isDown || isDisabled ? hud2126::tabActive() : hud2126::tab()) // (Warzone 2126 look)
+			: isDown || isDisabled ? pal_RGBA(10, 0, 70, 250) : pal_RGBA(25, 0, 110, 220);
 		iV_ShadowBox(x0, y0, x1, y1, 0, border_color, border_color, fill_color);
 		if (isHighlight)
 		{
@@ -4685,7 +4687,7 @@ void ChatBoxWidget::display(int xOffset, int yOffset)
 	int messageEditAreaY0 = y0 + messages->y() + messages->height();
 	int messageEditAreaX0 = x0;
 
-	pie_UniTransBoxFill(messageEditAreaX0 + 1, messageEditAreaY0, messageEditAreaX0 + width() - 1, y0 + height() - 1, pal_RGBA(0,0,100,80));
+	pie_UniTransBoxFill(messageEditAreaX0 + 1, messageEditAreaY0, messageEditAreaX0 + width() - 1, y0 + height() - 1, intInterface2126Active() ? hud2126::bg() : pal_RGBA(0,0,100,80));
 
 	iV_Line(messageEditAreaX0 + 1, messageEditAreaY0, messageEditAreaX0 + width() - 1, messageEditAreaY0, WZCOL_FORM_DARK);
 }
