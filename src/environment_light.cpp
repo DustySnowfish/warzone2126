@@ -50,6 +50,7 @@
  */
 
 #include "environment_light.h"
+#include "warzoneconfig.h"
 
 #include "levels.h"
 #include "objectdef.h"
@@ -706,6 +707,18 @@ void fillHazeConstants(gfx_api::constant_buffer_type<SHADER_TONEMAP>& constants)
 	const float hazeNear = p.hazeStart * (1.f - 0.75f * weatherHazeBoost);
 	const float hazeFar = std::max(hazeNear + 0.01f, p.hazeEnd * (1.f - 0.45f * weatherHazeBoost));
 	constants.haze = glm::vec4(halfDrawn * hazeNear, halfDrawn * hazeFar, std::max(p.hazeStrength, weatherHazeBoost), 0.f);
+	// Warzone 2126 volumetric haze (terrain realism E2): a ground-hugging mist marched along the view
+	// ray in the tonemap pass, lit by the sun through the cloud shadows (light shafts). Thicker in
+	// weather and with a low sun (morning mist, evening haze); the march length follows Effects Detail
+	// (off on Low). haze.w strength, grade.z camera height, grade.w steps.
+	{
+		static const float kSteps[] = {0.f, 8.f, 14.f};
+		const int detail = std::max(0, std::min(2, war_getEffectsDetail()));
+		const float lowSun = state.sunDir.y < 0.35f ? 1.f - std::max(0.f, state.sunDir.y) / 0.35f : 0.f;
+		constants.haze.w = std::min(1.6f, 0.3f + 0.9f * weatherHazeBoost + 0.55f * lowSun);
+		constants.grade.z = fc.cameraPos.y;
+		constants.grade.w = kSteps[detail];
+	}
 	const float cloudStrength = std::min(0.85f, p.cloudStrength + 0.4f * weatherCloudBoost);
 	const float cloudCoverage = std::min(0.95f, p.cloudCoverage + 0.45f * weatherCloudBoost);
 	if (cloudStrength > 0.f && state.sunDir.y > 0.f)

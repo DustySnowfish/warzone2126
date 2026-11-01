@@ -30,6 +30,12 @@ layout(location = 0) out vec4 FragColor;
 // Vulkan clip space has y pointing down relative to the engine's matrices (see view_position.glsl)
 #define CLIP_FROM_TEXCOORD(t) (vec2((t).x, 1.0 - (t).y) * 2.0 - 1.0)
 
+// Volumetric mist: density per render unit at sea level, how fast it thins with height, how far
+// it is marched
+#define WZ2126_MIST_DENSITY 0.00011
+#define WZ2126_MIST_HEIGHT 190.0
+#define WZ2126_MIST_REACH 9000.0
+
 // Aerial perspective: how far (render units, 1/e) and how strong (at most) it gets
 #define WZ2126_AERIAL_DISTANCE 13000.0
 #define WZ2126_AERIAL_STRENGTH 0.45
@@ -46,6 +52,38 @@ vec3 wzApplyHaze(vec3 encoded, vec2 t, float depth)
 	vec3 rel = p.xyz / p.w; // camera-relative position
 	// Cloud shadows darken the lit scene (display-encoded, so scale by the encoded factor)
 	encoded *= pow(wzCloudShadow(rel, hazeSunDir.xyz, cloud, cloudOffset), 1.0 / 2.2);
+	// Warzone 2126 volumetric haze (terrain realism E2): march the view ray through a mist that
+	// thins with height, scattering sunlight forward (the mist glows towards the sun) and sky light,
+	// with the cloud shadows cutting the sunlit part into shafts
+	if (haze.w > 0.0 && grade.w > 0.5)
+	{
+		int steps = int(grade.w + 0.5);
+		float len = length(rel);
+		vec3 dir = rel / max(len, 1e-3);
+		float marchLen = min(len, WZ2126_MIST_REACH);
+		float stepLen = marchLen / float(steps);
+		// Per-pixel offset of the samples (interleaved gradient noise) hides the steps
+		float jitter = fract(52.9829189 * fract(dot(gl_FragCoord.xy, vec2(0.06711056, 0.00583715))));
+		float g = 0.55;
+		float cosT = dot(dir, hazeSunDir.xyz);
+		float phase = (1.0 - g * g) / pow(1.0 + g * g - 2.0 * g * cosT, 1.5) * 0.25;
+		vec3 sunLight = hazeSunColour.rgb * phase * step(0.0, hazeSunDir.y);
+		vec3 skyLight = hazeHorizon.rgb * 0.45;
+		float T = 1.0;
+		vec3 inscatter = vec3(0.0);
+		for (int i = 0; i < 16; ++i)
+		{
+			if (i >= steps) { break; }
+			vec3 q = dir * ((float(i) + jitter) * stepLen);
+			float y = grade.z + q.y;
+			float density = haze.w * WZ2126_MIST_DENSITY * exp(-max(y, 0.0) / WZ2126_MIST_HEIGHT);
+			float lit = cloud.y > 0.0 ? wzCloudShadow(q, hazeSunDir.xyz, cloud, cloudOffset) : 1.0;
+			float a = density * stepLen;
+			inscatter += T * a * (sunLight * lit + skyLight);
+			T *= exp(-a);
+		}
+		encoded = encoded * T + inscatter;
+	}
 	if (haze.z <= 0.0)
 	{
 		return encoded;
