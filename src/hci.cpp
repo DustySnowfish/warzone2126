@@ -2671,6 +2671,17 @@ public:
 		drawText(researchTime, kHudAccent, 14);
 		separator();
 		drawText(clockValue, kHudValue, 12);
+		if (gamePaused())
+		{
+			// A pulsing badge while the game is paused (the classic banner of console lines is off)
+			pausedText.setText(_("PAUSED"), font_small);
+			const int pulse = static_cast<int>(150 + 105 * std::abs(std::sin(realTime / 450.0)));
+			const int bx0 = cx - 4, by0 = y0 + 6, bx1 = cx + pausedText->width() + 6, by1 = y0 + height() - 6;
+			pie_UniTransBoxFill(bx0, by0, bx1, by1, pal_RGBA(232, 193, 61, 40));
+			iV_Box(bx0, by0, bx1 - 1, by1 - 1, pal_RGBA(232, 193, 61, static_cast<uint8_t>(pulse)));
+			pausedText->render(cx + 1, midY - pausedText->lineSize() / 2 - pausedText->aboveBase(), kHudWarn);
+			cx += pausedText->width() + 16;
+		}
 		const int wanted = cx - x0;
 		if (wanted != idealW)
 		{
@@ -2766,7 +2777,7 @@ private:
 	int availablePower = 0;
 	int queuedPower = 0;
 	int shownCost = -1;
-	WzCachedText costText, queuedText;
+	WzCachedText costText, queuedText, pausedText;
 	WzCachedText powerLabel, powerValue, incomeValue, unitsLabel, unitsValue, researchLabel, researchValue, researchTime, clockValue;
 	PIELIGHT incomeColour = kHudLabel;
 	PIELIGHT unitsColour = kHudValue;

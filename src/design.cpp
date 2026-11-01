@@ -774,6 +774,28 @@ bool intAddDesign(bool bShowCentreScreen)
 
 	auto const &parent = psWScreen->psForm;
 
+	// Warzone 2126 look: the scene behind the design screen dimmed, so the design reads as its own
+	// screen (drawn under the design panels; clicks pass through)
+	if (des2126())
+	{
+		class DesignDim2126 : public WIDGET
+		{
+		public:
+			void display(int, int) override
+			{
+				pie_UniTransBoxFill(0, 0, static_cast<float>(pie_GetVideoBufferWidth()), static_cast<float>(pie_GetVideoBufferHeight()), pal_RGBA(0, 0, 0, 95));
+			}
+		};
+		widgDelete(psWScreen, IDDES_DIM2126);
+		auto dim = std::make_shared<DesignDim2126>();
+		dim->id = IDDES_DIM2126;
+		dim->setTransparentToMouse(true);
+		parent->attach(dim);
+		dim->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			psWidget->setGeometry(0, 0, static_cast<int>(pie_GetVideoBufferWidth()), static_cast<int>(pie_GetVideoBufferHeight()));
+		}));
+	}
+
 	/* Add the main design form */
 	auto desForm = std::make_shared<IntFormAnimated>(false);
 #if defined(WZ_CC_GNU) && !defined(WZ_CC_INTEL) && !defined(WZ_CC_CLANG) && (7 <= __GNUC__)
@@ -3255,6 +3277,7 @@ static void desCreateDefaultTemplate()
 /* Remove the design widgets from the widget screen */
 void intRemoveDesign()
 {
+	widgDelete(psWScreen, IDDES_DIM2126);
 	widgDelete(psWScreen, IDDES_POWERFORM);
 	widgDelete(psWScreen, IDDES_NAMEBOX);
 	widgDelete(psWScreen, IDDES_TEMPLBASE);

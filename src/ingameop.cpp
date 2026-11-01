@@ -58,6 +58,16 @@
 #include "screens/ingameopscreen.h"
 #include "screens/spectatorgameoverscreen.h"
 #include "titleui/options/optionsforms.h"
+#include "hci/hud2126_style.h"
+#include "display.h"
+#include "input/manager.h"
+#include "input/debugmappings.h"
+#include "activity.h"
+#include "levels.h"
+#include "difficulty.h"
+#include "lib/ivis_opengl/pieblitfunc.h"
+#include "lib/ivis_opengl/piestate.h"
+#include "lib/ivis_opengl/screen.h"
 
 bool hostQuitConfirmation = true;
 
@@ -67,6 +77,144 @@ static bool		isInGameConfirmQuitUp = false;
 
 // ////////////////////////////////////////////////////////////////////////////
 // functions
+
+// ////////////////////////////////////////////////////////////////////////////
+// Warzone 2126 look: with the 2126 interface the menu is a wider flat panel with a "Paused" header
+// (game mode, map, difficulty, cheats), full-width flat buttons, and the scene dimmed around it.
+
+static bool igo2126()
+{
+	return intInterface2126Active();
+}
+
+static int igLineH() { return igo2126() ? 40 : INTINGAMEOPLINE_H; }
+static int igButtonH() { return igo2126() ? 34 : INTINGAMEOP_OP_H; }
+static int igMarginH() { return igo2126() ? 14 : INTINGAMEOPMARGIN_H; }
+static int igHeaderH() { return igo2126() ? 78 : 0; }
+static int igFormW() { return igo2126() ? 320 : INTINGAMEOP_W; }
+static int igButtonX() { return igo2126() ? 16 : INTINGAMEOP_1_X; }
+static int igButtonW() { return igo2126() ? igFormW() - 32 : INTINGAMEOP_OP_W; }
+static int igLineY(int line) { return igHeaderH() + (line - 1) * igLineH() + igMarginH(); }
+static int igFormH(int lines) { return igHeaderH() + lines * igLineH() + igMarginH() * 2 - (igo2126() ? igLineH() - igButtonH() : 0); }
+static int igFormX(int w) { return (pie_GetVideoBufferWidth() - w) / 2; }
+static int igFormY(int h) { return igo2126() ? std::max(20, (pie_GetVideoBufferHeight() - h) / 2 - 20) : INTINGAMEOPAUTO_Y(0) - h / 2 + INTINGAMEOPAUTO_H(0) / 2; }
+
+struct IGButtonCache2126
+{
+	WzText text;
+};
+
+static void displayIGButton2126(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
+{
+	W_BUTTON *psBut = static_cast<W_BUTTON *>(psWidget);
+	auto &cache = *static_cast<IGButtonCache2126 *>(psWidget->pUserData);
+	const int x0 = xOffset + psWidget->x(), y0 = yOffset + psWidget->y();
+	const int x1 = x0 + psWidget->width(), y1 = y0 + psWidget->height();
+	const bool hot = (psBut->getState() & WBUT_HIGHLIGHT) != 0;
+	const bool down = (psBut->getState() & WBUT_DOWN) != 0;
+	const bool quit = psWidget->id == INTINGAMEOP_QUIT || psWidget->id == INTINGAMEOP_CONFIRM_QUIT || psWidget->id == INTINGAMEOP_HOSTQUIT;
+	pie_UniTransBoxFill(x0, y0, x1, y1, down ? hud2126::tabActive() : hot ? hud2126::tabHover() : hud2126::tab());
+	iV_Box(x0, y0, x1 - 1, y1 - 1, hot ? (quit ? hud2126::bad() : hud2126::accent()) : hud2126::border());
+	if (hot)
+	{
+		pie_UniTransBoxFill(x0, y0, x0 + 3, y1, quit ? hud2126::bad() : hud2126::accent());
+	}
+	cache.text.setText(psBut->pText, font_regular_bold);
+	const PIELIGHT colour = hot ? (quit ? hud2126::bad() : hud2126::value()) : hud2126::text();
+	cache.text.render(x0 + (psWidget->width() - cache.text.width()) / 2, y0 + (psWidget->height() - cache.text.lineSize()) / 2 - cache.text.aboveBase(), colour);
+}
+
+/// Dims the scene around a panel; drawn by a child widget at the panel's top left, so the offsets
+/// passed in are the panel's position (the panel itself is drawn already)
+static void dimAroundPanel2126(WIDGET *child, int xOffset, int yOffset)
+{
+	WIDGET *panel = child->parent().get();
+	if (panel == nullptr)
+	{
+		return;
+	}
+	const int fx0 = xOffset, fy0 = yOffset, fx1 = xOffset + panel->width(), fy1 = yOffset + panel->height();
+	const int W = static_cast<int>(pie_GetVideoBufferWidth()), H = static_cast<int>(pie_GetVideoBufferHeight());
+	const PIELIGHT dim = pal_RGBA(0, 0, 0, 110);
+	pie_UniTransBoxFill(0, 0, W, fy0, dim);
+	pie_UniTransBoxFill(0, fy1, W, H, dim);
+	pie_UniTransBoxFill(0, fy0, fx0, fy1, dim);
+	pie_UniTransBoxFill(fx1, fy0, W, fy1, dim);
+}
+
+class IGDim2126 : public WIDGET
+{
+public:
+	void display(int xOffset, int yOffset) override { dimAroundPanel2126(this, xOffset, yOffset); }
+};
+
+/// The header of the 2126 menu; it also dims the scene around the panel
+class IGHeader2126 : public WIDGET
+{
+public:
+	IGHeader2126()
+	{
+		title.setText(_("Paused"), font_large);
+		std::string sub;
+		switch (ActivityManager::instance().getCurrentGameMode())
+		{
+		case ActivitySink::GameMode::CAMPAIGN: sub = _("Campaign"); break;
+		case ActivitySink::GameMode::CHALLENGE: sub = _("Challenge"); break;
+		case ActivitySink::GameMode::SKIRMISH: sub = _("Skirmish"); break;
+		case ActivitySink::GameMode::MULTIPLAYER: sub = _("Multiplayer"); break;
+		default: break;
+		}
+		const char *level = getLevelName();
+		if (level != nullptr && level[0] != '\0')
+		{
+			sub += sub.empty() ? std::string(_(level)) : std::string("  ·  ") + _(level);
+		}
+		if (ActivityManager::instance().getCurrentGameMode() == ActivitySink::GameMode::CAMPAIGN)
+		{
+			const char *names[] = {N_("Super Easy"), N_("Easy"), N_("Normal"), N_("Hard"), N_("Insane")};
+			const int lev = static_cast<int>(getDifficultyLevel());
+			if (lev >= 0 && lev < 5)
+			{
+				sub += std::string("  ·  ") + gettext(names[lev]);
+			}
+		}
+		subtitle.setText(WzString::fromUtf8(sub), font_regular);
+		cheats = gInputManager.debugManager().debugMappingsAllowed();
+		if (cheats)
+		{
+			cheatsText.setText(_("Cheats enabled"), font_small);
+		}
+	}
+
+	void display(int xOffset, int yOffset) override
+	{
+		dimAroundPanel2126(this, xOffset, yOffset);
+		const int x0 = xOffset + x(), y0 = yOffset + y();
+		title.render(x0 + 18, y0 + 16 - title.aboveBase(), hud2126::value());
+		subtitle.render(x0 + 18, y0 + 16 + title.lineSize() + 2 - subtitle.aboveBase(), hud2126::label());
+		if (cheats)
+		{
+			cheatsText.render(x0 + width() - 18 - cheatsText.width(), y0 + 22 - cheatsText.aboveBase(), hud2126::warn());
+		}
+		pie_UniTransBoxFill(x0 + 16, y0 + height() - 1, x0 + width() - 16, y0 + height(), hud2126::border());
+	}
+
+private:
+	WzText title, subtitle, cheatsText;
+	bool cheats = false;
+};
+
+static void addIGHeader2126(const std::shared_ptr<W_FORM> &form)
+{
+	if (!igo2126())
+	{
+		return;
+	}
+	auto header = std::make_shared<IGHeader2126>();
+	form->attach(header);
+	header->setGeometry(0, 0, igFormW(), igHeaderH());
+}
+
 
 // ////////////////////////////////////////////////////////////////////////////
 
@@ -83,16 +231,28 @@ static bool addIGTextButton(UDWORD id, UWORD x, UWORD y, UWORD width, const char
 	sButInit.x			= x;
 	sButInit.y			= y;
 	sButInit.width		= width;
-	sButInit.height		= INTINGAMEOP_OP_H;
+	sButInit.height		= igButtonH();
 
-	sButInit.pDisplay	= displayTextOption;
 	sButInit.pText		= string;
-	sButInit.pUserData = new DisplayTextOptionCache();
-	sButInit.onDelete = [](WIDGET *psWidget) {
-		assert(psWidget->pUserData != nullptr);
-		delete static_cast<DisplayTextOptionCache *>(psWidget->pUserData);
-		psWidget->pUserData = nullptr;
-	};
+	if (igo2126())
+	{
+		sButInit.pDisplay	= displayIGButton2126;
+		sButInit.pUserData = new IGButtonCache2126();
+		sButInit.onDelete = [](WIDGET *psWidget) {
+			delete static_cast<IGButtonCache2126 *>(psWidget->pUserData);
+			psWidget->pUserData = nullptr;
+		};
+	}
+	else
+	{
+		sButInit.pDisplay	= displayTextOption;
+		sButInit.pUserData = new DisplayTextOptionCache();
+		sButInit.onDelete = [](WIDGET *psWidget) {
+			assert(psWidget->pUserData != nullptr);
+			delete static_cast<DisplayTextOptionCache *>(psWidget->pUserData);
+			psWidget->pUserData = nullptr;
+		};
+	}
 	widgAddButton(psWScreen, &sButInit);
 
 	return true;
@@ -173,21 +333,22 @@ static bool _intAddInGameOptions()
 	auto ingameOp = std::make_shared<IntFormAnimated>();
 	parent->attach(ingameOp);
 	ingameOp->id = INTINGAMEOP;
+	addIGHeader2126(ingameOp);
 
 	int row = 1;
 	// add 'resume'
-	addIGTextButton(INTINGAMEOP_RESUME, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Resume Game"), OPALIGN);
+	addIGTextButton(INTINGAMEOP_RESUME, igButtonX(), igLineY(row), igButtonW(), _("Resume Game"), OPALIGN);
 	row++;
 
 	if (hasGameGuideTopics())
 	{
 		// add "View Guide"
-		addIGTextButton(INTINGAMEOP_OPENGAMEGUIDE, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("View Guide"), OPALIGN);
+		addIGTextButton(INTINGAMEOP_OPENGAMEGUIDE, igButtonX(), igLineY(row), igButtonW(), _("View Guide"), OPALIGN);
 		row++;
 	}
 
 	// add 'options'
-	addIGTextButton(INTINGAMEOP_OPTIONS, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Options"), OPALIGN);
+	addIGTextButton(INTINGAMEOP_OPTIONS, igButtonX(), igLineY(row), igButtonW(), _("Options"), OPALIGN);
 	row++;
 
 	if (!((bMultiPlayer && NetPlay.bComms) || bInTutorial || NETisReplay()))
@@ -195,21 +356,21 @@ static bool _intAddInGameOptions()
 		if (bMultiPlayer)
 		{
 			// add 'load'
-			addIGTextButton(INTINGAMEOP_LOAD_SKIRMISH, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Load Game"), OPALIGN);
+			addIGTextButton(INTINGAMEOP_LOAD_SKIRMISH, igButtonX(), igLineY(row), igButtonW(), _("Load Game"), OPALIGN);
 			row++;
 			// add 'save'
-			addIGTextButton(INTINGAMEOP_SAVE_SKIRMISH, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Save Game"), OPALIGN);
+			addIGTextButton(INTINGAMEOP_SAVE_SKIRMISH, igButtonX(), igLineY(row), igButtonW(), _("Save Game"), OPALIGN);
 			row++;
 		}
 		else
 		{
 			// add 'load'
-			addIGTextButton(INTINGAMEOP_LOAD_MISSION, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Load Game"), OPALIGN);
+			addIGTextButton(INTINGAMEOP_LOAD_MISSION, igButtonX(), igLineY(row), igButtonW(), _("Load Game"), OPALIGN);
 			row++;
 			if (!getCamTweakOption_AutosavesOnly())
 			{
 				// add 'save'
-				addIGTextButton(INTINGAMEOP_SAVE_MISSION, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Save Game"), OPALIGN);
+				addIGTextButton(INTINGAMEOP_SAVE_MISSION, igButtonX(), igLineY(row), igButtonW(), _("Save Game"), OPALIGN);
 				row++;
 			}
 		}
@@ -218,16 +379,21 @@ static bool _intAddInGameOptions()
 	// add 'quit' text
 	if (NetPlay.isHost && bMultiPlayer && NetPlay.bComms)
 	{
-		addIGTextButton(hostQuitConfirmation ? INTINGAMEOP_HOSTQUIT : INTINGAMEOP_QUIT, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Host Quit"), OPALIGN);
+		addIGTextButton(hostQuitConfirmation ? INTINGAMEOP_HOSTQUIT : INTINGAMEOP_QUIT, igButtonX(), igLineY(row), igButtonW(), _("Host Quit"), OPALIGN);
 	}
 	else
 	{
-		addIGTextButton(INTINGAMEOP_CONFIRM_QUIT, INTINGAMEOP_1_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP_OP_W, _("Quit"), OPALIGN);
+		addIGTextButton(INTINGAMEOP_CONFIRM_QUIT, igButtonX(), igLineY(row), igButtonW(), _("Quit"), OPALIGN);
 	}
 
 	// calculate layout
 	int lines = row;
 	ingameOp->setCalcLayout([lines](WIDGET *psWidget){
+		if (igo2126())
+		{
+			psWidget->setGeometry(igFormX(igFormW()), igFormY(igFormH(lines)), igFormW(), igFormH(lines));
+			return;
+		}
 		psWidget->setGeometry(INTINGAMEOP_X, INTINGAMEOPAUTO_Y(lines), INTINGAMEOP_W, INTINGAMEOPAUTO_H(lines));
 	});
 
@@ -258,7 +424,12 @@ static bool startInGameConfirmQuit()
 
 	auto label = std::make_shared<W_LABEL>();
 	ingameOp->attach(label);
-	label->setGeometry(INTINGAMEOP_2_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP4_OP_W, INTINGAMEOP_OP_H);
+	const bool flat = igo2126();
+	const int confirmW = flat ? 380 : INTINGAMEOP4_W;
+	const int confirmX = flat ? 16 : INTINGAMEOP_2_X;
+	const int confirmBW = flat ? confirmW - 32 : INTINGAMEOP4_OP_W;
+	auto lineY = [flat](int line) { return flat ? 16 + (line - 1) * 40 : INTINGAMEOPAUTO_Y_LINE(line); };
+	label->setGeometry(confirmX, lineY(row), confirmBW, flat ? 30 : INTINGAMEOP_OP_H);
 	if (bMultiPlayer && (NetPlay.bComms || NETisReplay()))
 	{
 		label->setString(_("Warning: Are you sure?")); //Do not mention saving in real multiplayer matches
@@ -268,16 +439,28 @@ static bool startInGameConfirmQuit()
 		label->setString(_("Warning: Are you sure? Any unsaved progress will be lost."));
 	}
 	label->setTextAlignment(WLAB_ALIGNCENTRE);
-	label->setFont(font_medium, WZCOL_YELLOW);
+	label->setFont(flat ? font_regular_bold : font_medium, flat ? hud2126::warn() : WZCOL_YELLOW);
+	if (flat)
+	{
+		auto dimmer = std::make_shared<IGDim2126>();
+		ingameOp->attach(dimmer);
+		dimmer->setGeometry(0, 0, 1, 1);
+	}
 
 	row++;
 
 	// add quit confirmation text
-	addIGTextButton(INTINGAMEOP_QUIT, INTINGAMEOP_2_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP4_OP_W, _("Confirm"), OPALIGN);
+	addIGTextButton(INTINGAMEOP_QUIT, confirmX, lineY(row), confirmBW, _("Confirm"), OPALIGN);
 	row++;
-	addIGTextButton(INTINGAMEOP_GO_BACK, INTINGAMEOP_2_X, INTINGAMEOPAUTO_Y_LINE(row), INTINGAMEOP4_OP_W, _("Back"), OPALIGN);
+	addIGTextButton(INTINGAMEOP_GO_BACK, confirmX, lineY(row), confirmBW, _("Back"), OPALIGN);
 
-	ingameOp->setCalcLayout([row](WIDGET* psWidget) {
+	ingameOp->setCalcLayout([row, flat, confirmW](WIDGET* psWidget) {
+		if (flat)
+		{
+			const int h = 16 + row * 40 + 10;
+			psWidget->setGeometry(igFormX(confirmW), igFormY(h), confirmW, h);
+			return;
+		}
 		psWidget->setGeometry(INTINGAMEOP4_X, INTINGAMEOPAUTO_Y(row), INTINGAMEOP4_W, INTINGAMEOPAUTO_H(row));
 	});
 

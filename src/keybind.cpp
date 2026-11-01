@@ -1510,6 +1510,12 @@ void	kf_TogglePauseMode()
 
 		/* And stop the clock */
 		gameTimeStop();
+		// (Warzone 2126 interface: the status strip shows PAUSED and the menu its own header, so no
+		// banner of console lines)
+		if (intInterface2126Active())
+		{
+			return;
+		}
 		addConsoleMessage(_("PAUSED"), CENTRE_JUSTIFY, SYSTEM_MESSAGE);
 
 

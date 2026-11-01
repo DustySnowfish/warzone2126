@@ -26,6 +26,7 @@
 
 /* Design screen ID's */
 #define IDDES_FORM			5000		// The base form for the design screen
+#define IDDES_DIM2126		5998		// Warzone 2126: the dimmed scene behind the design screen
 #define IDDES_STATSFORM		5001		// The design screen stats form
 #define IDDES_SYSTEMFORM	5006		// The clickable form for the weapon/ecm/sensor
 #define IDDES_BODYFORM		5007		// The clickable form for the body

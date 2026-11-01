@@ -71,6 +71,8 @@
 
 #include "multimenu.h"
 #include "qtscript.h"
+#include "hci/hud2126_style.h"
+#include "lib/ivis_opengl/pieblitfunc.h"
 
 /* Intelligence Map screen IDs */
 #define IDINTMAP_MSGFORM		6001	//The intelligence map tabbed form
@@ -477,6 +479,36 @@ void W_INTELLIGENCEOVERLAY_FORM::closeAnimated(std::function<void ()> onComplete
 W_INTELLIGENCEOVERLAY_FORM::W_INTELLIGENCEOVERLAY_FORM(W_FORMINIT const *init) : W_FORM(init) {}
 W_INTELLIGENCEOVERLAY_FORM::W_INTELLIGENCEOVERLAY_FORM() : W_FORM() {}
 
+
+/// Warzone 2126 interface: the title of the intelligence reports panel, and a line saying there are
+/// none yet (skirmish games often have none)
+class IntelTitle2126 : public WIDGET
+{
+public:
+	explicit IntelTitle2126(bool empty)
+		: empty(empty)
+	{
+		title.setText(_("Intelligence reports"), font_small);
+		if (empty)
+		{
+			none.setText(_("No reports yet"), font_regular);
+		}
+	}
+	void display(int xOffset, int yOffset) override
+	{
+		const int x0 = xOffset + x(), y0 = yOffset + y();
+		title.render(x0 + 10, y0 + 8 - title.aboveBase(), hud2126::label());
+		if (empty)
+		{
+			const int cy = y0 + 22 + (height() - 22) / 2;
+			none.render(x0 + (width() - none.width()) / 2, cy - none.lineSize() / 2 - none.aboveBase(), hud2126::disabled());
+		}
+	}
+private:
+	bool empty;
+	WzText title, none;
+};
+
 std::shared_ptr<W_INTELLIGENCEOVERLAY_FORM> W_INTELLIGENCEOVERLAY_FORM::make(bool _playCurrent, UDWORD formID)
 {
 	W_FORMINIT sInit;
@@ -503,7 +535,7 @@ std::shared_ptr<W_INTELLIGENCEOVERLAY_FORM> W_INTELLIGENCEOVERLAY_FORM::make(boo
 void W_INTELLIGENCEOVERLAY_FORM::initialize(bool _playCurrent, bool animate)
 {
 	//add message to indicate game is paused - single player mode
-	if (PAUSE_DISPLAY_CONDITION)
+	if (PAUSE_DISPLAY_CONDITION && !intInterface2126Active()) // (2126: the status strip shows PAUSED)
 	{
 		W_LABINIT sLabInit;
 		sLabInit.id = IDINTMAP_PAUSELABEL;
@@ -536,7 +568,20 @@ void W_INTELLIGENCEOVERLAY_FORM::initialize(bool _playCurrent, bool animate)
 		msgList->setChildSize(OBJ_BUTWIDTH, OBJ_BUTHEIGHT);
 		msgList->setChildSpacing(OBJ_GAP, OBJ_GAP);
 		int msgListWidth = OBJ_BUTWIDTH * 5 + OBJ_GAP * 4;
-		msgList->setGeometry((msgForm->width() - msgListWidth) / 2, INTMAP_MSGY, msgListWidth, msgForm->height() - INTMAP_MSGY);
+		const bool flat2126 = intInterface2126Active();
+		const int listY = flat2126 ? 24 : INTMAP_MSGY;
+		msgList->setGeometry((msgForm->width() - msgListWidth) / 2, listY, msgListWidth, msgForm->height() - listY);
+		if (flat2126)
+		{
+			bool any = false;
+			for (MESSAGE *psMessage : apsMessages[selectedPlayer])
+			{
+				any = any || psMessage->type != MSG_PROXIMITY;
+			}
+			auto title = std::make_shared<IntelTitle2126>(!any);
+			msgForm->attach(title);
+			title->setGeometry(0, 0, msgForm->width(), any ? 22 : msgForm->height());
+		}
 
 		/* Add the message buttons */
 
