@@ -2,12 +2,24 @@
 	"version": 1,
 	"name": "Urban",
 	"strength": 1.0,
-	"exposure": 0.0,
-	"temperature": -0.10,
+	"exposure": 0.75,
+	"temperature": -0.03,
 	"tint": 0.0,
-	"contrast": 1.10,
-	"saturation": 0.85,
-	"lift": [0.0, 0.01, 0.02],
-	"gamma": [1.0, 1.0, 1.0],
-	"gain": [1.0, 1.0, 1.0]
+	"contrast": 1.1,
+	"saturation": 0.95,
+	"lift": [
+		0.0,
+		0.005,
+		0.01
+	],
+	"gamma": [
+		1.0,
+		1.0,
+		1.0
+	],
+	"gain": [
+		1.02,
+		1.0,
+		0.98
+	]
 }

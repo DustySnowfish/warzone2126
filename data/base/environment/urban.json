@@ -1,19 +1,62 @@
 {
 	"version": 1,
 	"name": "Urban",
-	"zenith": [115, 125, 140],
-	"horizon": [170, 168, 160],
-	"ground": [95, 95, 95],
+	"zenith": [
+		115,
+		125,
+		140
+	],
+	"horizon": [
+		178,
+		174,
+		166
+	],
+	"ground": [
+		95,
+		95,
+		95
+	],
 	"horizonSharpness": 2.5,
 	"sunGlow": 0.4,
 	"sky": {
-		"zenith": [60, 105, 170],
-		"horizon": [120, 155, 190],
+		"zenith": [
+			60,
+			105,
+			170
+		],
+		"horizon": [
+			120,
+			155,
+			190
+		],
 		"horizonSharpness": 2.0,
 		"sunGlow": 0.4,
 		"sunDisc": 1.0,
 		"brightness": 1.0,
 		"bandFade": 0.35
 	},
-	"weather": { "type": "rain", "clear": [240, 600], "storm": [120, 260], "strength": 1.0, "startChance": 0.3 }
+	"weather": {
+		"type": "rain",
+		"clear": [
+			240,
+			600
+		],
+		"storm": [
+			120,
+			260
+		],
+		"strength": 1.0,
+		"startChance": 0.3
+	},
+	"clouds": {
+		"coverage": 0.55,
+		"strength": 0.32,
+		"size": 2200,
+		"height": 1800,
+		"softness": 0.18,
+		"wind": [
+			30,
+			22
+		]
+	}
 }
