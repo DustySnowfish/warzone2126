@@ -32,6 +32,9 @@
  */
 
 #include <string.h>
+#include <algorithm>
+#include <cmath>
+#include <initializer_list>
 
 #include "mikktspace.h"
 
@@ -1354,83 +1357,245 @@ void reloadTerrainTextures()
 	loadTerrainTexturesBlocking(currentMapTileset);
 }
 
-/**
- * Check what the videocard + drivers support and divide the loaded map into sectors that can be drawn.
- * It also determines the lightmap size.
- */
-/// Warzone 2126: smoothed ground type masks (terrain realism A1).
+/// Warzone 2126: smoothed ground type masks (terrain realism A1, A4).
 ///
 /// The map stores one ground type per vertex (tile corner), and the renderer blended them across
 /// a single tile, so patches of different ground had staircase edges one tile wide. These masks
 /// hold, per vertex, how much of each ground type is there after a light blur over the
 /// neighbouring vertices; the High terrain shader samples them per pixel (bilinear) with a noise
 /// warp and per-ground noise, so boundaries become smooth, irregular natural edges.
+///
+/// A4: the masks are then weighted by the shape of the land, as weather would: rock shows through
+/// on steep slopes, damp ground (mud, dark earth) collects in hollows and along the paths water
+/// would take, and dust or snow lies on exposed ridges. Which ground plays which part is chosen by
+/// texture name per tileset; a role with no matching ground is skipped. Render-only, computed from
+/// the heights at map load (later craters and earthworks do not change it).
+///
 /// Layout: each block matches the lightmap (texel x, y = vertex x, y); the masks are blocks 1-3 of
 /// the terrain fields texture (block 0 is the crater depth), four ground types per block.
+namespace
+{
+
+float smoothstep2126(float e0, float e1, float x)
+{
+	const float t = std::max(0.f, std::min(1.f, (x - e0) / (e1 - e0)));
+	return t * t * (3.f - 2.f * t);
+}
+
+enum GroundRole2126 { ROLE_ROCK, ROLE_DAMP, ROLE_DUST, ROLE_COUNT };
+
+/// The ground type that plays each role on this map's tileset, or -1
+void findGroundRoles(size_t numGrounds, int (&roles)[ROLE_COUNT])
+{
+	auto find = [&](std::initializer_list<const char *> keys, const char *exclude) -> int {
+		for (const char *key : keys)
+		{
+			for (size_t g = 0; g < numGrounds; ++g)
+			{
+				const std::string &name = getGroundType(g).textureName;
+				if (name.find(key) != std::string::npos && (!exclude || name.find(exclude) == std::string::npos))
+				{
+					return static_cast<int>(g);
+				}
+			}
+		}
+		return -1;
+	};
+	roles[ROLE_ROCK] = find({"rock-earth", "snowrock", "brown-rocks", "cliff"}, nullptr);
+	roles[ROLE_DAMP] = find({"mud", "brown-earth"}, nullptr);
+	roles[ROLE_DUST] = find({"sand", "gray-rubble", "-snow-"}, "yellow");
+	if (roles[ROLE_DUST] < 0)
+	{
+		roles[ROLE_DUST] = find({"yellow-sand"}, nullptr);
+	}
+}
+
+/// Ground the shape weighting leaves alone where it is the vertex's own (paved tiles, lake beds)
+bool groundIsFixed(size_t g)
+{
+	const std::string &name = getGroundType(g).textureName;
+	return name.find("tiles") != std::string::npos || name.find("bottom") != std::string::npos;
+}
+
+} // anonymous namespace
+
 static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 {
-	// (W2126_NO_GROUND_MASKS=1 leaves the masks empty, so the shader uses the tile corners: for comparisons)
+	// (W2126_NO_GROUND_MASKS=1 leaves the masks empty, so the shader uses the tile corners;
+	// W2126_NO_GROUND_SHAPE=1 skips the slope and flow weighting: for comparisons)
 	const bool disabled = getenv("W2126_NO_GROUND_MASKS") != nullptr;
+	const bool shapeWeighting = getenv("W2126_NO_GROUND_SHAPE") == nullptr;
 	const size_t numGrounds = disabled ? 0 : std::min<size_t>(getNumGroundTypes(), 12);
 	const int W = static_cast<int>(mapState.width), H = static_cast<int>(mapState.height);
 	const size_t texW = lightmapWidth, texH = lightmapHeight;
-	std::vector<float> field(static_cast<size_t>(W + 1) * (H + 1));
-	std::vector<float> tmp(field.size());
-	if (fields.width() != texW || fields.height() != texH * 4)
+	if (numGrounds == 0 || fields.width() != texW || fields.height() != texH * 4)
 	{
 		return;
 	}
-	auto vertexGround = [&](int x, int y) -> unsigned {
-		x = std::max(0, std::min(W - 1, x));
-		y = std::max(0, std::min(H - 1, y));
-		return mapTile(mapState, x, y)->ground;
-	};
 	const int FW = W + 1;
+	const size_t count = static_cast<size_t>(FW) * (H + 1);
+	auto at = [FW](int x, int y) { return static_cast<size_t>(y) * FW + x; };
+	auto clampTile = [&](int x, int y) {
+		return mapTile(mapState, std::max(0, std::min(W - 1, x)), std::max(0, std::min(H - 1, y)));
+	};
+	auto vertexGround = [&](int x, int y) -> unsigned { return clampTile(x, y)->ground; };
+
+	std::vector<std::vector<float>> masks(numGrounds, std::vector<float>(count));
+	std::vector<float> tmp(count);
 	for (size_t g = 0; g < numGrounds; ++g)
 	{
+		std::vector<float> &field = masks[g];
 		for (int y = 0; y <= H; ++y)
 		{
 			for (int x = 0; x <= W; ++x)
 			{
-				field[static_cast<size_t>(y) * FW + x] = vertexGround(x, y) == g ? 1.f : 0.f;
+				field[at(x, y)] = vertexGround(x, y) == g ? 1.f : 0.f;
 			}
 		}
 		// A 1-4-1 blur along each axis (about 0.6 tiles): diagonal staircases become straight-ish
-		// edges, while a single vertex of a ground type still shows
+		// edges
 		for (int y = 0; y <= H; ++y)
 		{
 			for (int x = 0; x <= W; ++x)
 			{
-				const float l = field[static_cast<size_t>(y) * FW + std::max(0, x - 1)];
-				const float r = field[static_cast<size_t>(y) * FW + std::min(W, x + 1)];
-				tmp[static_cast<size_t>(y) * FW + x] = (l + 4.f * field[static_cast<size_t>(y) * FW + x] + r) / 6.f;
+				tmp[at(x, y)] = (field[at(std::max(0, x - 1), y)] + 4.f * field[at(x, y)] + field[at(std::min(W, x + 1), y)]) / 6.f;
 			}
 		}
 		for (int y = 0; y <= H; ++y)
 		{
 			for (int x = 0; x <= W; ++x)
 			{
-				const float u = tmp[static_cast<size_t>(std::max(0, y - 1)) * FW + x];
-				const float d = tmp[static_cast<size_t>(std::min(H, y + 1)) * FW + x];
-				field[static_cast<size_t>(y) * FW + x] = (u + 4.f * tmp[static_cast<size_t>(y) * FW + x] + d) / 6.f;
+				const float blurred = (tmp[at(x, std::max(0, y - 1))] + 4.f * tmp[at(x, y)] + tmp[at(x, std::min(H, y + 1))]) / 6.f;
+				// The vertex's own ground keeps most of its weight there, so isolated patches stay
+				// as small rounded blobs instead of being blurred away
+				field[at(x, y)] = vertexGround(x, y) == g ? 1.f : blurred * 0.7f;
 			}
 		}
+	}
+
+	int roles[ROLE_COUNT];
+	findGroundRoles(numGrounds, roles);
+	debug(LOG_TERRAIN, "Ground roles: rock %d, damp %d, dust %d", roles[ROLE_ROCK], roles[ROLE_DAMP], roles[ROLE_DUST]);
+	if (shapeWeighting && (roles[ROLE_ROCK] >= 0 || roles[ROLE_DAMP] >= 0 || roles[ROLE_DUST] >= 0))
+	{
+		std::vector<float> height(count);
+		for (int y = 0; y <= H; ++y)
+		{
+			for (int x = 0; x <= W; ++x)
+			{
+				height[at(x, y)] = static_cast<float>(clampTile(x, y)->height);
+			}
+		}
+		auto h = [&](int x, int y) { return height[at(std::max(0, std::min(W, x)), std::max(0, std::min(H, y)))]; };
+
+		// Where water would flow: each vertex passes what it has collected to its lowest
+		// neighbour, highest vertices first (a D8 flow accumulation)
+		std::vector<uint32_t> order(count);
+		for (size_t i = 0; i < count; ++i)
+		{
+			order[i] = static_cast<uint32_t>(i);
+		}
+		std::sort(order.begin(), order.end(), [&](uint32_t a, uint32_t b) { return height[a] > height[b]; });
+		std::vector<float> flow(count, 1.f);
+		for (const uint32_t i : order)
+		{
+			const int x = static_cast<int>(i % FW), y = static_cast<int>(i / FW);
+			float lowest = height[i];
+			size_t to = i;
+			for (int dy = -1; dy <= 1; ++dy)
+			{
+				for (int dx = -1; dx <= 1; ++dx)
+				{
+					const int nx = x + dx, ny = y + dy;
+					if ((dx == 0 && dy == 0) || nx < 0 || ny < 0 || nx > W || ny > H)
+					{
+						continue;
+					}
+					// Diagonal drops count for less (they are longer)
+					const float drop = (height[i] - height[at(nx, ny)]) * ((dx != 0 && dy != 0) ? 0.7071f : 1.f);
+					if (height[i] - drop < lowest)
+					{
+						lowest = height[i] - drop;
+						to = at(nx, ny);
+					}
+				}
+			}
+			if (to != i)
+			{
+				flow[to] += flow[i];
+			}
+		}
+
+		size_t touched[ROLE_COUNT] = {0, 0, 0};
+		for (int y = 0; y <= H; ++y)
+		{
+			for (int x = 0; x <= W; ++x)
+			{
+				const size_t i = at(x, y);
+				const unsigned own = vertexGround(x, y);
+				if (own < numGrounds && groundIsFixed(own))
+				{
+					continue;
+				}
+				bool nearWater = false;
+				for (int ty = y - 1; ty <= y && !nearWater; ++ty)
+				{
+					for (int tx = x - 1; tx <= x; ++tx)
+					{
+						nearWater = nearWater || terrainType(clampTile(tx, ty)) == TER_WATER;
+					}
+				}
+				if (nearWater)
+				{
+					continue; // the shoreline has its own treatment
+				}
+				const float gx = (h(x + 1, y) - h(x - 1, y)) / (2.f * TILE_UNITS);
+				const float gy = (h(x, y + 1) - h(x, y - 1)) / (2.f * TILE_UNITS);
+				const float slope = std::sqrt(gx * gx + gy * gy); // rise over run
+				const float hollow = (h(x - 1, y) + h(x + 1, y) + h(x, y - 1) + h(x, y + 1)) * 0.25f - h(x, y); // world units, + in a hollow
+				const float wet = std::log2(flow[i]) / 8.f; // 1 where about 256 vertices drain through
+
+				float amount[ROLE_COUNT];
+				amount[ROLE_ROCK] = smoothstep2126(0.3f, 0.75f, slope) * 0.8f;
+				amount[ROLE_DAMP] = std::max(smoothstep2126(4.f, 18.f, hollow) * 0.55f, smoothstep2126(0.3f, 0.75f, wet) * 0.65f) * (1.f - smoothstep2126(0.5f, 0.9f, slope));
+				amount[ROLE_DUST] = smoothstep2126(4.f, 18.f, -hollow) * 0.5f * (1.f - smoothstep2126(0.5f, 0.9f, slope));
+				for (int r = 0; r < ROLE_COUNT; ++r)
+				{
+					if (roles[r] < 0 || amount[r] <= 0.01f)
+					{
+						continue;
+					}
+					for (size_t g = 0; g < numGrounds; ++g)
+					{
+						masks[g][i] *= 1.f - amount[r];
+					}
+					masks[static_cast<size_t>(roles[r])][i] += amount[r];
+					touched[r] += amount[r] > 0.2f ? 1 : 0;
+				}
+			}
+		}
+		debug(LOG_TERRAIN, "Ground shape weighting: rock at %zu, damp at %zu, dust at %zu of %zu vertices", touched[ROLE_ROCK], touched[ROLE_DAMP], touched[ROLE_DUST], count);
+	}
+
+	for (size_t g = 0; g < numGrounds; ++g)
+	{
 		unsigned char *out = fields.bmp_w() + (1 + g / 4) * texW * texH * 4;
 		const size_t channel = g % 4;
 		for (int y = 0; y <= H && static_cast<size_t>(y) < texH; ++y)
 		{
 			for (int x = 0; x <= W && static_cast<size_t>(x) < texW; ++x)
 			{
-				// The vertex's own ground keeps most of its weight there, so isolated patches stay
-				// as small rounded blobs instead of being blurred away
-				const float blurred = field[static_cast<size_t>(y) * FW + x];
-				const float v = vertexGround(x, y) == g ? 1.f : blurred * 0.7f;
+				const float v = masks[g][at(x, y)];
 				out[(static_cast<size_t>(y) * texW + x) * 4 + channel] = static_cast<unsigned char>(std::lround(std::max(0.f, std::min(1.f, v)) * 255.f));
 			}
 		}
 	}
 }
 
+/**
+ * Check what the videocard + drivers support and divide the loaded map into sectors that can be drawn.
+ * It also determines the lightmap size.
+ */
 bool initTerrain(WorldMapState& mapState)
 {
 	const uint32_t initStartTime = wzGetTicks();
