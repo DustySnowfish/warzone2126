@@ -30,6 +30,8 @@
 #define WZ2126_MACRO_VARIATION 0.07
 // Slope (vertical part of the normal) below which the side projections are blended in
 #define WZ2126_TRIPLANAR_SHARPNESS 6.0
+// Thickness of the colour bands on cliff faces (world units; a tile is 128)
+#define WZ2126_STRATA_THICKNESS 13.0
 
 float wz2126Hash(vec2 p)
 {
@@ -152,6 +154,7 @@ void wz2126SampleGround(out vec4 outColour, out vec3 outN, out float outGloss)
 	float antiTile = smoothstep(0.25, 0.75, macroA * 0.65 + macroB * 0.35) * WZ2126_ANTI_TILE_MAX;
 	const mat2 rot = mat2(0.8, -0.6, 0.6, 0.8);
 
+	vec4 topColour = vec4(0.0); // the strongest ground seen from above (for dust on cliff ledges)
 	vec4 colours[4];
 	vec3 normals[4];
 	float glosses[4];
@@ -166,6 +169,10 @@ void wz2126SampleGround(out vec4 outColour, out vec3 outN, out float outGloss)
 		vec4 col = WZ_TEXARR(groundTex, uv);
 		vec3 uv2 = vec3(rot * (WZ_UV_GROUND * s) * 0.43 + vec2(0.37, 0.71), layer);
 		col = mix(col, WZ_TEXARR(groundTex, uv2), antiTile);
+		if (i == 0)
+		{
+			topColour = col;
+		}
 		vec3 n = wz2126UnpackNormal(WZ_TEXARR(groundNormal, uv).xyz);
 		float gloss = WZ_TEXARR(groundSpecular, uv).r;
 		if (sides)
@@ -210,6 +217,23 @@ void wz2126SampleGround(out vec4 outColour, out vec3 outN, out float outGloss)
 	outN /= total;
 	outGloss /= total;
 	outColour.rgb *= 1.0 + (macroA - 0.5) * 2.0 * WZ2126_MACRO_VARIATION;
+
+	// Cliffs (terrain realism C1): on steep faces, horizontal strata in slightly different shades
+	// with wavering edges, and the ground from above settling on the ledges that face up
+	float steep = 1.0 - smoothstep(0.5, 0.85, abs(Ng.y));
+	if (steep > 0.0)
+	{
+		float wave = (wz2126Noise(p.xz / 300.0) - 0.5) * 14.0 + (wz2126Noise(p.xz / 70.0 + vec2(4.7, 1.3)) - 0.5) * 4.0;
+		float layer = (p.y + wave) / WZ2126_STRATA_THICKNESS;
+		float band = wz2126Noise(vec2(layer, 0.37)) * 0.7 + wz2126Noise(vec2(layer * 2.3, 5.1)) * 0.3;
+		vec3 tint = mix(vec3(0.72, 0.7, 0.7), vec3(1.22, 1.12, 1.0), band);
+		outColour.rgb *= mix(vec3(1.0), tint, steep);
+		// The detail normal in model space: up-facing bumps on a steep face are ledges
+		vec3 nModel = normalize(transpose(ModelTangentMatrix) * normalize(outN));
+		float ledge = smoothstep(0.45, 0.8, nModel.y) * steep * smoothstep(0.3, 0.6, wz2126Noise(p.xz / 40.0 + vec2(p.y / 30.0, 2.9)));
+		outColour = mix(outColour, topColour, ledge * 0.7);
+		outGloss = mix(outGloss, 0.1, ledge * 0.5);
+	}
 }
 
 // Decal opacity factor: 1 on flat and gentle ground, fading to 0 on steep faces
