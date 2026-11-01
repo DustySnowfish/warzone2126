@@ -1476,6 +1476,7 @@ static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 	int roles[ROLE_COUNT];
 	findGroundRoles(numGrounds, roles);
 	debug(LOG_TERRAIN, "Ground roles: rock %d, damp %d, dust %d", roles[ROLE_ROCK], roles[ROLE_DAMP], roles[ROLE_DUST]);
+	const bool sandyDust = roles[ROLE_DUST] >= 0 && getGroundType(static_cast<size_t>(roles[ROLE_DUST])).textureName.find("sand") != std::string::npos;
 	if (shapeWeighting && (roles[ROLE_ROCK] >= 0 || roles[ROLE_DAMP] >= 0 || roles[ROLE_DUST] >= 0))
 	{
 		std::vector<float> height(count);
@@ -1545,20 +1546,25 @@ static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 						nearWater = nearWater || terrainType(clampTile(tx, ty)) == TER_WATER;
 					}
 				}
-				if (nearWater)
-				{
-					continue; // the shoreline has its own treatment
-				}
 				const float gx = (h(x + 1, y) - h(x - 1, y)) / (2.f * TILE_UNITS);
 				const float gy = (h(x, y + 1) - h(x, y - 1)) / (2.f * TILE_UNITS);
 				const float slope = std::sqrt(gx * gx + gy * gy); // rise over run
 				const float hollow = (h(x - 1, y) + h(x + 1, y) + h(x, y - 1) + h(x, y + 1)) * 0.25f - h(x, y); // world units, + in a hollow
 				const float wet = std::log2(flow[i]) / 8.f; // 1 where about 256 vertices drain through
 
-				float amount[ROLE_COUNT];
-				amount[ROLE_ROCK] = smoothstep2126(0.3f, 0.75f, slope) * 0.8f;
-				amount[ROLE_DAMP] = std::max(smoothstep2126(4.f, 18.f, hollow) * 0.55f, smoothstep2126(0.3f, 0.75f, wet) * 0.65f) * (1.f - smoothstep2126(0.5f, 0.9f, slope));
-				amount[ROLE_DUST] = smoothstep2126(4.f, 18.f, -hollow) * 0.5f * (1.f - smoothstep2126(0.5f, 0.9f, slope));
+				float amount[ROLE_COUNT] = {0.f, 0.f, 0.f};
+				if (nearWater)
+				{
+					// Shores: a sandy beach where the bank is gentle (the wet band and the lake bed
+					// are drawn by the shader from the shore field)
+					amount[ROLE_DUST] = sandyDust ? 0.45f * (1.f - smoothstep2126(0.25f, 0.5f, slope)) : 0.f;
+				}
+				else
+				{
+					amount[ROLE_ROCK] = smoothstep2126(0.3f, 0.75f, slope) * 0.8f;
+					amount[ROLE_DAMP] = std::max(smoothstep2126(4.f, 18.f, hollow) * 0.55f, smoothstep2126(0.3f, 0.75f, wet) * 0.65f) * (1.f - smoothstep2126(0.5f, 0.9f, slope));
+					amount[ROLE_DUST] = smoothstep2126(4.f, 18.f, -hollow) * 0.5f * (1.f - smoothstep2126(0.5f, 0.9f, slope));
+				}
 				for (int r = 0; r < ROLE_COUNT; ++r)
 				{
 					if (roles[r] < 0 || amount[r] <= 0.01f)
@@ -1588,6 +1594,91 @@ static void buildGroundMasks(WorldMapState& mapState, iV_Image &fields)
 				const float v = masks[g][at(x, y)];
 				out[(static_cast<size_t>(y) * texW + x) * 4 + channel] = static_cast<unsigned char>(std::lround(std::max(0.f, std::min(1.f, v)) * 255.f));
 			}
+		}
+	}
+}
+
+/// Warzone 2126: the shore field (terrain realism C3), in block 0 of the terrain fields texture:
+/// green = nearness to water (1 on the vertices of water tiles, fading to 0 three vertices inland),
+/// blue = the water level there ((level + 64) / 2.5 world units). The High terrain shader draws a
+/// wet band just above the waterline and the lake bed below it from these. Static: the water does
+/// not move.
+static void buildShoreField(WorldMapState& mapState, iV_Image &fields)
+{
+	const int W = static_cast<int>(mapState.width), H = static_cast<int>(mapState.height);
+	const size_t texW = lightmapWidth, texH = lightmapHeight;
+	if (fields.width() != texW || fields.height() < texH || getenv("W2126_NO_SHORE") != nullptr)
+	{
+		return;
+	}
+	const int FW = W + 1;
+	const size_t count = static_cast<size_t>(FW) * (H + 1);
+	constexpr int kReach = 3;
+	std::vector<int> dist(count, kReach + 1);
+	std::vector<int32_t> level(count, 0);
+	std::vector<uint32_t> queue;
+	queue.reserve(count / 4);
+	// Seeds: every corner of a water tile
+	for (int y = 0; y < H; ++y)
+	{
+		for (int x = 0; x < W; ++x)
+		{
+			const MAPTILE *tile = mapTile(mapState, x, y);
+			if (terrainType(tile) != TER_WATER)
+			{
+				continue;
+			}
+			for (int dy = 0; dy <= 1; ++dy)
+			{
+				for (int dx = 0; dx <= 1; ++dx)
+				{
+					const size_t i = static_cast<size_t>(y + dy) * FW + (x + dx);
+					if (dist[i] != 0)
+					{
+						dist[i] = 0;
+						level[i] = tile->waterLevel;
+						queue.push_back(static_cast<uint32_t>(i));
+					}
+				}
+			}
+		}
+	}
+	// Spread inland (breadth first), carrying the nearest water's level
+	for (size_t q = 0; q < queue.size(); ++q)
+	{
+		const uint32_t i = queue[q];
+		const int x = static_cast<int>(i % FW), y = static_cast<int>(i / FW);
+		if (dist[i] >= kReach)
+		{
+			continue;
+		}
+		const int nx[4] = {x - 1, x + 1, x, x};
+		const int ny[4] = {y, y, y - 1, y + 1};
+		for (int k = 0; k < 4; ++k)
+		{
+			if (nx[k] < 0 || ny[k] < 0 || nx[k] > W || ny[k] > H)
+			{
+				continue;
+			}
+			const size_t n = static_cast<size_t>(ny[k]) * FW + nx[k];
+			if (dist[n] > dist[i] + 1)
+			{
+				dist[n] = dist[i] + 1;
+				level[n] = level[i];
+				queue.push_back(static_cast<uint32_t>(n));
+			}
+		}
+	}
+	unsigned char *out = fields.bmp_w();
+	for (int y = 0; y <= H && static_cast<size_t>(y) < texH; ++y)
+	{
+		for (int x = 0; x <= W && static_cast<size_t>(x) < texW; ++x)
+		{
+			const size_t i = static_cast<size_t>(y) * FW + x;
+			const float closeness = 1.f - static_cast<float>(std::min(dist[i], kReach)) / kReach;
+			unsigned char *px = out + (static_cast<size_t>(y) * texW + x) * 4;
+			px[1] = static_cast<unsigned char>(std::lround(closeness * 255.f));
+			px[2] = static_cast<unsigned char>(std::max(0L, std::min(255L, std::lround((static_cast<float>(level[i]) + 64.f) / 2.5f))));
 		}
 	}
 }
@@ -1978,6 +2069,7 @@ bool initTerrain(WorldMapState& mapState)
 		return false;
 	}
 	buildGroundMasks(mapState, *deformPixmap);
+	buildShoreField(mapState, *deformPixmap);
 	delete deform_texture;
 	deform_texture = gfx_api::context::get().create_texture(1, deformPixmap->width(), deformPixmap->height(), deformPixmap->pixel_format(), "mem::terraindeform");
 	deform_texture->upload(0, *(deformPixmap.get()));

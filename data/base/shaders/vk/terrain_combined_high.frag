@@ -176,6 +176,30 @@ vec4 main_bumpMapping() {
 			bump.N = mix(bump.N, normalize(bump.N + vec3(n - 0.5, n2 - 0.5, 0.0) * 0.9), k);
 		}
 	}
+	// Warzone 2126 shorelines (terrain realism C3): a wet band just above the waterline, and the
+	// lake bed below it darker and tinted by the water (shore field: g nearness, b water level)
+	{
+		vec4 shore = texture(terrainDeform, vec2(frag.uvLightmap.x, frag.uvLightmap.y * 0.25), 0.f);
+		if (shore.g > 0.01)
+		{
+			float waterY = shore.b * 637.5 - 64.0;
+			float above = frag.posModelSpace.y - waterY;
+			float n = wzCraterNoise(frag.posModelSpace.xz * 0.018);
+			float n2 = wzCraterNoise(frag.posModelSpace.xz * 0.06 + 7.3);
+			// The band reaches 0.1 to 0.25 tiles up the bank, with a ragged top edge
+			float bandTop = 12.0 + 20.0 * n + 6.0 * (n2 - 0.5);
+			float wetBand = (1.0 - smoothstep(bandTop * 0.45, bandTop, above));
+			// A faint tide line along the top of the band
+			float tideLine = smoothstep(bandTop * 0.7, bandTop * 0.92, above) * (1.0 - smoothstep(bandTop * 0.92, bandTop * 1.12, above)) * 0.5;
+			float k = clamp(shore.g * 1.6, 0.0, 1.0);
+			float wet = clamp(wetBand + tideLine, 0.0, 1.0) * k;
+			bump.color.rgb *= 1.0 - 0.32 * wet;
+			bump.gloss = mix(bump.gloss, 0.6, wetBand * k * 0.5);
+			// Under water: the bed fades towards the water colour with depth
+			float under = smoothstep(0.0, 120.0, -above) * k;
+			bump.color.rgb = mix(bump.color.rgb, bump.color.rgb * vec3(0.64, 0.78, 0.82), under);
+		}
+	}
 	// Warzone 2126 weather: wet ground darkens and shines (most in hollows); snow settles on flat ground
 	if (weatherGround > 0.0)
 	{
