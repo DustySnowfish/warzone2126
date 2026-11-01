@@ -2437,6 +2437,28 @@ static void drawDepthOnlyForDepthMap(const glm::mat4 &ModelViewProjection, const
 	gfx_api::context::get().unbind_index_buffer(*geometryIndexVBO);
 }
 
+/// Warzone 2126 micro relief (terrain realism D2): which ground types get wind ripples (sand, snow)
+/// and which get rills on slopes (natural ground: not paving or lake beds), as bitmasks for the
+/// High terrain shader
+static glm::vec4 groundFlags2126()
+{
+	const size_t n = std::min<size_t>(getNumGroundTypes(), 16); // (a few name checks per frame)
+	unsigned ripples = 0, rills = 0;
+	for (size_t g = 0; g < n; ++g)
+	{
+		const std::string &name = getGroundType(g).textureName;
+		if ((name.find("sand") != std::string::npos && name.find("yellow") == std::string::npos) || name.find("-snow-") != std::string::npos)
+		{
+			ripples |= 1u << g;
+		}
+		if (name.find("tiles") == std::string::npos && name.find("bottom") == std::string::npos)
+		{
+			rills |= 1u << g;
+		}
+	}
+	return glm::vec4(static_cast<float>(ripples), static_cast<float>(rills), 0.f, 0.f);
+}
+
 template<typename PSO>
 static void drawTerrainCombinedmpl(const glm::mat4 &ModelViewProjection, const glm::mat4& ViewMatrix, const glm::mat4 &ModelUVLightmap, const Vector3f &cameraPos, const Vector3f &sunPos, const ShadowCascadesInfo& shadowCascades, gfx_api::abstract_texture* shadowMap, const gfx_api::frame_uniform_block_ref<gfx_api::PointLightsUniforms>& pointLights)
 {
@@ -2464,7 +2486,7 @@ static void drawTerrainCombinedmpl(const glm::mat4 &ModelViewProjection, const g
 		pie_GetLighting0(LIGHT_EMISSIVE), pie_GetLighting0(LIGHT_AMBIENT), pie_GetLighting0(LIGHT_DIFFUSE), pie_GetLighting0(LIGHT_SPECULAR),
 		{shadowCascades.shadowCascadeSplit[0], shadowCascades.shadowCascadeSplit[1], shadowCascades.shadowCascadeSplit[2], pie_getPerspectiveZFar()}, shadowCascades.shadowMapSize,
 		terrainShaderQuality, static_cast<int>(dimension.first), static_cast<int>(dimension.second), 0.f, gfx_api::context::get().getSceneMipLodBias(),
-		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), weather::groundState(),
+		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), weather::groundState(), groundFlags2126(),
 		getCurrentLightingManager().getPointLightBuckets().bucketOffsetAndSize
 	};
 	PSO::get().template set_uniforms_at<0>(uniforms, gfx_api::globals_block_active_size<gfx_api::TerrainCombinedUniforms>());
@@ -2515,7 +2537,7 @@ static void drawTerrainCombinedTessImpl(const glm::mat4 &ModelViewProjection, co
 		pie_GetLighting0(LIGHT_EMISSIVE), pie_GetLighting0(LIGHT_AMBIENT), pie_GetLighting0(LIGHT_DIFFUSE), pie_GetLighting0(LIGHT_SPECULAR),
 		{shadowCascades.shadowCascadeSplit[0], shadowCascades.shadowCascadeSplit[1], shadowCascades.shadowCascadeSplit[2], pie_getPerspectiveZFar()}, shadowCascades.shadowMapSize,
 		terrainShaderQuality, static_cast<int>(dimension.first), static_cast<int>(dimension.second), terrainTessMaxLevel(), gfx_api::context::get().getSceneMipLodBias(),
-		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), weather::groundState(),
+		static_cast<int>(getCurrentLightingManager().getPointLightBuckets().bucketDimensionUsed), weather::groundState(), groundFlags2126(),
 		getCurrentLightingManager().getPointLightBuckets().bucketOffsetAndSize
 	};
 	PSO::get().template set_uniforms_at<0>(uniforms, gfx_api::globals_block_active_size<gfx_api::TerrainCombinedUniforms>());

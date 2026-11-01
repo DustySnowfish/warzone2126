@@ -1414,6 +1414,7 @@ namespace gfx_api
 		float mipLoadBias;
 		int bucketDimensionUsed;
 		float weatherGround = 0.f; // Warzone 2126: > 0 wet ground (rain), < 0 snow cover
+		glm::vec4 groundFlags2126 = glm::vec4(0.f); // Warzone 2126: per-ground bitmasks (x: wind ripples, y: rills)
 		// The bucket table is last because its length follows the grid dimension, which may become variable.
 		// (Anything placed after it would shift whenever that changed.)
 		std::array<glm::ivec4, max_bucket_dimension * max_bucket_dimension> bucketOffsetAndSize;

@@ -216,6 +216,55 @@ void wz2126SampleGround(out vec4 outColour, out vec3 outN, out float outGloss)
 	outColour /= total;
 	outN /= total;
 	outGloss /= total;
+	// Micro relief (terrain realism D2): wind ripples on sand and snow, rills down slopes of natural
+	// ground; detail normals only, faded out with distance (they would only shimmer far away)
+	{
+		int rippleBits = int(groundFlags2126.x + 0.5), rillBits = int(groundFlags2126.y + 0.5);
+		float rippleW = 0.0, rillW = 0.0, wsum = 0.0;
+		for (int i = 0; i < 4; ++i)
+		{
+			float w = max(WZ_GROUND_WEIGHT(i), 0.0);
+			int g = int(WZ_GROUND_NO(i));
+			rippleW += w * float((rippleBits >> g) & 1);
+			rillW += w * float((rillBits >> g) & 1);
+			wsum += w;
+		}
+		rippleW /= max(wsum, 1e-4);
+		rillW /= max(wsum, 1e-4);
+		float nearK = 1.0 - smoothstep(1800.0, 4200.0, length(cameraPos.xyz - p));
+		float up = abs(Ng.y);
+		vec3 tilt = vec3(0.0);
+		if (rippleW > 0.01 && nearK > 0.0)
+		{
+			// The wind direction drifts slowly across the map; crests wander
+			float dirA = wz2126Noise(p.xz / 2600.0) * 1.2 + 0.6;
+			vec2 wdir = vec2(cos(dirA), sin(dirA));
+			float u = dot(p.xz, wdir) + (wz2126Noise(p.xz / 90.0) - 0.5) * 40.0 + (wz2126Noise(p.xz / 23.0 + 3.3) - 0.5) * 7.0;
+			float ph = u * (6.2831853 / 22.0);
+			float slopeU = cos(ph) + 0.35 * cos(2.0 * ph); // gentle windward side, steeper lee
+			float amt = rippleW * nearK * smoothstep(0.75, 0.95, up) * smoothstep(0.2, 0.55, wz2126Noise(p.xz / 160.0 + 7.1)) * 0.35;
+			tilt.xz -= wdir * slopeU * amt;
+		}
+		if (rillW > 0.01 && nearK > 0.0)
+		{
+			// Narrow channels running straight down moderate slopes (not flats, not cliffs)
+			vec2 down = Ng.xz / max(length(Ng.xz), 1e-4);
+			vec2 across = vec2(-down.y, down.x);
+			float onSlope = (1.0 - smoothstep(0.93, 0.985, up)) * smoothstep(0.55, 0.68, up);
+			float v = dot(p.xz, across) + (wz2126Noise(p.xz / 70.0 + 1.7) - 0.5) * 26.0;
+			float ph = v * (6.2831853 / 34.0);
+			float sp = max(sin(ph), 0.0);
+			float groove = pow(sp, 6.0);
+			float dGroove = 6.0 * pow(sp, 5.0) * cos(ph);
+			float amt = rillW * nearK * onSlope * smoothstep(0.35, 0.7, wz2126Noise(p.xz / 45.0 + 9.1)) * 0.45;
+			tilt.xz += across * dGroove * amt;
+			outColour.rgb *= 1.0 - groove * amt * 0.35;
+		}
+		if (dot(tilt, tilt) > 0.0)
+		{
+			outN = normalize(outN + ModelTangentMatrix * tilt);
+		}
+	}
 	outColour.rgb *= 1.0 + (macroA - 0.5) * 2.0 * WZ2126_MACRO_VARIATION;
 
 	// Cliffs (terrain realism C1): on steep faces, horizontal strata in slightly different shades

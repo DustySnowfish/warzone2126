@@ -24,6 +24,7 @@ layout(std140) uniform cbuffer {
 	float WZ_MIP_LOAD_BIAS;
 	int bucketDimensionUsed;
 	float weatherGround; // Warzone 2126: > 0 wet ground (rain), < 0 snow cover
+	vec4 groundFlags2126; // Warzone 2126: per-ground bitmasks (x: wind ripples, y: rills), as floats
 	// Last because its length follows the grid dimension
 	ivec4 bucketOffsetAndSize[WZ_BUCKET_DIMENSION * WZ_BUCKET_DIMENSION];
 };
