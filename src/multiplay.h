@@ -85,6 +85,7 @@ struct MULTIPLAYERGAME
 	uint16_t	playerReconnectWaitSeconds = PLAYER_RECONNECT_WAIT_SECONDS_DEFAULT;	// Max seconds the host holds a dropped player's slot for a mid-match reconnect before declaring them left (0 = do not wait)
 	BLIND_MODE	blindMode = BLIND_MODE::NONE;
 	uint16_t	pathfindingBackend = 65535;	// congestion feature bitmask (PathfindingFeature), every feature on by default, synced, locked before the match starts
+	uint8_t		submarines2126 = 1;			// Warzone 2126: submarines allowed in this game (match option; 0 off)
 	uint16_t	unitLimit = 150;			// Warzone 2126: units per player (150, 300 or 500); the rules script scales trucks and commanders with it
 	RandomMapSettings2126 randomMap;		// Warzone 2126: random map generator settings and seed (see randommap2126.h)
 

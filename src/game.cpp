@@ -4855,6 +4855,7 @@ static bool loadMainFile(const std::string &fileName)
 		game.gameTimeLimitMinutes = save.value("gameTimeLimitMinutes").toUInt();
 	}
 	game.unitLimit = clampUnitLimit2126(static_cast<uint16_t>(save.value("unitLimit", 150).toUInt()));
+	game.submarines2126 = save.value("submarines2126", 1).toUInt() ? 1 : 0;
 	game.randomMap = RandomMapSettings2126::fromStorageString(save.value("randomMap2126", "").toWzString().toUtf8());
 	if (save.contains("playerLeaveMode"))
 	{
@@ -5131,6 +5132,7 @@ static bool writeMainFile(const std::string &fileName, SDWORD saveType)
 	save.setValue("inactivityMinutes", game.inactivityMinutes);
 	save.setValue("gameTimeLimitMinutes", game.gameTimeLimitMinutes);
 	save.setValue("unitLimit", game.unitLimit);
+	save.setValue("submarines2126", game.submarines2126);
 	save.setValue("randomMap2126", WzString::fromUtf8(game.randomMap.toStorageString()));
 	save.setValue("playerLeaveMode", game.playerLeaveMode);
 	save.setValue("playerReconnectWaitSeconds", game.playerReconnectWaitSeconds);
@@ -5649,6 +5651,7 @@ foundDroid:
 			getIniBaseObject(ini, "actionTarget/" + WzString::number(j), psDroid->psActionTarget[j]);
 		}
 		psDroid->carrierId2126 = static_cast<uint32_t>(ini.value("carrier2126", 0).toInt()); // Warzone 2126
+		psDroid->surfacedUntil2126 = static_cast<uint32_t>(ini.value("surfacedUntil2126", 0).toUInt()); // Warzone 2126
 		if (ini.contains("baseStruct/id"))
 		{
 			int tid = ini.value("baseStruct/id", -1).toInt();
@@ -6300,6 +6303,10 @@ static nlohmann::json writeDroid(const DROID *psCurr, bool onMission, int &count
 	if (psCurr->carrierId2126 != 0)
 	{
 		droidObj["carrier2126"] = psCurr->carrierId2126; // Warzone 2126
+	}
+	if (psCurr->surfacedUntil2126 > gameTime)
+	{
+		droidObj["surfacedUntil2126"] = psCurr->surfacedUntil2126; // Warzone 2126
 	}
 	if (psCurr->psBaseStruct != nullptr)
 	{

@@ -362,6 +362,7 @@ struct SENSOR_STATS : public COMPONENT_STATS
 	iIMDBaseShape *pMountGraphic = nullptr;     ///< The turret mount to use
 	unsigned location = 0;                  ///< specifies whether the Sensor is default or for the Turret
 	SENSOR_TYPE type = STANDARD_SENSOR;     ///< used for combat
+	int sonarRange2126 = 0;                 ///< Warzone 2126: hears ships and submerged submarines up to this range, world units ("sonarRange"); ship turret only
 
 	struct : UPGRADE
 	{
@@ -450,6 +451,9 @@ struct WEAPON_STATS : public COMPONENT_STATS
 	UBYTE faceInFlight = 0;				///< flag to make the inflight effect face the player when drawn
 	UBYTE surfaceToAir = 0;				///< indicates how good in the air - SHOOT_ON_GROUND, SHOOT_IN_AIR or both
 	bool shipsOnly2126 = false;			///< Warzone 2126: can only hit ships (torpedoes; "shipsOnly": 1)
+	bool antiSub2126 = false;			///< Warzone 2126: can hit submerged submarines (depth charges; "antiSub": 1). Torpedoes can too
+	bool subTurret2126 = false;			///< Warzone 2126: mountable on submarines ("subTurret": 1; torpedoes are anyway)
+	bool shipTurret2126 = false;		///< Warzone 2126: only mountable on ships ("shipTurret": 1; torpedoes are anyway)
 	uint8_t torpedo2126 = 0;			///< Warzone 2126: torpedo movement: 0 none, TORPEDO_GUIDED_2126 ("torpedo": "guided"), TORPEDO_STRAIGHT_2126 ("straight")
 	bool lightWorld = false;			///< flag to indicate whether the effect lights up the world
 	bool penetrate = false;				///< flag to indicate whether pentrate droid or not
@@ -528,6 +532,7 @@ struct BODY_STATS : public COMPONENT_STATS
 	WzString         bodyClass;		///< rules hint to script about its classification
 	bool             isNaval = false;	///< Warzone 2126: a ship hull ("naval": 1); only with propeller propulsion
 	unsigned carrierCapacity2126 = 0; ///< Warzone 2126: VTOLs this hull can carry (aircraft carriers)
+	bool submarine2126 = false;       ///< Warzone 2126: a submarine hull ("submarine": 1): dived unless it has just fired; torpedo turrets only
 
 	struct UPGRADE : COMPONENT_STATS::UPGRADE
 	{

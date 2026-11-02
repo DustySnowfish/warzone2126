@@ -33,6 +33,7 @@
 #include "objects.h"
 #include "lib/gamelib/gtime.h"
 #include "research.h"
+#include "submarine2126.h"
 #include "researchprereq.h"
 #include "message.h"
 #include "lib/sound/audio.h"
@@ -573,6 +574,8 @@ bool loadResearch(WzConfig &ini)
 			research.iconID = NO_RESEARCH_ICON;
 		}
 
+		research.submarineTech2126 = ini.value("submarineTech", 0).toInt() != 0; // Warzone 2126
+
 		//get the IMDs used in the interface
 		WzString statID = ini.value("statID", "").toWzString();
 		research.psStat = nullptr;
@@ -842,6 +845,12 @@ bool researchAvailable(int inc, UDWORD playerID, QUEUE_MODE mode)
 
 	UDWORD				incPR, incS;
 	bool				bPRFound, bStructFound;
+
+	// Warzone 2126: no submarine research when the match's Submarines option is off
+	if (asResearch[inc].submarineTech2126 && !submarine2126::allowed())
+	{
+		return false;
+	}
 
 	// if its a cancelled topic - add to list
 	if (IsResearchCancelledFunc(&asPlayerResList[playerID][inc]))

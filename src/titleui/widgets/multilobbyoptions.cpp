@@ -769,6 +769,7 @@ private:
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> allianceChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> powerChoice;
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> unitLimitChoice; // Warzone 2126
+	std::shared_ptr<LobbyMultiOptionsChoiceWidget> submarinesChoice; // Warzone 2126
 	std::shared_ptr<LobbyMultiOptionsChoiceWidget> randomMapChoice; // Warzone 2126: Random map settings
 	std::shared_ptr<WzLobbyTextOptionButton> randomMapButton;
 public:
@@ -1185,6 +1186,43 @@ void WzMultiLobbyOptionsImpl::initialize(bool _isChallenge, const std::shared_pt
 	});
 	optionsList->addItem(wrapItemForList(unitLimitChoice));
 
+	// Submarines (Warzone 2126): whether anyone (players and AIs) may research and build them
+	submarinesChoice = std::make_shared<LobbyMultiOptionsChoiceWidget>(matchOptionsEditMode);
+	submarinesChoice->setLabel(_("Submarines"));
+	{
+		const int bw = iV_GetImageWidth(FrontImages, IMAGE_POWLO);
+		const int bh = iV_GetImageHeight(FrontImages, IMAGE_POWLO);
+		const std::pair<int, std::pair<const char*, const char*>> choices[] = {
+			{0, {N_("Off"), N_("No submarines: nobody can research or build them")}},
+			{1, {N_("On"), N_("Submarines can be researched and built (by players and AIs)")}},
+		};
+		for (const auto& c : choices)
+		{
+			auto button = std::make_shared<WzLobbyTextOptionButton>();
+			button->setLabelText(WzString::fromUtf8(gettext(c.second.first)));
+			button->setTip(gettext(c.second.second));
+			button->setGeometry(0, 0, bw, bh);
+			submarinesChoice->addButton(c.first, button);
+		}
+	}
+	submarinesChoice->setGeometry(0, 0, submarinesChoice->idealWidth(), submarinesChoice->idealHeight());
+	submarinesChoice->setCanChooseHandler([](MultibuttonWidget&, int) -> bool {
+		return ingame.side == InGameSide::HOST_OR_SINGLEPLAYER;
+	});
+	submarinesChoice->addOnChooseHandler([](MultibuttonWidget&, int newValue){
+		if (ingame.side == InGameSide::HOST_OR_SINGLEPLAYER)
+		{
+			war_setMPSubmarines2126(newValue != 0);
+			game.submarines2126 = newValue != 0 ? 1 : 0;
+			resetReadyStatus(false);
+			if (NetPlay.isHost)
+			{
+				sendOptions();
+			}
+		}
+	});
+	optionsList->addItem(wrapItemForList(submarinesChoice));
+
 	// Random map settings (Warzone 2126): landscape, sliders and the shareable map code
 	randomMapChoice = std::make_shared<LobbyMultiOptionsChoiceWidget>(matchOptionsEditMode);
 	randomMapChoice->setLabel(_("Map generator"));
@@ -1353,6 +1391,10 @@ void WzMultiLobbyOptionsImpl::setGameOptionStates()
 	if (unitLimitChoice)
 	{
 		unitLimitChoice->choose(game.unitLimit);
+	}
+	if (submarinesChoice)
+	{
+		submarinesChoice->choose(game.submarines2126 ? 1 : 0);
 	}
 	if (randomMapButton)
 	{

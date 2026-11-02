@@ -34,6 +34,7 @@
 #include "console.h"
 
 #include "carrier2126.h"
+#include "submarine2126.h"
 #include "move.h"
 
 #include "objects.h"
@@ -1336,6 +1337,7 @@ static void moveCalcDroidSlide(DROID *psDroid, int *pmx, int *pmy)
 	// Everything the loop needs that does not vary with the neighbor.
 	// The body writes psDroid->sMove bump fields and shuffles other droids, so none of these can change under it.
 	const bool selfFlying = psDroid->isFlying();
+	const bool selfSubmerged = submarine2126::isSubmerged(psDroid);
 	const bool softCollision = pathfindingSoftCollisionEnabled();
 	const bool frustrated = psDroid->lastFrustratedTime > 0
 	                        && gameTime - psDroid->lastFrustratedTime < FRUSTRATED_TIME;
@@ -1362,6 +1364,10 @@ static void moveCalcDroidSlide(DROID *psDroid, int *pmx, int *pmy)
 			if (carrier2126::isDocked(psObjcast))
 			{
 				continue; // Warzone 2126: parked on a carrier's deck, above the water
+			}
+			if (selfSubmerged != submarine2126::isSubmerged(psObjcast))
+			{
+				continue; // Warzone 2126: a dived submarine passes under ships (and other subs only meet subs)
 			}
 			objR = moveObjRadius(psObj);
 			const bool objFlying = psObjcast->isFlying();

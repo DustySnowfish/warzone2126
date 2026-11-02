@@ -9533,5 +9533,67 @@
 			"NavalJet"
 		],
 		"statID": "NavalJet"
+	},
+	"R-Vehicle-Body-NavalSub": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalSub",
+		"name": "Attack Submarine",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalFrigate",
+			"R-Wpn-Torpedo-Twin"
+		],
+		"researchPoints": 9000,
+		"researchPower": 240,
+		"resultComponents": [
+			"NavalSubAttack"
+		],
+		"statID": "NavalSubAttack",
+		"submarineTech": 1
+	},
+	"R-Sys-Sonar": {
+		"iconID": "IMAGE_RES_SYSTEMTECH",
+		"id": "R-Sys-Sonar",
+		"name": "Sonar Turret",
+		"requiredResearch": [
+			"R-Struc-SonarBuoy"
+		],
+		"researchPoints": 3600,
+		"researchPower": 100,
+		"resultComponents": [
+			"Sensor-Sonar"
+		],
+		"statID": "Sensor-Sonar"
+	},
+	"R-Wpn-DepthCharge": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-DepthCharge",
+		"name": "Depth Charges",
+		"requiredResearch": [
+			"R-Vehicle-Prop-NavalScrew",
+			"R-Wpn-Mortar01Lt"
+		],
+		"researchPoints": 3600,
+		"researchPower": 100,
+		"resultComponents": [
+			"DepthCharge-Rack"
+		],
+		"statID": "DepthCharge-Rack",
+		"submarineTech": 1
+	},
+	"R-Wpn-DepthCharge-VTOL": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-DepthCharge-VTOL",
+		"name": "VTOL ASW Depth Charges",
+		"requiredResearch": [
+			"R-Wpn-DepthCharge",
+			"R-Wpn-Bomb01"
+		],
+		"researchPoints": 4800,
+		"researchPower": 125,
+		"resultComponents": [
+			"Bomb-VTOL-DepthCharge"
+		],
+		"statID": "Bomb-VTOL-DepthCharge",
+		"submarineTech": 1
 	}
 }

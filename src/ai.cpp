@@ -27,6 +27,7 @@
 #include "lib/framework/frame.h"
 
 #include "action.h"
+#include "submarine2126.h"
 #include "cmddroid.h"
 #include "combat.h"
 #include "droid.h"
@@ -1305,6 +1306,20 @@ bool validTarget(BASE_OBJECT const *psObject, BASE_OBJECT const *psTarget, int w
 	    && asWeaponStats[psObject->asWeaps[weapon_slot].nStat].shipsOnly2126)
 	{
 		if (psTarget->type != OBJ_DROID || ((const DROID *)psTarget)->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR)
+		{
+			return false;
+		}
+	}
+
+	// Warzone 2126: a dived submarine can only be aimed at with torpedoes and depth charges
+	if (submarine2126::isSubmerged(psTarget))
+	{
+		const WEAPON_STATS *psW = nullptr;
+		if (weapon_slot >= 0 && static_cast<unsigned>(weapon_slot) < psObject->numWeaps && psObject->asWeaps[weapon_slot].nStat < asWeaponStats.size())
+		{
+			psW = &asWeaponStats[psObject->asWeaps[weapon_slot].nStat];
+		}
+		if (psW == nullptr || !submarine2126::weaponHitsSubmerged(*psW))
 		{
 			return false;
 		}

@@ -1239,5 +1239,31 @@
 		"size": "HEAVY",
 		"weaponSlots": 2,
 		"weight": 4200
+	},
+	"NavalSubAttack": {
+		"armourHeat": 18,
+		"armourKinetic": 24,
+		"buildPoints": 900,
+		"buildPower": 240,
+		"class": "Droids",
+		"designable": 1,
+		"hitpoints": 620,
+		"id": "NavalSubAttack",
+		"model": "drnaval_sub.pie",
+		"name": "Attack Submarine Hull",
+		"naval": 1,
+		"powerOutput": 26000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_sub.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_sub.pie"
+			}
+		},
+		"size": "MEDIUM",
+		"submarine": 1,
+		"weaponSlots": 2,
+		"weight": 3200
 	}
 }

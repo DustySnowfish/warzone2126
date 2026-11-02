@@ -72,6 +72,7 @@ struct RESEARCH : public BASE_STATS
 	uint16_t categoryProgress; /* Category this/max (gets filled on load) */
 	uint16_t categoryMax; /* Category progress/this (gets filled on load) */
 	int index;		///< Unique index for this research, set incrementally
+	bool submarineTech2126 = false; ///< Warzone 2126: submarine research ("submarineTech": 1): not offered when the match's Submarines option is off
 
 	RESEARCH() : pViewData(nullptr), iconID(0), psStat(nullptr), pIMD(nullptr), pIMD2(nullptr) {}
 };

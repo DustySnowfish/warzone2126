@@ -31,6 +31,7 @@
 
 #include "action.h"
 #include "component.h"
+#include "submarine2126.h"
 #include "particles.h"
 #include "wreck_physics.h"
 #include "hit_feedback.h"
@@ -537,6 +538,19 @@ void drawMuzzleFlash(WEAPON sWeap, const iIMDShape *weaponImd, const iIMDShape *
 /* Assumes matrix context is already set */
 // this is able to handle multiple weapon graphics now
 // removed mountRotation,they get such stuff from psObj directly now
+// Warzone 2126: how far a submarine has surfaced for display (0 dived, 1 surfaced): it rises over a
+// second after firing and dives over the last 1.5 s of its surfaced time
+static float submarineSurfaced(const DROID *psDroid)
+{
+	if (graphicsTime >= psDroid->surfacedUntil2126)
+	{
+		return 0.f;
+	}
+	const float sinceFire = static_cast<float>(graphicsTime + submarine2126::kSurfacedMs - psDroid->surfacedUntil2126);
+	const float untilDive = static_cast<float>(psDroid->surfacedUntil2126 - graphicsTime);
+	return std::max(0.f, std::min(1.f, std::min(sinceFire / 1000.f, untilDive / 1500.f)));
+}
+
 static bool displayCompObj(const DROID *psDroid, bool bButton, const glm::mat4& modelMatrix2, const glm::mat4 &viewMatrix)
 {
 	iIMDBaseShape *psMoveAnim, *psStillAnim;
@@ -581,6 +595,15 @@ static bool displayCompObj(const DROID *psDroid, bool bButton, const glm::mat4& 
 	{
 		pieFlag = pie_SHADOW;
 		brightness = pal_SetBrightness(psDroid->illumination);
+		if (submarine2126::isSubmarine(psDroid))
+		{
+			// Warzone 2126: the water is drawn before the units, so a dived hull would show at full
+			// colour through it: shade it towards deep water instead
+			const float d = 1.f - submarineSurfaced(psDroid);
+			brightness.byte.r = static_cast<uint8_t>(brightness.byte.r * (1.f - 0.88f * d));
+			brightness.byte.g = static_cast<uint8_t>(brightness.byte.g * (1.f - 0.72f * d));
+			brightness.byte.b = static_cast<uint8_t>(brightness.byte.b * (1.f - 0.62f * d));
+		}
 		// NOTE: Beware of transporters that are offscreen, on a mission!  We should *not* be checking tiles at this point in time!
 		if (!psDroid->isTransporter() && !missionIsOffworld())
 		{
@@ -1208,6 +1231,12 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 	if (psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR)
 	{
 		modelMatrix *= shipMotion(psDroid);
+	}
+	if (submarine2126::isSubmarine(psDroid))
+	{
+		// Warzone 2126: a dived submarine runs with only its tower above the water; it rises over a
+		// second after firing and dives again as the surfaced time runs out (display only)
+		modelMatrix *= glm::translate(glm::vec3(0.f, -22.f * (1.f - submarineSurfaced(psDroid)), 0.f));
 	}
 
 	if (psDroid->timeLastHit - graphicsTime < ELEC_DAMAGE_DURATION && psDroid->lastHitWeapon == WSC_ELECTRONIC)

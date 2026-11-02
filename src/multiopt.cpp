@@ -122,6 +122,8 @@ void sendOptions()
 	NETuint16_t(w, game.pathfindingBackend);
 	game.unitLimit = clampUnitLimit2126(game.unitLimit);
 	NETuint16_t(w, game.unitLimit);
+	game.submarines2126 = game.submarines2126 ? 1 : 0;
+	NETuint8_t(w, game.submarines2126);
 	game.randomMap.sanitise();
 	NETuint32_t(w, game.randomMap.seed);
 	NETuint8_t(w, game.randomMap.style);
@@ -264,6 +266,8 @@ bool recvOptions(NETQUEUE queue)
 	game.playerReconnectWaitSeconds = tempPlayerReconnectWaitSeconds;
 	NETuint16_t(r, game.pathfindingBackend);
 	NETuint16_t(r, game.unitLimit);
+	NETuint8_t(r, game.submarines2126);
+	game.submarines2126 = game.submarines2126 ? 1 : 0;
 	if (clampUnitLimit2126(game.unitLimit) != game.unitLimit)
 	{
 		debug(LOG_ERROR, "Invalid unitLimit value specified: %" PRIu16, game.unitLimit);

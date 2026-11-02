@@ -7974,6 +7974,7 @@ inline void to_json(nlohmann::json& j, const MULTIPLAYERGAME& p) {
 	j["blindMode"] = p.blindMode;
 	j["pathfindingBackend"] = p.pathfindingBackend;
 	j["unitLimit"] = p.unitLimit;
+	j["submarines2126"] = p.submarines2126;
 	j["randomMap2126"] = p.randomMap.toStorageString();
 }
 
@@ -8004,6 +8005,7 @@ inline void from_json(const nlohmann::json& j, MULTIPLAYERGAME& p) {
 		p.inactivityMinutes = 4;
 	}
 	p.unitLimit = clampUnitLimit2126(j.value("unitLimit", static_cast<uint16_t>(150)));
+	p.submarines2126 = j.value("submarines2126", static_cast<uint8_t>(1)) ? 1 : 0;
 	p.randomMap = RandomMapSettings2126::fromStorageString(j.value("randomMap2126", std::string()));
 	if (j.contains("gameTimeLimitMinutes"))
 	{

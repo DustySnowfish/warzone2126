@@ -100,6 +100,7 @@ struct WARZONE_GLOBALS
 	uint32_t MPinactivityMinutes = 5;
 	uint32_t MPgameTimeLimitMinutes = 0; // default to unlimited
 	uint16_t MPunitLimit = 150; // Warzone 2126: units per player
+	bool MPsubmarines = true; // Warzone 2126: submarines allowed (match option)
 	uint8_t MPopenSpectatorSlots = 0;
 	PLAYER_LEAVE_MODE MPplayerLeaveMode = PLAYER_LEAVE_MODE_DEFAULT;
 	uint16_t MPplayerReconnectWaitSeconds = PLAYER_RECONNECT_WAIT_SECONDS_DEFAULT;
@@ -762,6 +763,16 @@ uint16_t war_getMPUnitLimit()
 void war_setMPUnitLimit(uint16_t limit)
 {
 	warGlobs.MPunitLimit = clampUnitLimit2126(limit);
+}
+
+bool war_getMPSubmarines2126()
+{
+	return warGlobs.MPsubmarines;
+}
+
+void war_setMPSubmarines2126(bool allowed)
+{
+	warGlobs.MPsubmarines = allowed;
 }
 
 uint32_t war_getMPGameTimeLimitMinutes()

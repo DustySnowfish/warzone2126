@@ -33,6 +33,7 @@
 #include <limits>
 
 #include "visibility.h"
+#include "submarine2126.h"
 
 #include "objects.h"
 #include "map.h"
@@ -221,6 +222,10 @@ static void updateSpotters()
 		// else, ie if not expired, show objects around it
 		for (BASE_OBJECT *psObj : gridStartIterateUnseen(world_coord(psSpot->pos.x), world_coord(psSpot->pos.y), psSpot->sensorRadius, psSpot->player))
 		{
+			if (submarine2126::isSubmerged(psObj))
+			{
+				continue; // (Warzone 2126: only sonar finds a dived submarine)
+			}
 			// Tell system that this side can see this object
 			setSeenBy(psObj, psSpot->player, UBYTE_MAX);
 		}
@@ -497,6 +502,22 @@ int visibleObject(const BASE_OBJECT *psViewer, const BASE_OBJECT *psTarget, bool
 		return 0;
 	}
 
+	// Warzone 2126 sonar (buoys, ships with a sonar turret): hears ships and dived submarines out to
+	// its range, whatever is in the way. A dived submarine is heard by sonar only.
+	{
+		const int sonar = submarine2126::sonarRange(psViewer);
+		const bool targetIsShip = psTarget->type == OBJ_DROID
+			&& ((const DROID *)psTarget)->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR;
+		if (sonar > 0 && targetIsShip && iHypot((psTarget->pos - psViewer->pos).xy()) <= sonar)
+		{
+			return UBYTE_MAX;
+		}
+		if (submarine2126::isSubmerged(psTarget))
+		{
+			return 0;
+		}
+	}
+
 	/* Get the sensor range */
 	switch (psViewer->type)
 	{
@@ -532,14 +553,6 @@ int visibleObject(const BASE_OBJECT *psViewer, const BASE_OBJECT *psTarget, bool
 			    && psStruct->getWeaponStats(0)->surfaceToAir == SHOOT_IN_AIR)
 			{
 				range = 3 * range / 2;	// increase vision range of AA vs VTOL
-			}
-
-			// Warzone 2126 sonar: hears ships (only) out to its sonar range, whatever is in the way
-			if (psStruct->pStructureType->sonarRange2126 > 0 && psTarget->type == OBJ_DROID
-			    && ((const DROID *)psTarget)->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR
-			    && iHypot((psTarget->pos - psViewer->pos).xy()) <= psStruct->pStructureType->sonarRange2126)
-			{
-				return UBYTE_MAX;
 			}
 
 			if (psStruct->psTarget[0] == psTarget && (structCBSensor(psStruct) || structVTOLCBSensor(psStruct)))
@@ -733,7 +746,7 @@ static void processVisibilityVision(BASE_OBJECT *psViewer)
 	// get all the objects from the grid the droid is in
 	// Will give inconsistent results if hasSharedVision is not an equivalence relation.
 	// (Warzone 2126: a sonar buoy listens out to its sonar range)
-	const int searchRange = psStruct != nullptr ? std::max(objSensorRange(psViewer), psStruct->pStructureType->sonarRange2126) : objSensorRange(psViewer);
+	const int searchRange = std::max(objSensorRange(psViewer), submarine2126::sonarRange(psViewer)); // (Warzone 2126: sonar listens further)
 	for (BASE_OBJECT *psObj : gridStartIterateUnseen(psViewer->pos.x, psViewer->pos.y, searchRange, psViewer->player))
 	{
 		int val = visibleObject(psViewer, psObj, false);

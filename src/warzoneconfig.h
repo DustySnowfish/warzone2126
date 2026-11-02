@@ -205,6 +205,8 @@ uint32_t war_getMPInactivityMinutes();
 void war_setMPInactivityMinutes(uint32_t minutes);
 uint16_t war_getMPUnitLimit(); // Warzone 2126: units per player in multiplayer and skirmish
 void war_setMPUnitLimit(uint16_t limit);
+bool war_getMPSubmarines2126(); // Warzone 2126: submarines allowed in multiplayer and skirmish (match option)
+void war_setMPSubmarines2126(bool allowed);
 uint32_t war_getMPGameTimeLimitMinutes();
 void war_setMPGameTimeLimitMinutes(uint32_t minutes);
 uint16_t war_getMPopenSpectatorSlots();

@@ -227,5 +227,21 @@
 		"range": 1024,
 		"sensorModel": "gnlsnsr1.PIE",
 		"type": "STANDARD"
+	},
+	"Sensor-Sonar": {
+		"buildPoints": 300,
+		"buildPower": 90,
+		"designable": 1,
+		"droidType": "DROID_SENSOR",
+		"hitpoints": 220,
+		"id": "Sensor-Sonar",
+		"location": "TURRET",
+		"mountModel": "TRLSNSR1.PIE",
+		"name": "Sonar Turret",
+		"range": 1536,
+		"sensorModel": "GNLSNSR1.PIE",
+		"sonarRange": 2816,
+		"type": "STANDARD",
+		"weight": 300
 	}
 }

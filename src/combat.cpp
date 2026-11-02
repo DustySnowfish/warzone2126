@@ -37,6 +37,7 @@
 
 #include "action.h"
 #include "combat.h"
+#include "submarine2126.h"
 #include "difficulty.h"
 #include "geometry.h"
 #include "mapgrid.h"
@@ -365,6 +366,10 @@ bool combFire(WEAPON *psWeap, BASE_OBJECT *psAttacker, BASE_OBJECT *psTarget, in
 	CLIP(predict.y, 0, world_coord(gameWorld.map.height - 1));
 
 	proj_SendProjectileAngled(psWeap, psAttacker, psAttacker->player, predict, psTarget, bVisibleAnyway, weapon_slot, min_angle, fireTime);
+	if (psAttacker->type == OBJ_DROID)
+	{
+		submarine2126::surfaceAfterFiring(static_cast<DROID *>(psAttacker)); // Warzone 2126: firing gives a submarine away
+	}
 	return true;
 }
 

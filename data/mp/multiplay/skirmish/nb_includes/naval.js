@@ -38,6 +38,60 @@ const NAVAL_TUBES = ["Torpedo-Heavy", "Torpedo-Twin"]; // ship torpedo tubes, be
 const NAVAL_TUBES_RESEARCH = ["R-Wpn-Torpedo-Twin", "R-Wpn-Torpedo-Heavy"];
 
 // Whether this AI has seen enemy ships in the last 5 minutes (torpedo tubes only hit ships)
+// Submarines (only when the match allows them): an attack submarine joins the fleet every few
+// warships once enemy ships have been seen; once an enemy submarine has been seen the AI answers
+// with sonar (a sonar frigate with the fleet, sonar buoys) and depth charges
+const NAVAL_SUB_BODY = "NavalSubAttack";
+const NAVAL_SUB_RESEARCH = "R-Vehicle-Body-NavalSub";
+const NAVAL_SUB_EVERY = 3; // every third warship is a submarine
+const NAVAL_SONAR = "Sensor-Sonar";
+const NAVAL_SONAR_RESEARCH = "R-Sys-Sonar";
+const NAVAL_DEPTH_CHARGE = "DepthCharge-Rack";
+const NAVAL_DEPTH_CHARGE_RESEARCH = "R-Wpn-DepthCharge";
+const NAVAL_SONAR_SHIPS = 1;
+let enemySubsSeenAt = -1;
+let warshipsBuilt = 0;
+
+function subsAllowed()
+{
+	return typeof submarinesAllowed === "undefined" || submarinesAllowed;
+}
+
+function isSubmarine(droid)
+{
+	return droid.body === NAVAL_SUB_BODY;
+}
+
+function isSonarShip(droid)
+{
+	return isNavalDroid(droid) && droid.droidType === DROID_SENSOR;
+}
+
+// Whether this AI has seen an enemy submarine (they show when they surface to fire) in the last 10
+// minutes
+function seenEnemySubs()
+{
+	if (enemySubsSeenAt >= 0 && gameTime - enemySubsSeenAt < 600000)
+	{
+		return true;
+	}
+	for (let p = 0; p < maxPlayers; ++p)
+	{
+		if (p !== me && !allianceExistsBetween(me, p) && enumDroid(p, DROID_ANY, me).some(isSubmarine))
+		{
+			enemySubsSeenAt = gameTime;
+			return true;
+		}
+	}
+	return false;
+}
+
+function notDone(r)
+{
+	const res = getResearch(r);
+	return defined(res) && res !== null && !res.done;
+}
+
 let enemyShipsSeenAt = -1;
 let smallShipTubes = false; // single-mount hulls alternate between tubes and the usual weapon
 
@@ -209,6 +263,26 @@ _global.navalResearch = function(lab) {
 		if (pursueResearch(lab, NAVAL_CARRIER_RESEARCH))
 		{
 			navalDebug("researching the Aircraft Carrier");
+			return true;
+		}
+	}
+
+	// Sonar and depth charges once an enemy submarine has been seen
+	if (iHaveShips() && subsAllowed() && withChance(50) && seenEnemySubs())
+	{
+		if (pursueResearch(lab, [NAVAL_SONAR_RESEARCH, NAVAL_DEPTH_CHARGE_RESEARCH, NAVAL_BUOY_RESEARCH].filter(notDone)))
+		{
+			navalDebug("researching anti-submarine warfare");
+			return true;
+		}
+	}
+
+	// The attack submarine once enemy ships have been seen and torpedo tubes are in hand
+	if (iHaveShips() && subsAllowed() && withChance(25) && seenEnemyShips() && NAVAL_TUBES.some((w) => (componentAvailable(w))) && notDone(NAVAL_SUB_RESEARCH))
+	{
+		if (pursueResearch(lab, NAVAL_SUB_RESEARCH))
+		{
+			navalDebug("researching the Attack Submarine");
 			return true;
 		}
 	}
@@ -466,6 +540,28 @@ _global.checkShipProduction = function() {
 		}
 	}
 
+	// A sonar frigate with the fleet once enemy submarines are about
+	if (seenEnemySubs() && componentAvailable(NAVAL_SONAR) && myShips().filter(isSonarShip).length < NAVAL_SONAR_SHIPS)
+	{
+		if (buildDroid(yards[0], "Sonar Ship", ["NavalFrigate", "NavalPatrol"], getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", NAVAL_SONAR))
+		{
+			navalDebug("building a sonar ship");
+			return true;
+		}
+	}
+
+	// Every few warships, an attack submarine (torpedo tubes only)
+	const subTubes = NAVAL_TUBES.filter((w) => (componentAvailable(w)))[0];
+	if (subsAllowed() && componentAvailable(NAVAL_SUB_BODY) && defined(subTubes) && seenEnemyShips() && warshipsBuilt % NAVAL_SUB_EVERY === NAVAL_SUB_EVERY - 1)
+	{
+		if (buildDroid(yards[0], "Submarine", NAVAL_SUB_BODY, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", subTubes, subTubes))
+		{
+			++warshipsBuilt;
+			navalDebug("building an attack submarine");
+			return true;
+		}
+	}
+
 	let bodies = filterBodyStatsByUsage(BODYUSAGE.NAVAL, chooseBodyClass());
 
 	if (bodies.length === 0)
@@ -487,6 +583,8 @@ _global.checkShipProduction = function() {
 		{
 			// (every mount gets the chosen weapon; a hull takes as many as it has mounts, up to 8)
 			const w = [bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w, bwPair.w];
+			// Against submarines, the last mount carries depth charges (on hulls with two mounts or more)
+			const charges = seenEnemySubs() && componentAvailable(NAVAL_DEPTH_CHARGE);
 			if (defined(tubes))
 			{
 				if (bwPair.b === "NavalPatrol" || bwPair.b === "NavalLanding")
@@ -499,8 +597,13 @@ _global.checkShipProduction = function() {
 					for (let i = 1; i < w.length; i += 2) { w[i] = tubes; }
 				}
 			}
+			if (charges && bwPair.b !== "NavalPatrol" && bwPair.b !== "NavalLanding")
+			{
+				w[0] = NAVAL_DEPTH_CHARGE;
+			}
 			const built = buildDroid(yard, "Warship", bwPair.b, propulsions, "", "", w[0], w[1], w[2], w[3], w[4], w[5], w[6], w[7]);
-			navalDebug("warship " + bwPair.b + (w.indexOf(tubes) >= 0 ? " with " + tubes : "") + (built ? "" : " (failed)"));
+			if (built) { ++warshipsBuilt; }
+			navalDebug("warship " + bwPair.b + (w.indexOf(tubes) >= 0 ? " with " + tubes : "") + (w[0] === NAVAL_DEPTH_CHARGE ? " with depth charges" : "") + (built ? "" : " (failed)"));
 			success = built || success;
 		}
 	});
@@ -706,7 +809,10 @@ function releasePassengers()
 {
 	if (defined(landingGroup))
 	{
-		enumGroup(landingGroup).filter((d) => (d.order !== DORDER_EMBARK)).forEach(groupDroid);
+		// (units aboard a craft are not on the map: they stay in the group until put ashore)
+		const onMap = {};
+		enumDroid(me).forEach((d) => { onMap[d.id] = true; });
+		enumGroup(landingGroup).filter((d) => (d.order !== DORDER_EMBARK && onMap[d.id])).forEach(groupDroid);
 	}
 }
 
@@ -832,7 +938,7 @@ function seaConstructionTick(home)
 		}
 	}
 
-	if (isAvailable(NAVAL_BUOY) && countStructList([NAVAL_BUOY]) < 2)
+	if (isAvailable(NAVAL_BUOY) && countStructList([NAVAL_BUOY]) < (seenEnemySubs() ? 4 : 2))
 	{
 		// Out towards the enemy: the home water spot farthest from the base
 		const spots = homeWaterInfo().spots || [];
@@ -928,6 +1034,7 @@ function carrierTick(home)
 // Tactics, every few seconds
 _global.navalTick = function() {
 	seenEnemyShips(); // note enemy ships in sight, for the torpedo tube choice
+	seenEnemySubs();
 	buildShipyard();
 	buildCoastalBattery();
 	landingTick();
@@ -974,7 +1081,9 @@ _global.navalTick = function() {
 	}
 
 	// Enemy ships or units in the home waters: everyone defends
-	const intruders = enumRange(home.x, home.y, baseScale * 0.7, ENEMIES, false).filter((obj) => (obj.type === DROID && !isVTOL(obj)));
+	// (a submarine counts only while it can be seen: surfaced, or heard by sonar)
+	const seenIds = enumRange(home.x, home.y, baseScale * 0.7, ENEMIES, true).map((obj) => (obj.id));
+	const intruders = enumRange(home.x, home.y, baseScale * 0.7, ENEMIES, false).filter((obj) => (obj.type === DROID && !isVTOL(obj) && (!isSubmarine(obj) || seenIds.indexOf(obj.id) >= 0)));
 
 	if (intruders.length > 0)
 	{

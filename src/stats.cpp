@@ -580,6 +580,9 @@ bool loadWeaponStats(WzConfig &ini)
 			psStats->surfaceToAir |= SHOOT_IN_AIR;
 		}
 		psStats->shipsOnly2126 = ini.value("shipsOnly", 0).toInt() != 0; // Warzone 2126: torpedoes
+		psStats->antiSub2126 = ini.value("antiSub", 0).toInt() != 0; // Warzone 2126: depth charges
+		psStats->shipTurret2126 = ini.value("shipTurret", 0).toInt() != 0;
+		psStats->subTurret2126 = ini.value("subTurret", 0).toInt() != 0;
 		{
 			const WzString torpedo = ini.value("torpedo", "").toWzString();
 			psStats->torpedo2126 = torpedo == "guided" ? TORPEDO_GUIDED_2126 : torpedo == "straight" ? TORPEDO_STRAIGHT_2126 : 0;
@@ -669,6 +672,7 @@ bool loadBodyStats(WzConfig &ini)
 		psStats->bodyClass = ini.value("class").toWzString();
 		psStats->isNaval = ini.value("naval", 0).toInt() != 0;
 		psStats->carrierCapacity2126 = static_cast<unsigned>(std::clamp(ini.value("carrierCapacity", 0).toInt(), 0, 8)); // Warzone 2126: VTOL deck slots
+		psStats->submarine2126 = ini.value("submarine", 0).toInt() != 0; // Warzone 2126
 		psStats->base.thermal = ini.value("armourHeat").toInt();
 		psStats->base.armour = ini.value("armourKinetic").toInt();
 		psStats->base.power = ini.value("powerOutput").toInt();
@@ -970,6 +974,7 @@ bool loadSensorStats(WzConfig &ini)
 		psStats->compType = COMP_SENSOR;
 
 		psStats->base.range = ini.value("range").toInt();
+		psStats->sonarRange2126 = std::max(0, ini.value("sonarRange", 0).toInt()); // Warzone 2126
 		for (int j = 0; j < MAX_PLAYERS; j++)
 		{
 			psStats->upgrade[j] = psStats->base;

@@ -28,6 +28,7 @@
 #include "lib/framework/frame.h"
 #include "lib/framework/trig.h"
 #include "lib/framework/fixedpoint.h"
+#include "submarine2126.h"
 #include "lib/framework/math_ext.h"
 #include "lib/framework/paged_entity_container.h"
 #include "lib/gamelib/gtime.h"
@@ -1035,6 +1036,10 @@ static PROJECTILE* proj_InFlightFunc(PROJECTILE *psProj)
 		{
 			continue; // Warzone 2126: torpedoes only hit ships
 		}
+		if (submarine2126::isSubmerged(psTempObj) && !submarine2126::weaponHitsSubmerged(*psStats))
+		{
+			continue; // Warzone 2126: shells and bullets pass over a dived submarine
+		}
 
 		Vector3i psTempObjPrevPos = isDroid(psTempObj) ? castDroid(psTempObj)->prevSpacetime.pos : psTempObj->pos;
 
@@ -1177,6 +1182,15 @@ static void proj_radiusSweep(PROJECTILE *psObj, WEAPON_STATS *psStats, Vector3i 
 			continue;  // Don't hit main target twice.
 		}
 
+		if (submarine2126::isSubmerged(psCurr) && !submarine2126::weaponHitsSubmerged(*psStats))
+		{
+			continue;  // Warzone 2126: blasts above the water do not reach a dived submarine
+		}
+		if (psStats->antiSub2126 && !(psCurr->type == OBJ_DROID && ((DROID *)psCurr)->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR))
+		{
+			continue;  // Warzone 2126: depth charges burst under water: only ships and submarines are hurt
+		}
+
 		if (psObj->psSource && psObj->psSource->player == psCurr->player && psStats->flags.test(WEAPON_FLAG_NO_FRIENDLY_FIRE))
 		{
 			continue; // this weapon does not do friendly damage
@@ -1314,6 +1328,12 @@ static void proj_ImpactFunc(PROJECTILE *psObj)
 	scatter.x = psStats->upgrade[psObj->player].radius;
 	scatter.y = 0;
 	scatter.z = psStats->upgrade[psObj->player].radius;
+
+	// Warzone 2126: a submarine that dived while the shot was in flight is missed by it
+	if (psObj->psDest != nullptr && submarine2126::isSubmerged(psObj->psDest) && !submarine2126::weaponHitsSubmerged(*psStats))
+	{
+		setProjectileDestination(psObj, nullptr);
+	}
 
 	// If the projectile missed its target (or the target died)
 	if (psObj->psDest == nullptr)
@@ -1673,6 +1693,11 @@ static void proj_checkPeriodicalDamage(PROJECTILE *psProj)
 		if (psCurr->type == OBJ_DROID && ((DROID *)psCurr)->isFlying())
 		{
 			continue;  // Can't set flying units on fire.
+		}
+
+		if (submarine2126::isSubmerged(psCurr))
+		{
+			continue;  // Warzone 2126: fire does not reach a dived submarine
 		}
 
 		if (psCurr->type == OBJ_FEATURE && !((FEATURE *)psCurr)->psStats->damageable)

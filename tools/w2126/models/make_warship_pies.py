@@ -137,6 +137,35 @@ def make_carrier():
 	print("carrier: deck height 52, 2 mounts")
 
 
+def make_submarine():
+	"""Attack submarine: a long, low hull and a sail (tower) amidships; dived, only the sail shows
+	above the water (the game lowers the whole model)."""
+	hull = scale_points(open(HULL_SRC).readlines(), 0.75, 0.7, 1.9)
+	with open(os.path.join(ROOT, "prop", "prhnaval_sub.pie"), "w") as f:
+		f.writelines(hull)
+	points, polys = [], []
+	dark = (0.742, 0.802, 0.760, 0.830)
+	box(points, polys, -15, 15, 8, 20, -120, 110, dark)      # upper hull (pressure hull top)
+	box(points, polys, -9, 9, 20, 24, -100, 95, dark)        # casing
+	box(points, polys, -6, 6, 24, 52, 5, 45, dark)           # sail
+	box(points, polys, -20, 20, 40, 43, 22, 34, dark)        # sail planes
+	box(points, polys, -2, 2, 52, 66, 30, 34, dark)          # periscope
+	box(points, polys, -22, 22, 10, 13, -118, -100, dark)    # stern planes
+	lines = ["PIE 3\n", "TYPE 200\n", "TEXTURE 0 page-14-droid-hubs.png 0 0\n", "LEVELS 1\n", "LEVEL 1\n"]
+	lines.append("POINTS %d\n" % len(points))
+	lines += ["\t%d %d %d\n" % p for p in points]
+	lines.append("POLYGONS %d\n" % len(polys))
+	lines += polys
+	# Two bow torpedo mounts on the casing (x, forward, height)
+	lines.append("CONNECTORS 2\n")
+	lines.append("\t-6 80 24\n")
+	lines.append("\t6 80 24\n")
+	with open(os.path.join(ROOT, "bodies", "drnaval_sub.pie"), "w") as f:
+		f.writelines(lines)
+	print("submarine: casing height 24, sail to 52, 2 mounts")
+
+
 if __name__ == "__main__":
 	main()
 	make_carrier()
+	make_submarine()

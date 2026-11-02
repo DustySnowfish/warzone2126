@@ -43,6 +43,7 @@
 #include "visibility.h"
 #include "map.h"
 #include "droid.h"
+#include "submarine2126.h"
 #include "hci.h"
 #include "power.h"
 #include "effects.h"
@@ -3959,13 +3960,26 @@ bool checkValidWeaponForProp(const DROID_TEMPLATE *psTemplate)
 		}
 	}
 
-	// Warzone 2126: torpedo turrets only on ships
+	// Warzone 2126: torpedo turrets only on ships; submarine hulls take torpedoes only; depth charges
+	// and the sonar turret only on surface ships
 	for (int i = 0; i < psTemplate->numWeaps; ++i)
 	{
 		if (psTemplate->getWeaponStats(i)->torpedo2126 != 0 && psPropStats->propulsionType != PROPULSION_TYPE_PROPELLOR)
 		{
 			return false;
 		}
+		if (!submarine2126::turretAllowed(*psTemplate->getWeaponStats(i), psTemplate->getBodyStats(), psPropStats))
+		{
+			return false;
+		}
+	}
+	if (psTemplate->getBodyStats()->submarine2126 && psTemplate->numWeaps == 0)
+	{
+		return false; // a submarine carries torpedoes, nothing else
+	}
+	if (psTemplate->asParts[COMP_SENSOR] != 0 && !submarine2126::turretAllowed(*psTemplate->getSensorStats(), psTemplate->getBodyStats(), psPropStats))
+	{
+		return false;
 	}
 
 	//also checks that there is no other system component

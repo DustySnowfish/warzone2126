@@ -644,6 +644,8 @@ wzapi::scripting_instance* scripting_engine::loadPlayerScript(const WzString& pa
 	globalVars["mapWidth"] = gameWorld.map.width;
 	//== * ```unitLimit``` Warzone 2126: the game's unit limit per player (150, 300 or 500).
 	globalVars["unitLimit"] = game.unitLimit;
+	//== * ```submarinesAllowed``` Warzone 2126: whether the match allows submarines (true, or false when the Submarines option is off).
+	globalVars["submarinesAllowed"] = game.submarines2126 != 0 || !bMultiPlayer;
 	//== * ```mapHeight``` Height of map in tiles.
 	globalVars["mapHeight"] = gameWorld.map.height;
 	//== * ```scavengerPlayer``` Index of scavenger player. (3.2+ only)

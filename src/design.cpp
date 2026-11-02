@@ -60,6 +60,7 @@
 #include "intimage.h"
 #include "intdisplay.h"
 #include "design.h"
+#include "submarine2126.h"
 #include "component.h"
 #include "main.h"
 #include "display.h"
@@ -2352,7 +2353,8 @@ static bool intAddComponentButtons(ListTabWidget *compList, ComponentIterator co
 		{
 			auto &weapon = (WEAPON_STATS &)currStats;
 			if ((weapon.vtolAttackRuns > 0) != bVTOL
-			    || (weapon.torpedo2126 != 0 && !bShip)
+			    || ((weapon.torpedo2126 != 0 || weapon.shipTurret2126) && !bShip)
+			    || !submarine2126::turretAllowed(weapon, sCurrDesign.asParts[COMP_BODY] ? sCurrDesign.getBodyStats() : nullptr, sCurrDesign.asParts[COMP_PROPULSION] ? sCurrDesign.getPropulsionStats() : nullptr)
 			    || (weapon.weaponSize == WEAPON_SIZE_LIGHT && bodysize != SIZE_LIGHT)
 			    || (weapon.weaponSize == WEAPON_SIZE_HEAVY && bodysize == SIZE_LIGHT))
 			{
@@ -2443,6 +2445,14 @@ static bool intAddExtraSystemButtons(ListTabWidget *compList, unsigned sensorInd
 			{
 				ASSERT(false, "Too many components for the list");
 				return false;
+			}
+
+			// Warzone 2126: no system turrets on a submarine; the sonar turret only on surface ships
+			if (!submarine2126::turretAllowed(stats, sCurrDesign.asParts[COMP_BODY] ? sCurrDesign.getBodyStats() : nullptr,
+			                                  sCurrDesign.asParts[COMP_PROPULSION] ? sCurrDesign.getPropulsionStats() : nullptr)
+			    || (stats.compType == COMP_SENSOR && ((SENSOR_STATS &)stats).sonarRange2126 > 0 && !(sCurrDesign.asParts[COMP_PROPULSION] && sCurrDesign.getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR)))
+			{
+				return true;
 			}
 
 			// Set the tip and add the button
@@ -2832,6 +2842,12 @@ static void setTemplateStat(DROID_TEMPLATE *psTemplate, COMPONENT_STATS *psStats
 		{
 			clearTurret();
 		}
+		else if (stats->submarine2126 && (psTemplate->asParts[COMP_SENSOR] != 0 || psTemplate->asParts[COMP_ECM] != 0
+		         || psTemplate->asParts[COMP_CONSTRUCT] != 0 || psTemplate->asParts[COMP_REPAIRUNIT] != 0 || psTemplate->asParts[COMP_BRAIN] != 0
+		         || (psTemplate->numWeaps > 0 && !submarine2126::turretAllowed(*psTemplate->getWeaponStats(0), stats, nullptr))))
+		{
+			clearTurret(); // Warzone 2126: a submarine takes torpedoes only
+		}
 		else
 		{
 			clearWeapons(stats->weaponSlots);
@@ -3189,6 +3205,11 @@ bool intValidTemplate(DROID_TEMPLATE *psTempl, const char *newName, bool complai
 		if (psTempl->getWeaponStats(i)->torpedo2126 != 0 && psTempl->getPropulsionStats()->propulsionType != PROPULSION_TYPE_PROPELLOR)
 		{
 			debug(level, "Torpedo turret on a unit that is not a ship, not possible");
+			return false;
+		}
+		if (!submarine2126::turretAllowed(*psTempl->getWeaponStats(i), psTempl->getBodyStats(), psTempl->getPropulsionStats()))
+		{
+			debug(level, "Turret not allowed on this hull (submarine or ship-only turret)");
 			return false;
 		}
 	}
