@@ -1251,7 +1251,7 @@ void aiUpdateDroid(DROID *psDroid)
 
 	if (lookForTarget && !updateTarget)
 	{
-		BASE_OBJECT *psTarget;
+		BASE_OBJECT *psTarget = nullptr;
 		if (psDroid->droidType == DROID_SENSOR)
 		{
 			if (aiChooseSensorTarget(psDroid, &psTarget))
