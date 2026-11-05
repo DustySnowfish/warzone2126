@@ -583,6 +583,7 @@ bool loadWeaponStats(WzConfig &ini)
 		psStats->antiSub2126 = ini.value("antiSub", 0).toInt() != 0; // Warzone 2126: depth charges
 		psStats->shipTurret2126 = ini.value("shipTurret", 0).toInt() != 0;
 		psStats->subTurret2126 = ini.value("subTurret", 0).toInt() != 0;
+		psStats->anySight2126 = ini.value("anySight", 0).toInt() != 0;
 		{
 			const WzString torpedo = ini.value("torpedo", "").toWzString();
 			psStats->torpedo2126 = torpedo == "guided" ? TORPEDO_GUIDED_2126 : torpedo == "straight" ? TORPEDO_STRAIGHT_2126 : 0;
@@ -673,6 +674,9 @@ bool loadBodyStats(WzConfig &ini)
 		psStats->isNaval = ini.value("naval", 0).toInt() != 0;
 		psStats->carrierCapacity2126 = static_cast<unsigned>(std::clamp(ini.value("carrierCapacity", 0).toInt(), 0, 8)); // Warzone 2126: VTOL deck slots
 		psStats->submarine2126 = ini.value("submarine", 0).toInt() != 0; // Warzone 2126
+		psStats->surfacedMs2126 = static_cast<uint32_t>(std::max(1000, ini.value("surfacedTime", 8000).toInt()));
+		psStats->diveDepth2126 = std::max(0, ini.value("diveDepth", 22).toInt());
+		psStats->sonarSignature2126 = std::max(10, std::min(200, ini.value("sonarSignature", 100).toInt()));
 		psStats->base.thermal = ini.value("armourHeat").toInt();
 		psStats->base.armour = ini.value("armourKinetic").toInt();
 		psStats->base.power = ini.value("powerOutput").toInt();

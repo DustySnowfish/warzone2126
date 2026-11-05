@@ -109,6 +109,7 @@
 #include "loop.h"
 #include "screens/guidescreen.h"
 #include "game_world.h"
+#include "terrain_deform.h"
 #include <array>
 #include <set>
 #include "lib/framework/loading_task.h"
@@ -3533,6 +3534,13 @@ LoadingTask<> loadGame(ResourceLoadingController& controller, const GameLoadDeta
 		}
 	}
 
+	// Warzone 2126: ground heights before craters and earthworks (depth limits, churned crater look)
+	if (gameType == GTYPE_SAVE_MIDMISSION)
+	{
+		aFileName = mapFolderPath + "terraindeform2126.json";
+		terrain_deform::loadOriginalHeights(gameWorld.map, aFileName.c_str());
+	}
+
 	if ((saveGameVersion >= VERSION_15) && UserSaveGame)
 	{
 		setCurrentStructQuantity(gameWorld.objects, false);
@@ -3823,6 +3831,15 @@ bool saveGame(const char *aFileName, GAME_TYPE saveType, bool isAutoSave)
 	if (!writeScoreData(CurrentFileName))
 	{
 		debug(LOG_ERROR, "saveGame: writeScoreData(\"%s\") failed", CurrentFileName);
+		goto error;
+	}
+
+	// Warzone 2126: ground heights before craters and earthworks
+	CurrentFileName[fileExtension] = '\0';
+	strcat(CurrentFileName, "terraindeform2126.json");
+	if (!terrain_deform::saveOriginalHeights(gameWorld.map, CurrentFileName))
+	{
+		debug(LOG_ERROR, "saveGame: saveOriginalHeights(\"%s\") failed", CurrentFileName);
 		goto error;
 	}
 

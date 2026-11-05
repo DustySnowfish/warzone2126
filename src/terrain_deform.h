@@ -31,6 +31,8 @@
 
 #include "lib/framework/vector.h"
 
+#include <nlohmann/json_fwd.hpp>
+
 struct WEAPON_STATS;
 struct WorldMapState;
 struct GameWorld;
@@ -71,6 +73,15 @@ constexpr int kEarthworkModeCount = 4;
 void earthworkSlopeArea(Vector2i aTile, Vector2i bTile, Vector2i& lo, Vector2i& hi);
 
 bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode);
+
+/// Savegames: write the ground heights from before any crater or earthwork (only the tile corners
+/// that have changed), so a loaded game keeps its depth limits and churned crater look.
+bool saveOriginalHeights(const WorldMapState& map, const char* fileName);
+/// Savegames: read them back after the map has loaded (a missing file is fine: older saves).
+bool loadOriginalHeights(const WorldMapState& map, const char* fileName);
+/// The same as JSON, for the GameState savegame blob (gamestate.wz, which the loader prefers).
+nlohmann::json originalHeightsJson(const WorldMapState& map);
+void applyOriginalHeightsJson(const WorldMapState& map, const nlohmann::json& j);
 
 /// Total craters dug this game (for tests and benchmarks).
 unsigned craterCount();

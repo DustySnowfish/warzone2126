@@ -9550,6 +9550,37 @@
 		"statID": "NavalSubAttack",
 		"submarineTech": 1
 	},
+	"R-Vehicle-Body-NavalSubCoastal": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalSubCoastal",
+		"name": "Coastal Submarine",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalSub"
+		],
+		"researchPoints": 6000,
+		"researchPower": 180,
+		"resultComponents": [
+			"NavalSubCoastal"
+		],
+		"statID": "NavalSubCoastal",
+		"submarineTech": 1
+	},
+	"R-Vehicle-Body-NavalSubMissile": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Body-NavalSubMissile",
+		"name": "Missile Submarine",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalSub",
+			"R-Vehicle-Body-NavalCruiser"
+		],
+		"researchPoints": 14000,
+		"researchPower": 400,
+		"resultComponents": [
+			"NavalSubMissile"
+		],
+		"statID": "NavalSubMissile",
+		"submarineTech": 1
+	},
 	"R-Sys-Sonar": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sonar",
@@ -9594,6 +9625,22 @@
 			"Bomb-VTOL-DepthCharge"
 		],
 		"statID": "Bomb-VTOL-DepthCharge",
+		"submarineTech": 1
+	},
+	"R-Wpn-Missile-Cruise": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-Missile-Cruise",
+		"name": "Cruise Missile",
+		"requiredResearch": [
+			"R-Vehicle-Body-NavalSubMissile",
+			"R-Wpn-Missile2A-T"
+		],
+		"researchPoints": 16000,
+		"researchPower": 450,
+		"resultComponents": [
+			"Missile-Cruise"
+		],
+		"statID": "Missile-Cruise",
 		"submarineTech": 1
 	}
 }

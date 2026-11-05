@@ -52,14 +52,22 @@ bool isSubmarine(const BASE_OBJECT *psObj);
 /// A submarine that is dived now (not surfaced after firing)
 bool isSubmerged(const BASE_OBJECT *psObj);
 
-/// Call when a submarine fires: it surfaces for kSurfacedMs
+/// How long this submarine stays surfaced after firing (its hull's "surfacedTime", kSurfacedMs by
+/// default), game ms
+uint32_t surfacedMs(const DROID *psDroid);
+
+/// Percent of a sonar's range at which this object is heard (its hull's "sonarSignature"; 100 for
+/// everything else)
+int sonarSignature(const BASE_OBJECT *psObj);
+
+/// Call when a submarine fires: it surfaces for surfacedMs()
 void surfaceAfterFiring(DROID *psDroid);
 
 /// Whether a weapon can aim at and hurt a dived submarine (torpedoes, depth charges)
 bool weaponHitsSubmerged(const WEAPON_STATS &stats);
 
 /// Whether a turret may go on this hull and propulsion (null = not chosen yet). Submarine hulls take
-/// torpedoes (and "subTurret" weapons) only; depth charges, the sonar turret and torpedoes need a
+/// torpedoes (and "subTurret" weapons, such as cruise missiles, which go on submarines only) only; depth charges, the sonar turret and torpedoes need a
 /// ship (depth charges and sonar a surface ship).
 bool turretAllowed(const COMPONENT_STATS &turret, const BODY_STATS *body, const PROPULSION_STATS *propulsion);
 

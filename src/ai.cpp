@@ -234,7 +234,7 @@ static BASE_OBJECT *aiSearchSensorTargets(BASE_OBJECT *psObj, int weapon_slot, W
 			isCB = structCBSensor(psCStruct);
 			//isRD = objRadarDetector((BASE_OBJECT *)psCStruct);
 		}
-		if (!psTemp || psTemp->died || aiObjectIsProbablyDoomed(psTemp, false) || !validTarget(psObj, psTemp, 0) || aiCheckAlliances(psTemp->player, psObj->player))
+		if (!psTemp || psTemp->died || aiObjectIsProbablyDoomed(psTemp, false) || !validTarget(psObj, psTemp, weapon_slot) || aiCheckAlliances(psTemp->player, psObj->player)) // (Warzone 2126: the weapon in question, not always the first: a missile submarine's first mounts are torpedoes)
 		{
 			continue;
 		}
@@ -619,6 +619,10 @@ int aiBestNearestTarget(DROID *psDroid, BASE_OBJECT **ppsObj, int weapon_slot, i
 
 	// Range was previously 9*TILE_UNITS. Increasing this doesn't seem to help much, though. Not sure why.
 	int droidRange = std::min(aiDroidRange(psDroid, weapon_slot) + extraRange, objSensorRange(psDroid) + 6 * TILE_UNITS);
+	if (psWStats->anySight2126)
+	{
+		droidRange = aiDroidRange(psDroid, weapon_slot) + extraRange; // (Warzone 2126: cruise missiles: whatever its side sees in range)
+	}
 
 	for (BASE_OBJECT *gridObj : gridStartIterate(psDroid->pos.x, psDroid->pos.y, droidRange))
 	{
@@ -1262,8 +1266,20 @@ void aiUpdateDroid(DROID *psDroid)
 		}
 		else
 		{
-			if (IS_TIME_TO_CHECK_FOR_NEW_TARGET(psDroid)
-				&& aiChooseTarget((BASE_OBJECT *)psDroid, &psTarget, 0, true, nullptr))
+			bool found = IS_TIME_TO_CHECK_FOR_NEW_TARGET(psDroid)
+				&& aiChooseTarget((BASE_OBJECT *)psDroid, &psTarget, 0, true, nullptr);
+			// Warzone 2126: when the first weapon finds nothing, the others look too (a missile
+			// submarine's first mounts are torpedoes, which only aim at ships; its cruise missiles
+			// aim at anything)
+			for (unsigned i = 1; !found && i < psDroid->numWeaps && IS_TIME_TO_CHECK_FOR_NEW_TARGET(psDroid); ++i)
+			{
+				const WEAPON_STATS *psOther = psDroid->getWeaponStats(i);
+				if (psOther != nullptr && psOther->anySight2126)
+				{
+					found = aiChooseTarget((BASE_OBJECT *)psDroid, &psTarget, i, true, nullptr);
+				}
+			}
+			if (found)
 			{
 				if (!orderState(psDroid, DORDER_HOLD)
 					&& secondaryGetState(psDroid, DSO_HALTTYPE) == DSS_HALT_PURSUE)

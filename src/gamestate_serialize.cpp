@@ -86,6 +86,7 @@
 #include "lib/ivis_opengl/pietypes.h"  // LIGHTING_TYPE / PIELIGHT
 #include "lib/ivis_opengl/piedef.h"    // pie_GetLighting0 / pie_Lighting0
 #include "lib/ivis_opengl/piestate.h"  // pie_Get/SetFogColour
+#include "terrain_deform.h"
 
 #include <vector>
 #include <algorithm>
@@ -4486,6 +4487,8 @@ nlohmann::ordered_json gameStateToJson(ScriptScope scriptScope)
 	// self-contained: the loader builds the world on this terrain before anything references tiles,
 	// with no separate map-file data. (Off-world terrain stays nested in the mission section.)
 	j["mapTerrain"] = writeMapTerrain(gameWorld.map, true);
+	// Warzone 2126: ground heights from before craters and earthworks (only the changed corners)
+	j["terrainDeform2126"] = nlohmann::ordered_json::parse(terrain_deform::originalHeightsJson(gameWorld.map).dump());
 	j["determinismCore"] = writeDeterminismCore();
 	j["diplomacy"] = writeDiplomacy();
 	j["power"] = writePower();
@@ -4689,6 +4692,10 @@ void gameStateFromJson(const nlohmann::ordered_json &j, ScriptScope scriptScope,
 	{
 		debug(LOG_GAMESTATE_SERIAL, "post-pass: restampTerrainHeights (main world)");
 		restampTerrainHeights(gameWorld.map, j.at("mapTerrain"));
+	}
+	if (j.contains("terrainDeform2126"))
+	{
+		terrain_deform::applyOriginalHeightsJson(gameWorld.map, nlohmann::json::parse(j.at("terrainDeform2126").dump()));
 	}
 	// Re-apply the power request queues now that all structures exist: structure (re)building during
 	// the world restore mutates the per-player queue (delPowerRequest/requestPowerFor), so it must be

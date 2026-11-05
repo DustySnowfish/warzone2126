@@ -181,6 +181,15 @@ function produceVtol(factory)
 	// TODO: consider thermal bodies
 	const bodies = filterBodyStatsByUsage(BODYUSAGE.AIR, BODYCLASS.KINETIC);
 	const propulsions = getPropulsionStatsComponents(PROPULSIONUSAGE.VTOL);
+	// (Warzone 2126: a couple of anti-submarine VTOLs once enemy submarines are about; naval.js)
+	if (typeof aswVtolWanted === "function" && aswVtolWanted())
+	{
+		const asw = chooseBodyWeaponPair(bodies, [{ stat: NAVAL_ASW_VTOL_WEAPON, weight: WEIGHT.MEDIUM }]);
+		if (defined(asw) && ourBuildDroid(factory, "ASW VTOL", asw.b, propulsions, asw.w, asw.w, asw.w))
+		{
+			return true;
+		}
+	}
 	const bwPair = chooseBodyWeaponPair(bodies, chooseWeapon(true));
 
 	if (!defined(bwPair))

@@ -55,11 +55,26 @@ bool isSubmerged(const BASE_OBJECT *psObj)
 	return gameTime >= psDroid->surfacedUntil2126;
 }
 
+uint32_t surfacedMs(const DROID *psDroid)
+{
+	return isSubmarine(psDroid) ? psDroid->getBodyStats()->surfacedMs2126 : kSurfacedMs;
+}
+
+int sonarSignature(const BASE_OBJECT *psObj)
+{
+	if (psObj == nullptr || psObj->type != OBJ_DROID)
+	{
+		return 100;
+	}
+	const BODY_STATS *psBody = static_cast<const DROID *>(psObj)->getBodyStats();
+	return psBody != nullptr ? psBody->sonarSignature2126 : 100;
+}
+
 void surfaceAfterFiring(DROID *psDroid)
 {
 	if (isSubmarine(psDroid))
 	{
-		psDroid->surfacedUntil2126 = std::max(psDroid->surfacedUntil2126, gameTime + kSurfacedMs);
+		psDroid->surfacedUntil2126 = std::max(psDroid->surfacedUntil2126, gameTime + surfacedMs(psDroid));
 	}
 }
 
@@ -98,6 +113,10 @@ bool turretAllowed(const COMPONENT_STATS &turret, const BODY_STATS *body, const 
 		if (sub)
 		{
 			return w.torpedo2126 != 0 || w.subTurret2126;
+		}
+		if (w.subTurret2126)
+		{
+			return false; // cruise missiles and the like: submarines only
 		}
 		if ((w.torpedo2126 != 0 || w.shipTurret2126) && !ship)
 		{

@@ -406,6 +406,12 @@ function attackTarget(droid)
 
 function pickVtolTarget(droid)
 {
+	// (Warzone 2126: anti-submarine VTOLs go after ships they can see, submarines first)
+	if (typeof isAswVtol === "function" && isAswVtol(droid))
+	{
+		return aswVtolTarget(droid);
+	}
+
 	function uncached()
 	{
 		function canHit(obj)
@@ -479,6 +485,11 @@ function vtolReady(droid)
 }
 
 _global.vtolCanHit = function(droid, obj) {
+	// (Warzone 2126: anti-submarine VTOLs hit ships and submarines only)
+	if (droid.type === DROID && typeof isAswVtol === "function" && isAswVtol(droid))
+	{
+		return obj.type === DROID && (isNavalDroid(obj) || isSubmarine(obj));
+	}
 	if (droid.type === DROID && obj.type === DROID && isVTOL(obj))
 	{
 		return droid.canHitAir;

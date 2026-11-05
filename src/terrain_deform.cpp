@@ -25,6 +25,8 @@
 #include "terrain_deform.h"
 
 #include "lib/framework/frame.h"
+#include "lib/framework/wzconfig.h"
+#include "lib/framework/physfs_ext.h"
 #include "lib/framework/trig.h"
 #include "lib/gamelib/gtime.h"
 #include "lib/netplay/sync_debug.h"
@@ -625,6 +627,94 @@ int depthBelowOriginal(const WorldMapState& map, int x, int y)
 		return 0;
 	}
 	return std::max(0, s.originalHeights[static_cast<size_t>(x + y * s.width)] - map_TileHeight(map, x, y));
+}
+
+nlohmann::json originalHeightsJson(const WorldMapState& map)
+{
+	nlohmann::json j = nlohmann::json::object();
+	j["version"] = 1;
+	j["width"] = map.width;
+	j["height"] = map.height;
+	j["craters"] = s.craters;
+	nlohmann::json corners = nlohmann::json::array();
+	if (s.map == &map && !s.originalHeights.empty() && s.width == map.width && s.height == map.height)
+	{
+		for (int y = 0; y < map.height; ++y)
+		{
+			for (int x = 0; x < map.width; ++x)
+			{
+				const int original = s.originalHeights[static_cast<size_t>(x + y * map.width)];
+				if (original != map_TileHeight(map, x, y))
+				{
+					corners.push_back(x);
+					corners.push_back(y);
+					corners.push_back(original);
+				}
+			}
+		}
+	}
+	j["corners"] = std::move(corners); // x, y, original height, x, y, ...
+	return j;
+}
+
+void applyOriginalHeightsJson(const WorldMapState& map, const nlohmann::json& j)
+{
+	if (!j.is_object() || j.value("width", 0) != map.width || j.value("height", 0) != map.height)
+	{
+		debug(LOG_WARNING, "Terrain: saved original heights do not match the map; crater depths start from the loaded ground");
+		return;
+	}
+	s.map = nullptr; // rebuild from the loaded heights, then restore the changed corners
+	ensureOriginal(map);
+	size_t restored = 0;
+	const auto it = j.find("corners");
+	if (it != j.end() && it->is_array())
+	{
+		const nlohmann::json& corners = *it;
+		for (size_t i = 0; i + 2 < corners.size(); i += 3)
+		{
+			if (!corners[i].is_number_integer() || !corners[i + 1].is_number_integer() || !corners[i + 2].is_number_integer())
+			{
+				continue;
+			}
+			const int x = corners[i].get<int>(), y = corners[i + 1].get<int>();
+			if (x >= 0 && y >= 0 && x < map.width && y < map.height)
+			{
+				s.originalHeights[static_cast<size_t>(x + y * map.width)] = corners[i + 2].get<int>();
+				++restored;
+			}
+		}
+	}
+	s.craters = static_cast<unsigned>(std::max(0, j.value("craters", 0)));
+	++s.changes; // refresh the display data
+	debug(LOG_INFO, "Terrain: %zu dug or raised tile corners restored from the savegame", restored);
+}
+
+bool saveOriginalHeights(const WorldMapState& map, const char* fileName)
+{
+	WzConfig ini(fileName, WzConfig::ReadAndWrite);
+	const nlohmann::json j = originalHeightsJson(map);
+	for (const auto& item : j.items())
+	{
+		ini.setValue(WzString::fromUtf8(item.key()), item.value());
+	}
+	return true;
+}
+
+bool loadOriginalHeights(const WorldMapState& map, const char* fileName)
+{
+	if (!PHYSFS_exists(fileName))
+	{
+		return true; // saved before this was kept
+	}
+	WzConfig ini(fileName, WzConfig::ReadOnly);
+	nlohmann::json j = nlohmann::json::object();
+	j["width"] = ini.value("width", 0).toInt();
+	j["height"] = ini.value("height", 0).toInt();
+	j["craters"] = ini.value("craters", 0).toInt();
+	j["corners"] = ini.json("corners", nlohmann::json::array());
+	applyOriginalHeightsJson(map, j);
+	return true;
 }
 
 } // namespace terrain_deform

@@ -1265,5 +1265,63 @@
 		"submarine": 1,
 		"weaponSlots": 2,
 		"weight": 3200
+	},
+	"NavalSubCoastal": {
+		"armourHeat": 12,
+		"armourKinetic": 16,
+		"buildPoints": 550,
+		"buildPower": 140,
+		"class": "Droids",
+		"designable": 1,
+		"diveDepth": 16,
+		"hitpoints": 360,
+		"id": "NavalSubCoastal",
+		"model": "drnaval_subcoastal.pie",
+		"name": "Coastal Submarine Hull",
+		"naval": 1,
+		"powerOutput": 22000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_subcoastal.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_subcoastal.pie"
+			}
+		},
+		"size": "LIGHT",
+		"sonarSignature": 60,
+		"submarine": 1,
+		"surfacedTime": 5000,
+		"weaponSlots": 1,
+		"weight": 1800
+	},
+	"NavalSubMissile": {
+		"armourHeat": 28,
+		"armourKinetic": 36,
+		"buildPoints": 2200,
+		"buildPower": 520,
+		"class": "Droids",
+		"designable": 1,
+		"diveDepth": 30,
+		"hitpoints": 1500,
+		"id": "NavalSubMissile",
+		"model": "drnaval_submissile.pie",
+		"name": "Missile Submarine Hull",
+		"naval": 1,
+		"powerOutput": 40000,
+		"propulsionExtraModels": {
+			"NavalJet": {
+				"left": "prhnaval_submissile.pie"
+			},
+			"NavalScrew": {
+				"left": "prhnaval_submissile.pie"
+			}
+		},
+		"size": "HEAVY",
+		"sonarSignature": 125,
+		"submarine": 1,
+		"surfacedTime": 10000,
+		"weaponSlots": 4,
+		"weight": 7000
 	}
 }

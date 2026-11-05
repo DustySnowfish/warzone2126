@@ -453,6 +453,7 @@ struct WEAPON_STATS : public COMPONENT_STATS
 	bool shipsOnly2126 = false;			///< Warzone 2126: can only hit ships (torpedoes; "shipsOnly": 1)
 	bool antiSub2126 = false;			///< Warzone 2126: can hit submerged submarines (depth charges; "antiSub": 1). Torpedoes can too
 	bool subTurret2126 = false;			///< Warzone 2126: mountable on submarines ("subTurret": 1; torpedoes are anyway)
+	bool anySight2126 = false;			///< Warzone 2126: fires at anything its side can see within range, without a sensor assignment ("anySight": 1; cruise missiles)
 	bool shipTurret2126 = false;		///< Warzone 2126: only mountable on ships ("shipTurret": 1; torpedoes are anyway)
 	uint8_t torpedo2126 = 0;			///< Warzone 2126: torpedo movement: 0 none, TORPEDO_GUIDED_2126 ("torpedo": "guided"), TORPEDO_STRAIGHT_2126 ("straight")
 	bool lightWorld = false;			///< flag to indicate whether the effect lights up the world
@@ -533,6 +534,9 @@ struct BODY_STATS : public COMPONENT_STATS
 	bool             isNaval = false;	///< Warzone 2126: a ship hull ("naval": 1); only with propeller propulsion
 	unsigned carrierCapacity2126 = 0; ///< Warzone 2126: VTOLs this hull can carry (aircraft carriers)
 	bool submarine2126 = false;       ///< Warzone 2126: a submarine hull ("submarine": 1): dived unless it has just fired; torpedo turrets only
+	uint32_t surfacedMs2126 = 8000;   ///< Warzone 2126: how long a submarine stays surfaced after firing, ms ("surfacedTime")
+	int diveDepth2126 = 22;           ///< Warzone 2126: how far a dived submarine's model sits lower, world units ("diveDepth"; display only)
+	int sonarSignature2126 = 100;     ///< Warzone 2126: percent of a sonar's range at which this hull is heard ("sonarSignature"; quiet hulls less)
 
 	struct UPGRADE : COMPONENT_STATS::UPGRADE
 	{

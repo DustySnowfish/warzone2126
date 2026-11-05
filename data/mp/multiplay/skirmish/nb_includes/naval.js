@@ -37,12 +37,22 @@ const NAVAL_BATTERY_RESEARCH = "R-Defense-CoastalGun";
 const NAVAL_TUBES = ["Torpedo-Heavy", "Torpedo-Twin"]; // ship torpedo tubes, best first
 const NAVAL_TUBES_RESEARCH = ["R-Wpn-Torpedo-Twin", "R-Wpn-Torpedo-Heavy"];
 
-// Whether this AI has seen enemy ships in the last 5 minutes (torpedo tubes only hit ships)
-// Submarines (only when the match allows them): an attack submarine joins the fleet every few
-// warships once enemy ships have been seen; once an enemy submarine has been seen the AI answers
-// with sonar (a sonar frigate with the fleet, sonar buoys) and depth charges
+// Submarines (only when the match allows them): a submarine joins the fleet every few warships once
+// enemy ships have been seen, taking turns between the hulls it has (missile, attack, coastal); once
+// an enemy submarine has been seen the AI answers with sonar (a sonar frigate with the fleet, sonar
+// buoys), depth charges on its warships and anti-submarine VTOLs
 const NAVAL_SUB_BODY = "NavalSubAttack";
+const NAVAL_SUB_COASTAL_BODY = "NavalSubCoastal";
+const NAVAL_SUB_MISSILE_BODY = "NavalSubMissile";
+const NAVAL_SUB_BODIES = [NAVAL_SUB_MISSILE_BODY, NAVAL_SUB_BODY, NAVAL_SUB_COASTAL_BODY];
 const NAVAL_SUB_RESEARCH = "R-Vehicle-Body-NavalSub";
+const NAVAL_SUB_COASTAL_RESEARCH = "R-Vehicle-Body-NavalSubCoastal";
+const NAVAL_SUB_MISSILE_RESEARCH = "R-Vehicle-Body-NavalSubMissile";
+const NAVAL_CRUISE_MISSILE = "Missile-Cruise";
+const NAVAL_CRUISE_MISSILE_RESEARCH = "R-Wpn-Missile-Cruise";
+const NAVAL_ASW_VTOL_WEAPON = "Bomb-VTOL-DepthCharge";
+const NAVAL_ASW_VTOL_RESEARCH = "R-Wpn-DepthCharge-VTOL";
+const NAVAL_ASW_VTOLS = 2; // anti-submarine VTOLs kept once enemy submarines are about
 const NAVAL_SUB_EVERY = 3; // every third warship is a submarine
 const NAVAL_SONAR = "Sensor-Sonar";
 const NAVAL_SONAR_RESEARCH = "R-Sys-Sonar";
@@ -51,6 +61,7 @@ const NAVAL_DEPTH_CHARGE_RESEARCH = "R-Wpn-DepthCharge";
 const NAVAL_SONAR_SHIPS = 1;
 let enemySubsSeenAt = -1;
 let warshipsBuilt = 0;
+let subsBuilt = 0;
 
 function subsAllowed()
 {
@@ -59,7 +70,7 @@ function subsAllowed()
 
 function isSubmarine(droid)
 {
-	return droid.body === NAVAL_SUB_BODY;
+	return droid.type === DROID && NAVAL_SUB_BODIES.indexOf(droid.body) >= 0;
 }
 
 function isSonarShip(droid)
@@ -92,6 +103,60 @@ function notDone(r)
 	return defined(res) && res !== null && !res.done;
 }
 
+// Anti-submarine VTOLs (depth charges): only ships are worth attacking
+function isAswVtol(droid)
+{
+	return droid.type === DROID && isVTOL(droid) && droid.weapons.some((w) => (w.name === NAVAL_ASW_VTOL_WEAPON));
+}
+
+// Whether to build an anti-submarine VTOL next (called from produceVtol)
+function aswVtolWanted()
+{
+	return subsAllowed() && componentAvailable(NAVAL_ASW_VTOL_WEAPON) && seenEnemySubs()
+		&& enumDroid(me).filter(isAswVtol).length < NAVAL_ASW_VTOLS;
+}
+
+// A target for an anti-submarine VTOL: a visible enemy submarine (surfaced, or heard by sonar), else
+// a visible enemy ship; none, and it stays home
+function aswVtolTarget(droid)
+{
+	let ships = [];
+	enumLivingPlayers().filter(isEnemy).forEach((p) => {
+		ships = ships.concat(enumDroid(p, DROID_ANY, me).filter((d) => (isNavalDroid(d) || isSubmarine(d))));
+	});
+	if (ships.length === 0)
+	{
+		return undefined;
+	}
+	const subs = ships.filter(isSubmarine);
+	const list = subs.length > 0 ? subs : ships;
+	list.sort((a, b) => (distBetweenTwoPoints(droid.x, droid.y, a.x, a.y) - distBetweenTwoPoints(droid.x, droid.y, b.x, b.y)));
+	return list[0];
+}
+
+// The next submarine: the hulls it has take turns (missile, attack, coastal); a missile submarine
+// carries two torpedo mounts and two cruise missiles when it has them
+function nextSubmarine(tubes)
+{
+	const bodies = NAVAL_SUB_BODIES.filter((b) => (componentAvailable(b)));
+	if (bodies.length === 0)
+	{
+		return undefined;
+	}
+	const body = bodies[subsBuilt % bodies.length];
+	if (body === NAVAL_SUB_MISSILE_BODY)
+	{
+		const cm = componentAvailable(NAVAL_CRUISE_MISSILE) ? NAVAL_CRUISE_MISSILE : tubes;
+		return { body: body, weapons: [tubes, tubes, cm, cm], name: "Missile Submarine" };
+	}
+	if (body === NAVAL_SUB_COASTAL_BODY)
+	{
+		return { body: body, weapons: [tubes], name: "Coastal Submarine" };
+	}
+	return { body: body, weapons: [tubes, tubes], name: "Attack Submarine" };
+}
+
+// Whether this AI has seen enemy ships in the last 5 minutes (torpedo tubes only hit ships)
 let enemyShipsSeenAt = -1;
 let smallShipTubes = false; // single-mount hulls alternate between tubes and the usual weapon
 
@@ -283,6 +348,28 @@ _global.navalResearch = function(lab) {
 		if (pursueResearch(lab, NAVAL_SUB_RESEARCH))
 		{
 			navalDebug("researching the Attack Submarine");
+			return true;
+		}
+	}
+
+	// Later submarines: the coastal submarine, the missile submarine once it has cruisers, then
+	// cruise missiles
+	if (iHaveShips() && subsAllowed() && withChance(20) && seenEnemyShips() && componentAvailable(NAVAL_SUB_BODY))
+	{
+		const later = [NAVAL_SUB_COASTAL_RESEARCH, NAVAL_SUB_MISSILE_RESEARCH, NAVAL_CRUISE_MISSILE_RESEARCH].filter(notDone);
+		if (later.length > 0 && pursueResearch(lab, later))
+		{
+			navalDebug("researching later submarines (" + later.join(", ") + ")");
+			return true;
+		}
+	}
+
+	// Anti-submarine VTOLs once it has VTOLs and has seen an enemy submarine
+	if (subsAllowed() && withChance(35) && seenEnemySubs() && myVtols().length > 0 && notDone(NAVAL_ASW_VTOL_RESEARCH))
+	{
+		if (pursueResearch(lab, NAVAL_ASW_VTOL_RESEARCH))
+		{
+			navalDebug("researching anti-submarine VTOLs");
 			return true;
 		}
 	}
@@ -550,14 +637,17 @@ _global.checkShipProduction = function() {
 		}
 	}
 
-	// Every few warships, an attack submarine (torpedo tubes only)
+	// Every few warships, a submarine (torpedo tubes, and cruise missiles on the missile submarine)
 	const subTubes = NAVAL_TUBES.filter((w) => (componentAvailable(w)))[0];
-	if (subsAllowed() && componentAvailable(NAVAL_SUB_BODY) && defined(subTubes) && seenEnemyShips() && warshipsBuilt % NAVAL_SUB_EVERY === NAVAL_SUB_EVERY - 1)
+	const subPlan = defined(subTubes) ? nextSubmarine(subTubes) : undefined;
+	if (subsAllowed() && defined(subPlan) && seenEnemyShips() && warshipsBuilt % NAVAL_SUB_EVERY === NAVAL_SUB_EVERY - 1)
 	{
-		if (buildDroid(yards[0], "Submarine", NAVAL_SUB_BODY, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", subTubes, subTubes))
+		const w = subPlan.weapons;
+		if (buildDroid(yards[0], subPlan.name, subPlan.body, getPropulsionStatsComponents(PROPULSIONUSAGE.NAVAL), "", "", w[0], w[1], w[2], w[3]))
 		{
 			++warshipsBuilt;
-			navalDebug("building an attack submarine");
+			++subsBuilt;
+			navalDebug("building: " + subPlan.name);
 			return true;
 		}
 	}

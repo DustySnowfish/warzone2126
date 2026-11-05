@@ -546,7 +546,7 @@ static float submarineSurfaced(const DROID *psDroid)
 	{
 		return 0.f;
 	}
-	const float sinceFire = static_cast<float>(graphicsTime + submarine2126::kSurfacedMs - psDroid->surfacedUntil2126);
+	const float sinceFire = static_cast<float>(graphicsTime + submarine2126::surfacedMs(psDroid) - psDroid->surfacedUntil2126);
 	const float untilDive = static_cast<float>(psDroid->surfacedUntil2126 - graphicsTime);
 	return std::max(0.f, std::min(1.f, std::min(sinceFire / 1000.f, untilDive / 1500.f)));
 }
@@ -1236,7 +1236,7 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 	{
 		// Warzone 2126: a dived submarine runs with only its tower above the water; it rises over a
 		// second after firing and dives again as the surfaced time runs out (display only)
-		modelMatrix *= glm::translate(glm::vec3(0.f, -22.f * (1.f - submarineSurfaced(psDroid)), 0.f));
+		modelMatrix *= glm::translate(glm::vec3(0.f, -static_cast<float>(psDroid->getBodyStats()->diveDepth2126) * (1.f - submarineSurfaced(psDroid)), 0.f));
 	}
 
 	if (psDroid->timeLastHit - graphicsTime < ELEC_DAMAGE_DURATION && psDroid->lastHitWeapon == WSC_ELECTRONIC)

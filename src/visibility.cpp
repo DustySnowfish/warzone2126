@@ -508,7 +508,8 @@ int visibleObject(const BASE_OBJECT *psViewer, const BASE_OBJECT *psTarget, bool
 		const int sonar = submarine2126::sonarRange(psViewer);
 		const bool targetIsShip = psTarget->type == OBJ_DROID
 			&& ((const DROID *)psTarget)->getPropulsionStats()->propulsionType == PROPULSION_TYPE_PROPELLOR;
-		if (sonar > 0 && targetIsShip && iHypot((psTarget->pos - psViewer->pos).xy()) <= sonar)
+		// (quiet hulls, such as the coastal submarine, are heard only closer in)
+		if (sonar > 0 && targetIsShip && iHypot((psTarget->pos - psViewer->pos).xy()) <= sonar * submarine2126::sonarSignature(psTarget) / 100)
 		{
 			return UBYTE_MAX;
 		}

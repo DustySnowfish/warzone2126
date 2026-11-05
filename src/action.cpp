@@ -436,7 +436,10 @@ bool actionVisibleTarget(DROID *psDroid, BASE_OBJECT *psTarget, int weapon_slot)
 	{
 		return true;
 	}
-	return (orderState(psDroid, DORDER_FIRESUPPORT)	|| visibleObject(psDroid, psTarget, false) > UBYTE_MAX / 2)
+	// (Warzone 2126: a cruise missile ("anySight") flies at anything its side sees clearly)
+	const WEAPON_STATS *psWStats = weapon_slot >= 0 && weapon_slot < static_cast<int>(psDroid->numWeaps) ? psDroid->getWeaponStats(weapon_slot) : nullptr;
+	const bool anySight = psWStats != nullptr && psWStats->anySight2126 && psTarget->visible[psDroid->player] == UBYTE_MAX;
+	return (anySight || orderState(psDroid, DORDER_FIRESUPPORT) || visibleObject(psDroid, psTarget, false) > UBYTE_MAX / 2)
 	       && lineOfFire(psDroid, psTarget, weapon_slot, true);
 }
 
