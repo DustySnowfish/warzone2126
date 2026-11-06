@@ -1,0 +1,31 @@
+{
+	"challenge": {
+		"map": "Sk-Urban-Chaos",
+		"maxPlayers": 4,
+		"scavengers": "false",
+		"alliances": 0,
+		"powerLevel": 2,
+		"bases": 2,
+		"name": "Tileset survey Sk-Urban-Chaos",
+		"version": 2
+	},
+	"scripts": {
+		"extra": "tileset_view.js"
+	},
+	"player_0": {
+		"team": 0,
+		"position": 0
+	},
+	"player_1": {
+		"team": 1,
+		"position": 1
+	},
+	"player_2": {
+		"team": 2,
+		"position": 2
+	},
+	"player_3": {
+		"team": 3,
+		"position": 3
+	}
+}

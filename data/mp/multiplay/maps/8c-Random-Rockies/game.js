@@ -188,8 +188,10 @@ const LOOKS = {
 		blocks: [], treeDensity: 0.012, rockDensity: 0.004, wreckDensity: 0.0015,
 	},
 	urban: {
-		chain: ["u_stone", "u_gray", "u_blue", "u_brown", "u_green"],
+		chain: ["u_stone", "u_gray", "u_brown", "u_gray", "u_green"],
 		shore: "u_stone", water: "u_water", pad: "u_gray",
+		// Old concrete: patches of broken paving (car parks, yards, streets) across the rubble
+		patches: [{ ground: "u_mstone", detail: 640 }, { ground: "u_bstone", detail: 760 }],
 		trees: ["Tree1", "Tree2", "Tree3"],
 		rocks: ["Wreck0", "Wreck1", "Wreck2", "Wreck3", "BlueCar", "Chevy", "Pickup", "WreckedSuzukiJeep", "barrier"],
 		rocksAreWrecks: true, // wrecked cars and barriers: they follow the ruins setting
@@ -198,8 +200,10 @@ const LOOKS = {
 		treeDensity: 0.003, rockDensity: 0.004, wreckDensity: 0.004,
 	},
 	rockie: {
-		chain: ["r_grass", "r_brown", "r_rock", "r_snowrock", "r_snow"],
+		chain: ["r_grass", "r_grass", "r_brown", "r_rock", "r_snowrock", "r_snow"],
 		shore: "r_grass", water: "r_water", pad: "r_tiles",
+		// Early snow lying on the upper meadows
+		patches: [{ ground: "r_snowgrass", detail: 700, minBand: 2 }],
 		trees: ["Tree1", "Tree2", "Tree3"], snowTrees: ["TreeSnow1", "TreeSnow2", "TreeSnow3"],
 		rocks: ["Boulder1", "Boulder2", "Boulder3"],
 		wrecks: ["LogCabin1", "LogCabin2", "LogCabin3", "LogCabin4", "LogCabin5", "Wreck0", "Wreck2", "Wreck4", "WaterTower"],
@@ -1133,7 +1137,14 @@ const vground = new Array(AREA);
 	for (let i = 0; i < AREA; ++i) {
 		const e = clamp((hgt[i] - minH) / Math.max(1, reliefH), 0, 1);
 		const f = clamp(e * 0.6 + (nMoist[i] / 1000) * 0.55 - 0.08, 0, 0.9999);
-		vground[i] = chain[Math.floor(f * L)];
+		const band = Math.floor(f * L);
+		vground[i] = chain[band];
+		// Patches of another ground where the fine noise peaks (old paving in cities, snow on meadows)
+		for (const patch of (look.patches || [])) {
+			if (band >= (patch.minBand || 0) && band < L - 1 && nDetail[i] > patch.detail && nMoist[i] > 380) {
+				vground[i] = G[patch.ground];
+			}
+		}
 	}
 	// Water and shores
 	for (let y = 0; y < N; ++y) {
