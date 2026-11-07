@@ -28,6 +28,7 @@
 #include "lib/framework/wzconfig.h"
 #include "lib/framework/physfs_ext.h"
 #include "lib/framework/trig.h"
+#include "lib/framework/fixedpoint.h"
 #include "lib/gamelib/gtime.h"
 #include "lib/netplay/sync_debug.h"
 
@@ -83,7 +84,10 @@ struct State
 	int height = 0;
 	std::vector<int32_t> originalHeights; // tile corner heights before any crater
 	unsigned craters = 0;
-	unsigned changes = 0; // display: bumped whenever a height changes
+	unsigned changes = 0; // bumped whenever a height changes (in the synchronised game logic)
+	std::shared_ptr<const std::vector<uint8_t>> roughness; // pathfinding cost, see roughnessMap()
+	unsigned roughnessChanges = ~0u;                      // changes when roughness was built
+	uint32_t roughnessTime = 0;                           // game time when it was built
 };
 
 State s;
@@ -608,6 +612,58 @@ bool earthworkApply(GameWorld& world, Vector2i a, Vector2i b, int mode)
 		             static_cast<UDWORD>(std::min(map.width, tx1 + 3)), static_cast<UDWORD>(std::min(map.height, ty1 + 3)));
 	}
 	return finished;
+}
+
+std::shared_ptr<const std::vector<uint8_t>> roughnessMap(const WorldMapState& map)
+{
+	if (s.map != &map || s.originalHeights.empty() || s.width != map.width || s.height != map.height || s.changes == 0)
+	{
+		return nullptr;
+	}
+	// Rebuilt at most once a second of game time (the whole map is scanned; under heavy artillery
+	// the ground changes every tick). Game time is synchronised, so every player rebuilds together.
+	if (s.roughness && (s.roughnessChanges == s.changes || gameTime < s.roughnessTime + 1000))
+	{
+		return s.roughness;
+	}
+	// Units slow down by pitch: at pitch p (in sixtieths of 60 degrees) a climb runs at (1 - p) and a descent
+	// at (1 + p) of normal speed, so crossing up and down takes p^2 / (1 - p^2) longer. Priced at one and a
+	// half times that, so units take a short way round rather than churn through a crater field.
+	const int64_t maxPitch = DEG(60);
+	auto cost = std::make_shared<std::vector<uint8_t>>(static_cast<size_t>(map.width) * static_cast<size_t>(map.height), 0);
+	for (int y = 0; y + 1 < map.height; ++y)
+	{
+		for (int x = 0; x + 1 < map.width; ++x)
+		{
+			int lo = INT32_MAX, hi = INT32_MIN;
+			bool deformed = false;
+			for (int c = 0; c < 4; ++c)
+			{
+				const int cx = x + (c & 1), cy = y + (c >> 1);
+				const int h = map_TileHeight(map, cx, cy);
+				lo = std::min(lo, h);
+				hi = std::max(hi, h);
+				deformed = deformed || h != s.originalHeights[static_cast<size_t>(cx + cy * map.width)];
+			}
+			if (!deformed || hi - lo < 16)
+			{
+				continue;
+			}
+			const int64_t pitch = std::min<int64_t>(iAtan2(hi - lo, TILE_UNITS), maxPitch * 15 / 16);
+			const int64_t extra = 150 * pitch * pitch / (maxPitch * maxPitch - pitch * pitch);
+			(*cost)[static_cast<size_t>(x + y * map.width)] = static_cast<uint8_t>(std::min<int64_t>(extra, 250));
+		}
+	}
+	uint32_t checksum = 0;
+	for (const uint8_t c : *cost)
+	{
+		checksum = checksum * 31 + c;
+	}
+	syncDebug("Roughness map %u = %08X", s.changes, checksum);
+	s.roughness = cost;
+	s.roughnessChanges = s.changes;
+	s.roughnessTime = gameTime;
+	return s.roughness;
 }
 
 unsigned craterCount()

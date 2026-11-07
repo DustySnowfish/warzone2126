@@ -33,6 +33,10 @@
 
 #include <nlohmann/json_fwd.hpp>
 
+#include <cstdint>
+#include <memory>
+#include <vector>
+
 struct WEAPON_STATS;
 struct WorldMapState;
 struct GameWorld;
@@ -91,5 +95,11 @@ unsigned changeCount();
 
 /// Display: how far (world units) a tile corner is below its original height (0 if not dug).
 int depthBelowOriginal(const WorldMapState& map, int x, int y);
+
+/// Pathfinding: extra cost of crossing each tile of deformed ground (craters, earthworks), in percent
+/// of a normal step, from how steep the tile is (units slow on slopes). Tiles at their original
+/// height cost nothing extra. Null when no ground has changed. Synchronised state only (integer
+/// maths), rebuilt after the ground changes; the snapshot is safe to read from the path thread.
+std::shared_ptr<const std::vector<uint8_t>> roughnessMap(const WorldMapState& map);
 
 } // namespace terrain_deform

@@ -656,6 +656,189 @@ function buildEarthworks()
 	return false;
 }
 
+// Warzone 2126: cut ramps (the Slope tool) through cliffs where that gives the trucks and the army
+// a much shorter way: to free oil on a cliff-locked plateau, or towards the nearest enemy base when
+// the only way there is a long detour (or there is none). A ramp runs straight along x or y from a
+// tile on our side to one on the far side, 3 to 7 tiles long and 3 wide.
+let rampsCut = 0;
+let rampAttempts = 0;
+let lastRampRoute = 0;
+const rampTried = {};
+
+function rampGround(x, y)
+{
+	const t = terrainType(x, y);
+	return t !== TER_WATER && t !== TER_CLIFFFACE;
+}
+
+// Ground distance (4-way steps over everything but cliffs and water; buildings ignored) from a tile
+function groundDistances(from)
+{
+	const W = mapWidth, H = mapHeight;
+	const dist = new Int32Array(W * H).fill(-1);
+	const queue = new Int32Array(W * H);
+	let head = 0, tail = 0;
+	if (!rampGround(from.x, from.y))
+	{
+		return dist;
+	}
+	dist[from.x + from.y * W] = 0;
+	queue[tail++] = from.x + from.y * W;
+	while (head < tail)
+	{
+		const i = queue[head++];
+		const x = i % W, y = (i - x) / W, d = dist[i] + 1;
+		if (x > 1 && dist[i - 1] < 0 && rampGround(x - 1, y)) { dist[i - 1] = d; queue[tail++] = i - 1; }
+		if (x < W - 2 && dist[i + 1] < 0 && rampGround(x + 1, y)) { dist[i + 1] = d; queue[tail++] = i + 1; }
+		if (y > 1 && dist[i - W] < 0 && rampGround(x, y - 1)) { dist[i - W] = d; queue[tail++] = i - W; }
+		if (y < H - 2 && dist[i + W] < 0 && rampGround(x, y + 1)) { dist[i + W] = d; queue[tail++] = i + W; }
+	}
+	return dist;
+}
+
+function rampAreaOk(a, b)
+{
+	const alongX = a.y === b.y;
+	const x1 = Math.min(a.x, b.x) - (alongX ? 0 : 1), x2 = Math.max(a.x, b.x) + (alongX ? 0 : 1);
+	const y1 = Math.min(a.y, b.y) - (alongX ? 1 : 0), y2 = Math.max(a.y, b.y) + (alongX ? 1 : 0);
+	if (x1 < 3 || y1 < 3 || x2 > mapWidth - 4 || y2 > mapHeight - 4)
+	{
+		return false;
+	}
+	let cliffs = 0;
+	for (let x = x1; x <= x2; ++x)
+	{
+		for (let y = y1; y <= y2; ++y)
+		{
+			const t = terrainType(x, y);
+			if (t === TER_WATER)
+			{
+				return false;
+			}
+			cliffs += t === TER_CLIFFFACE ? 1 : 0;
+		}
+	}
+	return cliffs > 0 && enumArea(x1 - 1, y1 - 1, x2 + 1, y2 + 1, ALL_PLAYERS, false).filter((obj) => (
+		obj.type === STRUCTURE || (obj.type === FEATURE && obj.stattype === OIL_RESOURCE)
+	)).length === 0;
+}
+
+// The ramp that shortens the ground route from home to the target the most. Returns undefined
+// unless it saves at least 20 tiles and an eighth of the way (or the target has no route at all).
+function findRampSite(home, target)
+{
+	const W = mapWidth;
+	const fromHome = groundDistances(home);
+	const fromTarget = groundDistances(target);
+	const now = fromHome[target.x + target.y * W];
+	const candidates = [];
+	for (let y = 3; y < mapHeight - 3; ++y)
+	{
+		for (let x = 3; x < W - 3; ++x)
+		{
+			const dHome = fromHome[x + y * W];
+			if (dHome < 0 || dHome > 50)
+			{
+				continue; // only ramps the trucks can reach and finish near home
+			}
+			for (let len = 3; len <= 7; ++len)
+			{
+				[[len, 0], [-len, 0], [0, len], [0, -len]].forEach((step) => {
+					const bx = x + step[0], by = y + step[1];
+					if (bx < 3 || by < 3 || bx >= W - 3 || by >= mapHeight - 3)
+					{
+						return;
+					}
+					const dTarget = fromTarget[bx + by * W];
+					if (dTarget < 0)
+					{
+						return;
+					}
+					const via = dHome + 2 * len + dTarget; // ramps count double: they are slow to climb
+					if (now < 0 || (now - via >= 20 && via * 8 <= now * 7))
+					{
+						candidates.push({ a: { x: x, y: y }, b: { x: bx, y: by }, via: via });
+					}
+				});
+			}
+		}
+	}
+	lastRampRoute = now;
+	candidates.sort((c1, c2) => (c1.via - c2.via));
+	for (let i = 0; i < candidates.length && i < 40; ++i)
+	{
+		if (rampAreaOk(candidates[i].a, candidates[i].b))
+		{
+			return candidates[i];
+		}
+	}
+	return undefined;
+}
+
+function rampTargets(truck)
+{
+	const targets = [];
+	enumFeature(ALL_PLAYERS, "OilResource").forEach((oil) => {
+		if (terrainType(oil.x, oil.y) !== TER_WATER && !droidCanReach(truck, oil.x, oil.y) && distanceToBase(oil) < 60)
+		{
+			targets.push({ x: oil.x, y: oil.y, oil: true });
+		}
+	});
+	const enemy = nearestEnemyStart();
+	if (defined(enemy))
+	{
+		targets.push({ x: enemy.x, y: enemy.y, oil: false });
+	}
+	return targets.filter((t) => (!rampTried[t.x + "," + t.y]));
+}
+
+function cutRamps()
+{
+	if (typeof orderDroidEarthwork === "undefined" || rampsCut >= 3 || rampAttempts >= 8 || throttled(90000))
+	{
+		return false;
+	}
+	if (gameTime < 150000 || enumTrucks().length < 3)
+	{
+		return false;
+	}
+	if (enumTrucks().some((truck) => (truck.order === DORDER_EARTHWORK)))
+	{
+		return false; // one earthwork at a time
+	}
+	const trucks = getTwoFreeTrucks();
+	if (trucks.length === 0 || trucks[0].isVTOL)
+	{
+		return false;
+	}
+	// Nearest unreachable oil first, then the way to the enemy; one search per call (they are slow)
+	const targets = rampTargets(trucks[0]).sort((t1, t2) => (
+		(t1.oil === t2.oil ? 0 : (t1.oil ? -1 : 1)) || (distanceToBase(t1) - distanceToBase(t2))
+	));
+	if (targets.length === 0)
+	{
+		return false;
+	}
+	const target = targets[0];
+	const key = target.x + "," + target.y;
+	rampTried[key] = true;
+	++rampAttempts;
+	const home = { x: Math.round(trucks[0].x), y: Math.round(trucks[0].y) };
+	const site = findRampSite(home, target);
+	if (!defined(site) || !safeSpot(site.a.x, site.a.y) || !droidCanReach(trucks[0], site.a.x, site.a.y))
+	{
+		debug("NullBot " + me + ": no useful ramp towards " + key + " (ground route " + (lastRampRoute < 0 ? "none" : lastRampRoute + " tiles") + ")");
+		return false;
+	}
+	trucks.forEach((truck) => {
+		orderDroidEarthwork(truck, site.a.x, site.a.y, site.b.x, site.b.y, 3);
+	});
+	++rampsCut;
+	debug("NullBot " + me + ": cutting a ramp " + site.a.x + "," + site.a.y + " to " + site.b.x + "," + site.b.y +
+		(target.oil ? " to reach oil at " : " towards the enemy base at ") + key);
+	return true;
+}
+
 _global.buildDefenses = function() {
 	if (chooseObjectType() !== 2)
 	{
@@ -746,6 +929,7 @@ _global.checkConstruction = function() {
 
 	if (functionSeries("construction", [
 		buildEarthworks,
+		cutRamps,
 		finishStructures,
 		buildOrder,
 		buildExpand,

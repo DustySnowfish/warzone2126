@@ -44,6 +44,7 @@
 #include "lib/framework/frame.h"
 
 #include "astar.h"
+#include "terrain_deform.h"
 #include "map.h"
 #endif
 
@@ -141,6 +142,8 @@ struct PathBlockingMap
 	/// One byte per tile, each holding 0 or 1, which the checksum below relies on.
 	std::vector<uint8_t> map;
 	std::vector<uint8_t> dangerMap;	// using threatBits
+	/// Warzone 2126: extra cost per tile of cratered or dug ground, percent of a step (null: none).
+	std::shared_ptr<const std::vector<uint8_t>> roughness;
 };
 
 struct PathNonblockingArea
@@ -182,6 +185,10 @@ struct PathfindContext
 	bool isDangerous(int x, int y) const
 	{
 		return !blockingMap->dangerMap.empty() && blockingMap->dangerMap[x + y * gameWorld.map.width];
+	}
+	unsigned roughness(int x, int y) const
+	{
+		return blockingMap->roughness ? (*blockingMap->roughness)[x + y * gameWorld.map.width] : 0;
 	}
 	bool matches(const std::shared_ptr<const PathBlockingMap> &blockingMap_, const std::shared_ptr<const DynamicCostOverlay> &overlay_, PathCoord tileS_, PathNonblockingArea dstIgnore_) const
 	{
@@ -354,6 +361,11 @@ static inline void fpathNewNode(PathfindContext &context, PathCoord dest, PathCo
 				}
 			}
 		}
+	}
+	// Warzone 2126: steep cratered or dug ground costs extra, the same from every direction.
+	if (const unsigned rough = context.roughness(pos.x, pos.y))
+	{
+		overlayCost += (isDiagonal ? 198 : 140) * rough / 100;
 	}
 	node.p = pos;
 	node.dist = prevDist + fpathEstimate(prevPos, pos) * costFactor + overlayCost;
@@ -1192,7 +1204,11 @@ void fpathSetBlockingMap(PATHJOB *psJob)
 					checksumDangerMap ^= dangerMap[x + y * gameWorld.map.width] * (factor = 3 * factor + 1);
 				}
 		}
-		syncDebug("blockingMap(%d,%d,%d,%d) = %08X %08X", gameTime, psJob->propulsion, psJob->owner, psJob->moveType, checksumMap, checksumDangerMap);
+		if (type.propulsion != PROPULSION_TYPE_LIFT && type.moveType == FMT_MOVE)
+		{
+			blockMap->roughness = terrain_deform::roughnessMap(gameWorld.map); // logs its own checksum when rebuilt
+		}
+		syncDebug("blockingMap(%d,%d,%d,%d) = %08X %08X %d", gameTime, psJob->propulsion, psJob->owner, psJob->moveType, checksumMap, checksumDangerMap, blockMap->roughness ? 1 : 0);
 
 		psJob->blockingMap = blockMap;
 	}
