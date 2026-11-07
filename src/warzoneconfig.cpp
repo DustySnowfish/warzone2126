@@ -138,6 +138,7 @@ struct WARZONE_GLOBALS
 	// Warzone 2126 effects
 	int effectsDetail = 2; // 0 low, 1 medium, 2 high
 	bool physicalWrecks = true;
+	bool infantryFireteams = true;
 	bool hullSuspension = true;
 	bool hitFlash = true;
 	bool heatShimmer = true;
@@ -1041,6 +1042,16 @@ bool war_getPhysicalWrecks()
 void war_setPhysicalWrecks(bool enabled)
 {
 	warGlobs.physicalWrecks = enabled;
+}
+
+bool war_getInfantryFireteams()
+{
+	return warGlobs.infantryFireteams;
+}
+
+void war_setInfantryFireteams(bool enabled)
+{
+	warGlobs.infantryFireteams = enabled;
 }
 
 bool war_getHullSuspension()

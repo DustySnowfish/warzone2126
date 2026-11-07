@@ -822,6 +822,7 @@ bool loadConfig()
 	war_setTaa(iniGetBool("taa", war_getTaa()).value());
 	war_setEffectsDetail(iniGetInteger("effectsDetail2126", war_getEffectsDetail()).value());
 	war_setPhysicalWrecks(iniGetBool("physicalWrecks2126", war_getPhysicalWrecks()).value());
+	war_setInfantryFireteams(iniGetBool("infantryFireteams2126", war_getInfantryFireteams()).value());
 	war_setHullSuspension(iniGetBool("hullSuspension2126", war_getHullSuspension()).value());
 	war_setHitFlash(iniGetBool("hitFlash2126", war_getHitFlash()).value());
 	war_setHeatShimmer(iniGetBool("heatShimmer2126", war_getHeatShimmer()).value());
@@ -1176,6 +1177,7 @@ bool saveConfig()
 	iniSetBool("taa", war_getTaa());
 	iniSetInteger("effectsDetail2126", war_getEffectsDetail());
 	iniSetBool("physicalWrecks2126", war_getPhysicalWrecks());
+	iniSetBool("infantryFireteams2126", war_getInfantryFireteams());
 	iniSetBool("hullSuspension2126", war_getHullSuspension());
 	iniSetBool("hitFlash2126", war_getHitFlash());
 	iniSetBool("heatShimmer2126", war_getHeatShimmer());

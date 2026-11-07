@@ -295,6 +295,25 @@ std::shared_ptr<OptionsForm> makeGraphicsOptionsForm()
 		result->addOption(optionInfo, valueChanger, true);
 	}
 	{
+		auto optionInfo = OptionInfo("gfx.infantryFireteams", N_("Infantry Fireteams"), N_("Cyborgs are drawn as fireteams of two or three animated figures that walk, aim and fire, and fall apart one by one as the unit loses health. Off uses the classic single cyborg."));
+		auto valueChanger = OptionsDropdown<bool>::make(
+			[]() {
+				OptionChoices<bool> result;
+				result.choices = {
+					{ _("Off"), "", false },
+					{ _("On"), "", true },
+				};
+				result.setCurrentIdxForValue(war_getInfantryFireteams());
+				return result;
+			},
+			[](const auto& newValue) -> bool {
+				war_setInfantryFireteams(newValue);
+				return true;
+			}, true
+		);
+		result->addOption(optionInfo, valueChanger, true);
+	}
+	{
 		auto optionInfo = OptionInfo("gfx.hullSuspension", N_("Vehicle Suspension"), N_("Vehicle hulls pitch and roll as they speed up, brake and fire."));
 		auto valueChanger = OptionsDropdown<bool>::make(
 			[]() {

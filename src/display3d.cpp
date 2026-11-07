@@ -98,6 +98,7 @@
 #include "ambient2126.h"
 #include "particles.h"
 #include "wreck_physics.h"
+#include "infantry2126.h"
 #include "hit_feedback.h"
 #include "weather.h"
 #include "time_of_day.h"
@@ -1608,6 +1609,7 @@ bool init3DView()
 	// Warzone 2126: particle effects (definitions re-read each level, so they can be tuned between games)
 	particles::initialise();
 	wreck_physics::clear();
+	infantry2126::clear();
 	hit_feedback::clear();
 	weather::reset();
 	ambient::reset();
@@ -1652,6 +1654,7 @@ void shutdown3DView_FullReset()
 	environment_light::shutdown();
 	particles::shutdown();
 	wreck_physics::clear();
+	infantry2126::clear();
 	hit_feedback::clear();
 	weather::reset();
 	ambient::reset();

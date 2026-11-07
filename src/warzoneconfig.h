@@ -277,6 +277,8 @@ int war_getEffectsDetail(); // 0 low, 1 medium, 2 high: particle counts and how 
 void war_setEffectsDetail(int level);
 bool war_getPhysicalWrecks(); // destroyed vehicles and buildings break into physical pieces
 void war_setPhysicalWrecks(bool enabled);
+bool war_getInfantryFireteams(); // cyborgs drawn as fireteams of animated figures (Warzone 2126)
+void war_setInfantryFireteams(bool enabled);
 bool war_getHullSuspension(); // vehicle hulls pitch and roll with acceleration and recoil
 void war_setHullSuspension(bool enabled);
 bool war_getHitFlash(); // units and buildings flash when hit

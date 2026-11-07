@@ -35,6 +35,7 @@
 
 struct DROID;
 struct STRUCTURE;
+struct iIMDShape;
 
 namespace wreck_physics
 {
@@ -47,6 +48,10 @@ void droidDestroyed(const DROID* psDroid);
 
 /// A structure was destroyed: it collapses into the ground, throws chunks and leaves smoking rubble.
 void structureDestroyed(const STRUCTURE* psStruct);
+
+/// Warzone 2126 infantry: one loose part (a limb or plate of a fallen cyborg) placed by its model
+/// matrix in render space, thrown with a velocity (render space, units per second).
+void addLoosePart(const iIMDShape* shape, int team, const glm::mat4& model, const glm::vec3& vel, const glm::vec3& angVel);
 
 /// Advance the pieces (call once per frame).
 void update();

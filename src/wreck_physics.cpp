@@ -286,6 +286,19 @@ void droidDestroyed(const DROID* psDroid)
 	}
 }
 
+void addLoosePart(const iIMDShape* shape, int team, const glm::mat4& model, const glm::vec3& vel, const glm::vec3& angVel)
+{
+	const glm::vec3 pos(model[3]);
+	const glm::mat3 basis(model);
+	const float scale = glm::length(basis[0]);
+	const glm::quat rot = glm::quat_cast(scale > 0.f ? basis / scale : basis);
+	if (Piece* p = addShape(shape, team, pos, rot, vel, angVel, false, scale))
+	{
+		p->life = 18.f;
+		p->shade = 175;
+	}
+}
+
 void structureDestroyed(const STRUCTURE* psStruct)
 {
 	if (psStruct == nullptr || !psStruct->visibleForLocalDisplay() || psStruct->sDisplay.imd == nullptr)

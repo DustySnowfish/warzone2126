@@ -34,6 +34,7 @@
 #include "submarine2126.h"
 #include "particles.h"
 #include "wreck_physics.h"
+#include "infantry2126.h"
 #include "hit_feedback.h"
 #include "display3d.h"
 #include "lib/ivis_opengl/pielighting.h"
@@ -1262,7 +1263,18 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 		addEffect(&effectPosition, EFFECT_EXPLOSION, EXPLOSION_TYPE_PLASMA, false, nullptr, 0);
 	}
 
-	if (psDroid->visibleForLocalDisplay() == UBYTE_MAX)
+	if (psDroid->visibleForLocalDisplay() == UBYTE_MAX && infantry2126::handles(psDroid))
+	{
+		// Warzone 2126: cyborgs as a fireteam of animated figures, standing upright on the ground
+		const UDWORD colour = (psDroid->timeLastHit - graphicsTime < ELEC_DAMAGE_DURATION && psDroid->lastHitWeapon == WSC_ELECTRONIC && !gamePaused()) ? getPlayerColour(rand() % MAX_PLAYERS) : getPlayerColour(psDroid->player);
+		const glm::mat4 unitMatrix = glm::translate(glm::vec3(position)) * glm::rotate(UNDEG(rotation.y), glm::vec3(0.f, 1.f, 0.f));
+		if (infantry2126::draw(psDroid, unitMatrix, viewMatrix, colour, pal_SetBrightness(psDroid->illumination)))
+		{
+			psDroid->sDisplay.frameNumber = frameGetFrameNumber();
+		}
+		calcScreenCoords(psDroid, perspectiveViewMatrix * modelMatrix);
+	}
+	else if (psDroid->visibleForLocalDisplay() == UBYTE_MAX)
 	{
 		//ingame not button object
 		//should render 3 mounted weapons now
@@ -1288,6 +1300,12 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 
 void destroyFXDroid(DROID *psDroid, unsigned impactTime, Vector3f &velocity)
 {
+	// Warzone 2126: the figures of a cyborg fireteam break apart
+	if (infantry2126::handles(psDroid) && wreck_physics::enabled())
+	{
+		infantry2126::droidDestroyed(psDroid);
+		return;
+	}
 	// Warzone 2126: vehicles break into physical pieces instead of the classic flying bits
 	if (wreck_physics::enabled() && !psDroid->isCyborg() && !psDroid->isFlightBasedTransporter() && psDroid->droidType != DROID_PERSON)
 	{
