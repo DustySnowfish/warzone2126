@@ -118,6 +118,9 @@ struct Rig
 	int weaponJoint = -1;
 	glm::vec3 weaponPos { 0.f };
 	glm::mat4 weaponTransform { 1.f }; // rotation and scale of the weapon model at the mount
+	// Joints the engine poses directly (-1 when the rig has no such joint)
+	int pelvis = -1, chest = -1, head = -1, lUpperarm = -1, rUpperarm = -1;
+	int thigh[2] = { -1, -1 }, shin[2] = { -1, -1 }, foot[2] = { -1, -1 }; // left, right
 	Pose aim;                // the arms holding the weapon forward
 	std::vector<bool> aimed; // joints the aim pose sets
 	Clip idle, walk, run, fire;
@@ -287,6 +290,18 @@ void load()
 				}
 			}
 		}
+		rig.pelvis = jointIndex(rig, "pelvis");
+		rig.chest = jointIndex(rig, "chest");
+		rig.head = jointIndex(rig, "head");
+		rig.lUpperarm = jointIndex(rig, "l_upperarm");
+		rig.rUpperarm = jointIndex(rig, "r_upperarm");
+		for (int side = 0; side < 2; ++side)
+		{
+			const std::string prefix = side == 0 ? "l_" : "r_";
+			rig.thigh[side] = jointIndex(rig, prefix + "thigh");
+			rig.shin[side] = jointIndex(rig, prefix + "shin");
+			rig.foot[side] = jointIndex(rig, prefix + "foot");
+		}
 		auto clips = r.find("clips");
 		if (clips != r.end() && clips->is_object())
 		{
@@ -351,6 +366,11 @@ struct Figure
 	float speed = 0.f;     // smoothed, units per second
 	bool alive = true;
 	float jitter = 0.f;    // per-figure variation, 0..1
+	uint32_t hitTime = 0;  // last flinch
+	float hitStrength = 0.f;
+	float hitTwist = 0.f;
+	uint32_t lastCase = 0; // the shot whose spent case was thrown
+	float drawHeight = 0.f; // height the figure stands at (the lower foot on the ground)
 };
 
 struct Team
@@ -358,6 +378,7 @@ struct Team
 	std::array<Figure, kMaxFigures> figs;
 	int count = 0;
 	uint32_t lastTime = 0;
+	uint32_t lastHit = 0; // the unit's last hit already shown as a flinch
 	bool init = false;
 };
 
@@ -458,7 +479,95 @@ Pose figurePose(const Rig& rig, const Figure& fig, const DROID* psDroid, int ind
 			}
 		}
 	}
+	// Flinch when hit: the upper body snaps back and twists, then recovers
+	if (fig.hitTime != 0 && graphicsTime >= fig.hitTime)
+	{
+		const float since = static_cast<float>(graphicsTime - fig.hitTime) / 1000.f;
+		if (since < 0.45f)
+		{
+			const float envelope = since < 0.06f ? since / 0.06f : 1.f - (since - 0.06f) / 0.39f;
+			const float k = envelope * envelope * fig.hitStrength;
+			if (rig.chest >= 0) { pose[rig.chest].x -= 18.f * k; pose[rig.chest].y += fig.hitTwist * k; }
+			if (rig.head >= 0) { pose[rig.head].x -= 14.f * k; }
+			if (rig.pelvis >= 0) { pose[rig.pelvis].w -= 2.f * k; }
+			if (rig.lUpperarm >= 0) { pose[rig.lUpperarm].z -= 18.f * k; }
+			if (rig.rUpperarm >= 0) { pose[rig.rUpperarm].x += 12.f * k; }
+		}
+	}
 	return pose;
+}
+
+/// Feet on uneven ground: the figure stands with its lower foot on the ground, the other knee bends
+/// to reach the higher ground (two-bone leg), and both feet tilt to the slope ahead.
+void standOnGround(const Rig& rig, Figure& fig, Pose& pose)
+{
+	const glm::vec3 forward(std::sin(fig.yaw), 0.f, std::cos(fig.yaw));
+	const glm::vec3 right(forward.z, 0.f, -forward.x);
+	float footHeight[2];
+	for (int side = 0; side < 2; ++side)
+	{
+		const float across = (rig.thigh[side] >= 0 ? rig.joints[rig.thigh[side]].pos.x : (side == 0 ? -5.f : 5.f)) * rig.scale;
+		footHeight[side] = groundHeight(fig.pos + right * across + forward * (2.f * rig.scale));
+	}
+	const float base = std::min(fig.pos.y, std::min(footHeight[0], footHeight[1]));
+	fig.drawHeight = base;
+	const float ahead = groundHeight(fig.pos + forward * (10.f * rig.scale));
+	const float behind = groundHeight(fig.pos - forward * (10.f * rig.scale));
+	const float slope = glm::degrees(std::atan2(ahead - behind, 20.f * rig.scale));
+	for (int side = 0; side < 2; ++side)
+	{
+		if (rig.thigh[side] < 0 || rig.shin[side] < 0 || rig.foot[side] < 0)
+		{
+			continue;
+		}
+		const float legLength = (std::abs(rig.joints[rig.shin[side]].pos.y) + std::abs(rig.joints[rig.foot[side]].pos.y)) * rig.scale;
+		const float lift = std::min(footHeight[side] - base, legLength * 0.6f);
+		const float bend = lift > 0.5f ? glm::degrees(std::acos(1.f - lift / legLength)) : 0.f;
+		pose[rig.thigh[side]].x -= bend;
+		pose[rig.shin[side]].x += 2.f * bend;
+		pose[rig.foot[side]].x -= bend + std::max(-30.f, std::min(30.f, slope));
+	}
+}
+
+bool softGround(unsigned char type)
+{
+	return type == TER_SAND || type == TER_SANDYBRUSH || type == TER_BAKEDEARTH || type == TER_GREENMUD
+		|| type == TER_REDBRUSH || type == TER_SLUSH || type == TER_SHEETICE;
+}
+
+bool dustyGround(unsigned char type)
+{
+	return type == TER_SAND || type == TER_SANDYBRUSH || type == TER_BAKEDEARTH || type == TER_REDBRUSH || type == TER_PINKROCK;
+}
+
+/// A foot comes down: a footprint on soft ground, a puff of dust on dry ground when running
+void footfall(const Figure& fig, const glm::vec3& footPos, float running)
+{
+	const int mx = static_cast<int>(footPos.x), my = static_cast<int>(-footPos.z);
+	if (mx < 0 || my < 0 || mx >= world_coord(gameWorld.map.width) || my >= world_coord(gameWorld.map.height))
+	{
+		return;
+	}
+	const unsigned char type = terrainType(worldTile(gameWorld.map, mx, my));
+	const Vector3f at(footPos.x, -footPos.z, groundHeight(footPos) + 8.f); // as high as track marks: the ground detail is drawn above the height map
+	const Vector3f dir(std::sin(fig.yaw), -std::cos(fig.yaw), 0.f);
+	if (softGround(type))
+	{
+		particles::spawn("marks_foot", at, dir, 1.f);
+	}
+	if (running > 0.3f && dustyGround(type))
+	{
+		particles::spawn("foot_dust", at, Vector3f(0.f, 0.f, 1.f), 0.6f + 0.4f * running);
+	}
+}
+
+bool crossed(float before, float after, float mark)
+{
+	if (after >= before)
+	{
+		return before < mark && after >= mark;
+	}
+	return before < mark || after >= mark; // wrapped past 1
 }
 
 void breakApart(const Rig& rig, const Figure& fig, const Pose& pose, int team, const glm::vec3& push)
@@ -539,6 +648,38 @@ bool draw(const DROID* psDroid, const glm::mat4& unitMatrix, const glm::mat4& vi
 		}
 	}
 
+	// A new hit on the unit: one of the figures flinches (heavy weapons knock it back)
+	if (psDroid->timeLastHit != team.lastHit)
+	{
+		team.lastHit = psDroid->timeLastHit;
+		if (graphicsTime - psDroid->timeLastHit < 500)
+		{
+			int choices[kMaxFigures];
+			int n = 0;
+			for (int i = 0; i < std::min(alive, rig.figures); ++i)
+			{
+				if (team.figs[i].alive) { choices[n++] = i; }
+			}
+			if (n > 0)
+			{
+				Figure& f = team.figs[choices[std::min(n - 1, static_cast<int>(rand01() * static_cast<float>(n)))]];
+				const WEAPON_SUBCLASS w = psDroid->lastHitWeapon;
+				const bool heavy = w == WSC_CANNON || w == WSC_MORTARS || w == WSC_HOWITZERS || w == WSC_MISSILE || w == WSC_ROCKET
+					|| w == WSC_SLOWROCKET || w == WSC_SLOWMISSILE || w == WSC_GAUSS || w == WSC_BOMB || w == WSC_ENERGY;
+				f.hitTime = graphicsTime;
+				f.hitStrength = heavy ? 1.f : 0.55f;
+				f.hitTwist = (rand01() - 0.5f) * 30.f;
+				if (heavy)
+				{
+					f.pos -= glm::vec3(std::sin(f.yaw), 0.f, std::cos(f.yaw)) * (14.f * rig.scale);
+				}
+			}
+		}
+	}
+
+	const WEAPON_STATS* weaponStats = armed ? psDroid->getWeaponStats(0) : nullptr;
+	const bool throwsCases = weaponStats && (weaponStats->weaponSubClass == WSC_MGUN || weaponStats->weaponSubClass == WSC_CANNON);
+
 	bool drew = false;
 	std::vector<glm::mat4> mats;
 	for (int i = 0; i < rig.figures; ++i)
@@ -569,12 +710,13 @@ bool draw(const DROID* psDroid, const glm::mat4& unitMatrix, const glm::mat4& vi
 		// Gait: the cycle advances with the distance covered, so the feet do not slide
 		const float running = std::max(0.f, std::min(1.f, (f.speed - 130.f) / 100.f));
 		const float stride = (rig.walk.stride * (1.f - running) + rig.run.stride * running) * rig.scale;
+		const float phaseBefore = f.phase;
 		if (stride > 1.f)
 		{
 			f.phase = std::fmod(f.phase + moved / stride, 1.f);
 		}
 
-		const Pose pose = figurePose(rig, f, psDroid, i, armed);
+		Pose pose = figurePose(rig, f, psDroid, i, armed);
 		if (i >= alive)
 		{
 			// This figure falls: it breaks into its parts
@@ -584,8 +726,21 @@ bool draw(const DROID* psDroid, const glm::mat4& unitMatrix, const glm::mat4& vi
 			continue;
 		}
 
-		const glm::mat4 figureMatrix = glm::translate(f.pos) * glm::rotate(f.yaw, glm::vec3(0.f, 1.f, 0.f)) * glm::scale(glm::vec3(rig.scale));
+		standOnGround(rig, f, pose);
+		const glm::vec3 standAt(f.pos.x, f.drawHeight, f.pos.z);
+		const glm::mat4 figureMatrix = glm::translate(standAt) * glm::rotate(f.yaw, glm::vec3(0.f, 1.f, 0.f)) * glm::scale(glm::vec3(rig.scale));
 		jointMatrices(rig, pose, figureMatrix, mats);
+		// Footfalls: the left foot lands near a quarter of the cycle, the right near three quarters
+		if (moved > 0.f)
+		{
+			for (int side = 0; side < 2; ++side)
+			{
+				if (rig.foot[side] >= 0 && crossed(phaseBefore, f.phase, side == 0 ? 0.25f : 0.75f))
+				{
+					footfall(f, glm::vec3(mats[rig.foot[side]][3]), running);
+				}
+			}
+		}
 		for (size_t j = 0; j < rig.joints.size(); ++j)
 		{
 			if (rig.joints[j].shape && pie_Draw3DShape(rig.joints[j].shape, 0, colour, brightness, pie_SHADOW, 0, mats[j], viewMatrix))
@@ -622,7 +777,16 @@ bool draw(const DROID* psDroid, const glm::mat4& unitMatrix, const glm::mat4& vi
 					WEAPON w = psDroid->asWeaps[0];
 					w.lastFired += static_cast<uint32_t>(i) * 110u;
 					const iIMDBaseShape* flashBase = MUZZLE_FLASH_PIE(psDroid, 0);
-					drawMuzzleFlash(w, tool, flashBase ? flashBase->displayModel() : nullptr, brightness, pie_SHADOW, 0, hand, viewMatrix, f.pos.y - groundHeight(f.pos), static_cast<UBYTE>(colour));
+					drawMuzzleFlash(w, tool, flashBase ? flashBase->displayModel() : nullptr, brightness, pie_SHADOW, 0, hand, viewMatrix, 0, static_cast<UBYTE>(colour));
+					// A spent case thrown out to the right of the weapon
+					if (throwsCases && w.lastFired != 0 && w.lastFired != f.lastCase && graphicsTime >= w.lastFired && graphicsTime - w.lastFired < 300)
+					{
+						f.lastCase = w.lastFired;
+						const glm::vec3 at(hand[3]);
+						const glm::vec3 side = glm::normalize(glm::vec3(std::cos(f.yaw), 0.f, -std::sin(f.yaw)));
+						const glm::vec3 throwDir = glm::normalize(side + glm::vec3(0.f, 0.8f, 0.f));
+						particles::spawn("shell_case", Vector3f(at.x, -at.z, at.y), Vector3f(throwDir.x, -throwDir.z, throwDir.y), 1.f);
+					}
 				}
 			}
 		}

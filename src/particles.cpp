@@ -73,7 +73,7 @@ constexpr size_t kMaxParticles = 24000;
 constexpr size_t kMaxGroundMarks = 7000;
 constexpr size_t kMaxLights = 96;
 constexpr int kAtlasColumns = 8;
-constexpr int kAtlasRows = 4;
+constexpr int kAtlasRows = 5;
 constexpr int kCell = 64;
 constexpr float kPi = 3.14159265f;
 
@@ -105,6 +105,8 @@ const std::unordered_map<std::string, FrameSet>& frameSets()
 		{ "bird", { 26, 3 } },
 		{ "leaf", { 29, 2 } },
 		{ "scrap", { 31, 1 } },
+		{ "foot", { 32, 1 } },
+		{ "case", { 33, 1 } },
 	};
 	return sets;
 }
@@ -752,6 +754,19 @@ float frameAlpha(int frame, float u, float v)
 		const float tear = 0.06f * valueNoise(u * 9.f + 3.f, v * 9.f, 31);
 		const float inside = std::max(std::abs(u) / 0.6f, std::abs(v) / 0.42f) + tear;
 		return 1.f - smoothstep(0.92f, 1.f, inside);
+	}
+	case 32: // cyborg footprint along u (toe at +u): a broad sole with tread bars and a split heel
+	{
+		const float half = u > 0.f ? 0.42f - 0.12f * u * u : 0.34f;
+		const float inside = std::max(std::abs(u) / 0.8f, std::abs(v) / half);
+		const float tread = 0.8f + 0.2f * std::cos(u * 3.14159f * 6.f);
+		const float heelGap = (u < -0.35f && std::abs(v) < 0.07f) ? 0.3f : 1.f;
+		return (1.f - smoothstep(0.85f, 1.f, inside)) * tread * heelGap;
+	}
+	case 33: // spent case seen from the side: a short capsule along u
+	{
+		const float inside = std::max(std::abs(u) / 0.75f, std::abs(v) / 0.32f);
+		return 1.f - smoothstep(0.8f, 1.f, inside);
 	}
 	case 20: case 21: case 22: // scorch mark: dark centre, blotchy fading edge, radial streaks
 	{
