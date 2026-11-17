@@ -231,4 +231,6 @@ struct WorldObjectState;
 
 void keybindInformResourceExtractorRemoved(const STRUCTURE* psResourceExtractor, const WorldObjectState& objState);
 
+void kf_JumpJets2126(); // Warzone 2126: arm a jump for the selected walkers; the next click is the landing spot
+
 #endif // __INCLUDED_SRC_KEYBIND_H__

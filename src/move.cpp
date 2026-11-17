@@ -36,6 +36,7 @@
 #include "carrier2126.h"
 #include "submarine2126.h"
 #include "move.h"
+#include "jumpjets2126.h"
 
 #include "objects.h"
 #include "visibility.h"
@@ -1723,6 +1724,8 @@ SDWORD moveCalcDroidSpeed(DROID *psDroid)
 
 	// now offset the speed for the slope of the droid
 	pitch = angleDelta(psDroid->rot.pitch);
+	// Warzone 2126: walkers step up slopes with only part of the usual slowdown (and gain less going down)
+	pitch = pitch * psDroid->getPropulsionStats()->slopeTolerance2126 / 100;
 	speed = (maxPitch - pitch) * speed / maxPitch;
 	if (!bMultiPlayer && getCamTweakOption_heavilyDamagedPenalty() && objectBelowHealthLevel(psDroid, HEAVY_DAMAGE_LEVEL))
 	{
@@ -2597,6 +2600,11 @@ void moveUpdateDroid(DROID *psDroid)
 
 	// Warzone 2126: a VTOL parked on a carrier rides on its deck
 	if (carrier2126::holdOnDeck(psDroid))
+	{
+		return;
+	}
+	// Warzone 2126: a walker in the air on its jump jets follows its arc
+	if (jumpjets2126::update(psDroid))
 	{
 		return;
 	}

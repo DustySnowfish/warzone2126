@@ -33,7 +33,7 @@
 #pragma once
 
 #include "lib/ivis_opengl/pietypes.h"
-#include <glm/fwd.hpp>
+#include <glm/glm.hpp>
 
 struct DROID;
 
@@ -49,6 +49,16 @@ bool draw(const DROID* psDroid, const glm::mat4& unitMatrix, const glm::mat4& vi
 
 /// The unit was destroyed: the figures still standing break apart.
 void droidDestroyed(const DROID* psDroid);
+
+/// Warzone 2126 walkers (design/walkers.md): the droid is on walker legs.
+bool isWalker(const DROID* psDroid);
+
+/// Draw a walker's legs at the droid's matrix; returns the transform that lifts the body onto the
+/// hips (bobbing with the stride). button: the design screen (a still pose, no effects).
+glm::mat4 drawWalkerLegs(const DROID* psDroid, const glm::mat4& droidMatrix, const glm::mat4& viewMatrix, uint32_t colour, PIELIGHT brightness, int pieFlag, int pieFlagData, bool button);
+
+/// The walker was destroyed.
+void walkerDestroyed(const DROID* psDroid);
 
 /// Forget all fireteams (new game, load).
 void clear();

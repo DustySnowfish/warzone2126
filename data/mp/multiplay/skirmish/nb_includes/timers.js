@@ -21,6 +21,7 @@ _global.setTimers = function() {
 	setTimer("adaptCycle", 100);
 	setTimer("rebalanceGroups", 10000 + 20 * rnd());
 	setTimer("navalTick", 4000 + 10 * rnd());
+	setTimer("useJumpJets", 3000 + 10 * rnd()); // Warzone 2126 walkers
 
 	if (difficulty === EASY)
 	{

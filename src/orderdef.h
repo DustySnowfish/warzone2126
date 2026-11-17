@@ -80,6 +80,7 @@ enum DroidOrderType
 	DORDER_RECOVER,         /**< pick up an artifact. */
 	DORDER_EARTHWORK,       /**< Warzone 2126: raise (direction 0), lower (direction 1) or level (direction 2) the ground in the tile rectangle pos..pos2 (world coordinates). */
 	DORDER_RTR_SPECIFIED,   /**< return to repair at a specified repair center. */
+	DORDER_JUMP,            /**< 36 - Warzone 2126: jump jets towards pos (see jumpjets2126.h). */
 	DORDER_CIRCLE = 40,     /**< circles target location and engage. */
 	DORDER_HOLD,            /**< hold position until given next order. */
 };

@@ -942,6 +942,10 @@ bool loadPropulsionStats(WzConfig &ini)
 		ASSERT(psStats->acceleration != 0, "\"%s\".\"acceleration\" is 0", psStats->id.toUtf8().c_str());
 		psStats->deceleration = ini.value("deceleration", 800).toInt();
 		psStats->skidDeceleration = ini.value("skidDeceleration", 600).toInt();
+		psStats->walkerLegs2126 = std::max(0, ini.value("walkerLegs", 0).toInt());
+		psStats->slopeTolerance2126 = std::max(0, std::min(ini.value("slopeTolerance", 100).toInt(), 100));
+		psStats->jumpRange2126 = std::max(0, std::min(ini.value("jumpRange", 0).toInt(), 12));
+		psStats->jumpCooldown2126 = static_cast<uint32_t>(std::max(1000, ini.value("jumpCooldown", 25000).toInt()));
 		psStats->pIMD = nullptr;
 		psStats->pIMD = statsGetIMD(ini, psStats, "model");
 		for (int j = 0; j < MAX_PLAYERS; j++)

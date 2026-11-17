@@ -776,3 +776,57 @@ _global.inPanic = function() {
 
 ////////////////////////////////////////////////////////////////////////////////////////////
 })(this);
+
+// Warzone 2126 jump jets (design/walkers.md): biped walkers hop over enemy walls and defences between
+// them and their target, or up to an enemy they cannot reach on foot (a plateau or a walled-in base).
+(function(_global) {
+
+function wallBetween(droid, target)
+{
+	const dx = target.x - droid.x, dy = target.y - droid.y;
+	const steps = Math.max(1, Math.round(Math.sqrt(dx * dx + dy * dy)));
+	for (let i = 1; i < steps; ++i)
+	{
+		const x = droid.x + dx * i / steps, y = droid.y + dy * i / steps;
+		const blocking = enumRange(x, y, 1, ENEMIES, false).some((obj) => (
+			obj.type === STRUCTURE && (obj.stattype === WALL || obj.stattype === GATE || obj.stattype === DEFENSE)
+		));
+		if (blocking)
+		{
+			return true;
+		}
+	}
+	return false;
+}
+
+_global.useJumpJets = function() {
+	if (typeof DORDER_JUMP === "undefined")
+	{
+		return;
+	}
+	enumDroid(me).filter((droid) => (droid.jumpReady)).forEach((droid) => {
+		// the nearest enemy thing worth jumping at, within 10 tiles
+		const near = enumRange(droid.x, droid.y, 10, ENEMIES, false).filter((obj) => (
+			obj.type === DROID || (obj.type === STRUCTURE && obj.stattype !== WALL)
+		));
+		if (near.length === 0)
+		{
+			return;
+		}
+		near.sort((a, b) => (distance(droid, a) - distance(droid, b)));
+		const target = near[0];
+		const dist = distance(droid, target);
+		if (dist < 3)
+		{
+			return;
+		}
+		if (!droidCanReach(droid, target.x, target.y) || wallBetween(droid, target))
+		{
+			// land just short of the target (the jets carry up to 7 tiles)
+			const k = Math.max(0, (dist - 1.5) / dist);
+			orderDroidLoc(droid, DORDER_JUMP, Math.round(droid.x + (target.x - droid.x) * k), Math.round(droid.y + (target.y - droid.y) * k));
+		}
+	});
+};
+
+})(this);

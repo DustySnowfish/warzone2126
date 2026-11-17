@@ -165,6 +165,16 @@ struct DROID : public BASE_OBJECT
 	DROID_GROUP    *psGroup;
 	STRUCTURE      *psBaseStruct;                   ///< a structure that this droid might be associated with. For VTOLs this is the rearming pad
 	uint32_t        carrierId2126 = 0;              ///< Warzone 2126: the aircraft carrier this VTOL is assigned to (0 = none)
+	// Warzone 2126 jump jets (jumpjets2126.h): in the air from jumpStart2126 (0: on the ground) for
+	// jumpDuration2126 ms, from jumpFrom2126 to jumpTo2126 (world coordinates, heights at both ends);
+	// ready again at jumpReady2126
+	uint32_t        jumpStart2126 = 0;
+	uint32_t        jumpDuration2126 = 0;
+	uint32_t        jumpReady2126 = 0;
+	Vector2i        jumpFrom2126 = Vector2i(0, 0);
+	Vector2i        jumpTo2126 = Vector2i(0, 0);
+	int32_t         jumpFromZ2126 = 0;
+	int32_t         jumpToZ2126 = 0;
 	uint32_t        surfacedUntil2126 = 0;          ///< Warzone 2126: a submarine stays surfaced (visible, and open to every weapon) until this game time
 	// queued orders
 	SDWORD          listSize;                       ///< Gives the number of synchronised orders. Orders from listSize to the real end of the list may not affect game state.

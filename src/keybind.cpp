@@ -36,6 +36,7 @@
 #include "display3d.h"
 #include "edit3d.h"
 #include "keybind.h"
+#include "jumpjets2126.h"
 #include "screens/researchtreescreen.h"
 #include "mechanics.h"
 #include "lib/sound/audio.h"
@@ -2838,4 +2839,23 @@ void kf_ToggleSpecOverlays()
 void keybindShutdown()
 {
 	psOldRE.reset();
+}
+
+// Warzone 2126: J arms the jump jets of the selected walkers (pressed again, or Escape, cancels)
+void kf_JumpJets2126()
+{
+	if (jumpjets2126::targeting())
+	{
+		jumpjets2126::setTargeting(false);
+		return;
+	}
+	if (jumpjets2126::anySelectedReady(selectedPlayer))
+	{
+		jumpjets2126::setTargeting(true);
+		addConsoleMessage(_("Jump jets: click where to land"), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+	}
+	else
+	{
+		addConsoleMessage(_("No selected unit has jump jets ready"), DEFAULT_JUSTIFY, SYSTEM_MESSAGE);
+	}
 }

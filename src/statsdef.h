@@ -346,6 +346,13 @@ struct PROPULSION_STATS : public COMPONENT_STATS
 	unsigned skidDeceleration = 0;
 	unsigned deceleration = 0;
 	unsigned acceleration = 0;
+	/// Warzone 2126 walkers (design/walkers.md): number of legs (0: not a walker), how much of the
+	/// normal slope slowdown applies (percent), and the jump jets (range in tiles, cooldown in ms;
+	/// range 0: none)
+	int walkerLegs2126 = 0;
+	int slopeTolerance2126 = 100;
+	int jumpRange2126 = 0;
+	uint32_t jumpCooldown2126 = 0;
 
 	struct UPGRADE : COMPONENT_STATS::UPGRADE
 	{

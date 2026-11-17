@@ -5669,6 +5669,7 @@ foundDroid:
 		}
 		psDroid->carrierId2126 = static_cast<uint32_t>(ini.value("carrier2126", 0).toInt()); // Warzone 2126
 		psDroid->surfacedUntil2126 = static_cast<uint32_t>(ini.value("surfacedUntil2126", 0).toUInt()); // Warzone 2126
+		psDroid->jumpReady2126 = static_cast<uint32_t>(ini.value("jumpReady2126", 0).toUInt()); // Warzone 2126 jump jets cooldown
 		if (ini.contains("baseStruct/id"))
 		{
 			int tid = ini.value("baseStruct/id", -1).toInt();
@@ -6320,6 +6321,10 @@ static nlohmann::json writeDroid(const DROID *psCurr, bool onMission, int &count
 	if (psCurr->carrierId2126 != 0)
 	{
 		droidObj["carrier2126"] = psCurr->carrierId2126; // Warzone 2126
+	}
+	if (psCurr->jumpReady2126 > gameTime)
+	{
+		droidObj["jumpReady2126"] = psCurr->jumpReady2126; // Warzone 2126 jump jets cooldown (a jump in the air lands where it took off)
 	}
 	if (psCurr->surfacedUntil2126 > gameTime)
 	{

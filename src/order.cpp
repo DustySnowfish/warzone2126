@@ -34,6 +34,7 @@
 
 #include "objects.h"
 #include "order.h"
+#include "jumpjets2126.h"
 #include "terrain_deform.h"
 #include "carrier2126.h"
 #include "tunnels.h"
@@ -1744,6 +1745,11 @@ void orderDroidBase(DROID *psDroid, DROID_ORDER_DATA *psOrder)
 	case DORDER_CARRIER:
 		carrier2126::orderStart(psDroid, psOrder);
 		break;
+	case DORDER_JUMP:
+		// Warzone 2126: jump jets; the jump itself runs in moveUpdateDroid
+		jumpjets2126::start(psDroid, psOrder->pos);
+		psDroid->order = DroidOrder(DORDER_NONE);
+		break;
 	case DORDER_EARTHWORK:
 		// Warzone 2126: go to the area, then raise or lower the ground there (see orderUpdateDroid)
 		if (!psDroid->isConstructionDroid() || !worldOnMap(gameWorld.map, psOrder->pos) || !worldOnMap(gameWorld.map, psOrder->pos2))
@@ -2189,7 +2195,7 @@ bool orderState(const DROID *psDroid, DROID_ORDER order)
 /** This function returns true if the order is an acceptable order to give for a given location on the map.*/
 bool validOrderForLoc(DROID_ORDER order)
 {
-	return order == DORDER_NONE || order == DORDER_MOVE || order == DORDER_DISEMBARK ||
+	return order == DORDER_NONE || order == DORDER_MOVE || order == DORDER_DISEMBARK || order == DORDER_JUMP ||
 	       order == DORDER_TRANSPORTOUT || order == DORDER_TRANSPORTIN || order == DORDER_TRANSPORTRETURN ||
 	       order == DORDER_GUARD || order == DORDER_SCOUT || order == DORDER_PATROL || order == DORDER_CIRCLE;
 }
@@ -2855,6 +2861,13 @@ void orderSelectedLoc(uint32_t player, uint32_t x, uint32_t y, bool add)
 	//if were in build select mode ignore all other clicking
 	if (intBuildSelectMode())
 	{
+		return;
+	}
+
+	// Warzone 2126: J was pressed: this click is where the selected walkers jump to
+	if (jumpjets2126::targeting())
+	{
+		jumpjets2126::orderSelected(player, static_cast<int>(x), static_cast<int>(y));
 		return;
 	}
 
@@ -4593,6 +4606,7 @@ const char *getDroidOrderName(DROID_ORDER order)
 	case DORDER_REARM:                    return "DORDER_REARM";
 	case DORDER_RECOVER:                  return "DORDER_RECOVER";
 	case DORDER_EARTHWORK:                return "DORDER_EARTHWORK";
+	case DORDER_JUMP:                     return "DORDER_JUMP";
 	case DORDER_RTR_SPECIFIED:            return "DORDER_RTR_SPECIFIED";
 	case DORDER_CIRCLE:                   return "DORDER_CIRCLE";
 	case DORDER_HOLD:                     return "DORDER_HOLD";
@@ -4642,6 +4656,7 @@ const char *getDroidOrderKey(DROID_ORDER order)
 	case DORDER_REARM:                    return "RE";
 	case DORDER_RECOVER:                  return "RCV";
 	case DORDER_EARTHWORK:                return "E";
+	case DORDER_JUMP:                     return "J";
 	case DORDER_RTR_SPECIFIED:            return "RTR";
 	case DORDER_CIRCLE:                   return "C";
 	case DORDER_HOLD:                     return "H";

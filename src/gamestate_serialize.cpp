@@ -2095,6 +2095,10 @@ static nlohmann::ordered_json writeDroid(const DROID *d, bool onMission)
 	j["baseStruct"] = writeObjRef(d->psBaseStruct);
 	j["carrier2126"] = d->carrierId2126;
 	j["surfacedUntil2126"] = d->surfacedUntil2126;
+	if (d->jumpStart2126 != 0 || d->jumpReady2126 > gameTime)
+	{
+		j["jump2126"] = { d->jumpStart2126, d->jumpDuration2126, d->jumpReady2126, d->jumpFrom2126.x, d->jumpFrom2126.y, d->jumpTo2126.x, d->jumpTo2126.y, d->jumpFromZ2126, d->jumpToZ2126 };
+	}
 
 	nlohmann::ordered_json mv = nlohmann::ordered_json::object();
 	mv["status"] = static_cast<int>(d->sMove.Status);
@@ -2483,6 +2487,17 @@ static void readDroidPass2(const nlohmann::ordered_json &j, std::unordered_map<u
 
 	d->carrierId2126 = j.value("carrier2126", 0u);
 	d->surfacedUntil2126 = j.value("surfacedUntil2126", 0u);
+	if (j.contains("jump2126") && j["jump2126"].is_array() && j["jump2126"].size() == 9)
+	{
+		const auto& a = j["jump2126"];
+		d->jumpStart2126 = a[0].get<uint32_t>();
+		d->jumpDuration2126 = a[1].get<uint32_t>();
+		d->jumpReady2126 = a[2].get<uint32_t>();
+		d->jumpFrom2126 = Vector2i(a[3].get<int>(), a[4].get<int>());
+		d->jumpTo2126 = Vector2i(a[5].get<int>(), a[6].get<int>());
+		d->jumpFromZ2126 = a[7].get<int>();
+		d->jumpToZ2126 = a[8].get<int>();
+	}
 	BASE_OBJECT *base = readObjRef(j.at("baseStruct"));
 	if (base != nullptr && base->type == OBJ_STRUCTURE)
 	{

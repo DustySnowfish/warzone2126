@@ -9642,5 +9642,53 @@
 		],
 		"statID": "Missile-Cruise",
 		"submarineTech": 1
+	},
+	"R-Vehicle-Prop-WalkerBiped": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Prop-WalkerBiped",
+		"msgName": "RES_TRACK1",
+		"name": "Biped Walker",
+		"requiredResearch": [
+			"R-Vehicle-Prop-Halftracks",
+			"R-Vehicle-Body11"
+		],
+		"researchPoints": 3000,
+		"researchPower": 100,
+		"resultComponents": [
+			"WalkerBiped"
+		],
+		"statID": "WalkerBiped"
+	},
+	"R-Vehicle-Prop-WalkerQuad": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Prop-WalkerQuad",
+		"msgName": "RES_TRACK1",
+		"name": "Quad Walker",
+		"requiredResearch": [
+			"R-Vehicle-Prop-WalkerBiped",
+			"R-Vehicle-Prop-Tracks"
+		],
+		"researchPoints": 4800,
+		"researchPower": 150,
+		"resultComponents": [
+			"WalkerQuad"
+		],
+		"statID": "WalkerQuad"
+	},
+	"R-Vehicle-Prop-WalkerHex": {
+		"iconID": "IMAGE_RES_DROIDTECH",
+		"id": "R-Vehicle-Prop-WalkerHex",
+		"msgName": "RES_TRACK1",
+		"name": "Hex Walker",
+		"requiredResearch": [
+			"R-Vehicle-Prop-WalkerQuad",
+			"R-Vehicle-Body13"
+		],
+		"researchPoints": 7200,
+		"researchPower": 250,
+		"resultComponents": [
+			"WalkerHex"
+		],
+		"statID": "WalkerHex"
 	}
 }

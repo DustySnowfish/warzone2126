@@ -4904,6 +4904,7 @@ nlohmann::json wzapi::getUsefulConstants()
 	constants["DORDER_RTR"] = DORDER_RTR;
 	constants["DORDER_EMBARK"] = DORDER_EMBARK;
 	constants["DORDER_DISEMBARK"] = DORDER_DISEMBARK;
+	constants["DORDER_JUMP"] = DORDER_JUMP; // Warzone 2126: jump jets towards a location
 	constants["DORDER_COMMANDERSUPPORT"] = DORDER_COMMANDERSUPPORT;
 	constants["DORDER_RECYCLE"] = DORDER_RECYCLE;
 	constants["DORDER_SCOUT"] = DORDER_SCOUT;

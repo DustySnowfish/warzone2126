@@ -27,6 +27,7 @@
 #include "lib/framework/wzpaths.h"
 #include "lib/framework/fixedpoint.h"
 #include "lib/framework/string_ext.h"
+#include "jumpjets2126.h"
 #include "lib/sound/audio.h"
 #include "lib/sound/cdaudio.h"
 #include "lib/netplay/netplay.h"
@@ -1543,6 +1544,8 @@ JSValue convDroid(const DROID *psDroid, JSContext *ctx)
 	QuickJS_DefinePropertyValue(ctx, value, "canHitAir", JS_NewBool(ctx, aa), JS_PROP_ENUMERABLE);
 	QuickJS_DefinePropertyValue(ctx, value, "canHitGround", JS_NewBool(ctx, ga), JS_PROP_ENUMERABLE);
 	QuickJS_DefinePropertyValue(ctx, value, "isVTOL", JS_NewBool(ctx, psDroid->isVtol()), JS_PROP_ENUMERABLE);
+	//;; * ```jumpReady``` Warzone 2126: the droid has jump jets and they are ready (order DORDER_JUMP with a location).
+	QuickJS_DefinePropertyValue(ctx, value, "jumpReady", JS_NewBool(ctx, jumpjets2126::ready(psDroid)), JS_PROP_ENUMERABLE);
 	QuickJS_DefinePropertyValue(ctx, value, "isFlying", JS_NewBool(ctx, psDroid->isFlying()), JS_PROP_ENUMERABLE);
 	QuickJS_DefinePropertyValue(ctx, value, "droidType", JS_NewInt32(ctx, (int)type), JS_PROP_ENUMERABLE);
 	QuickJS_DefinePropertyValue(ctx, value, "experience", JS_NewFloat64(ctx, (double)psDroid->experience / 65536.0), JS_PROP_ENUMERABLE);

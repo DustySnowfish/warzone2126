@@ -119,8 +119,8 @@ static bool selCombatLand(DROID *droid)
 }
 static bool selCombatCyborg(DROID *droid)
 {
-	PROPULSION_TYPE type = droid->getPropulsionStats()->propulsionType;
-	return droid->asWeaps[0].nStat > 0 && type == PROPULSION_TYPE_LEGGED;
+	// Warzone 2126: walkers are vehicles on legged propulsion, not cyborgs
+	return droid->asWeaps[0].nStat > 0 && droid->isCyborg();
 }
 static bool selDamaged(DROID *droid)
 {

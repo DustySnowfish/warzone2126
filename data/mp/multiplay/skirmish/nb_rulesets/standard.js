@@ -176,6 +176,10 @@ const propulsionStats = [
 	{ res: "R-Vehicle-Prop-Wheels", stat: "wheeled01", usage: PROPULSIONUSAGE.GROUND },
 	{ res: "R-Vehicle-Prop-Halftracks", stat: "HalfTrack", usage: PROPULSIONUSAGE.GROUND },
 	{ res: "R-Vehicle-Prop-Tracks", stat: "tracked01", usage: PROPULSIONUSAGE.GROUND },
+	// Warzone 2126 walkers (design/walkers.md): slower but tougher than tracks; preferred once researched
+	{ res: "R-Vehicle-Prop-WalkerBiped", stat: "WalkerBiped", usage: PROPULSIONUSAGE.GROUND },
+	{ res: "R-Vehicle-Prop-WalkerQuad", stat: "WalkerQuad", usage: PROPULSIONUSAGE.GROUND },
+	{ res: "R-Vehicle-Prop-WalkerHex", stat: "WalkerHex", usage: PROPULSIONUSAGE.GROUND },
 	{ res: "R-Vehicle-Prop-Hover", stat: "hover01", usage: PROPULSIONUSAGE.HOVER },
 	{ res: "R-Vehicle-Prop-VTOL", stat: "V-Tol", usage: PROPULSIONUSAGE.VTOL },
 	{ res: "R-Vehicle-Prop-NavalScrew", stat: "NavalScrew", usage: PROPULSIONUSAGE.NAVAL },

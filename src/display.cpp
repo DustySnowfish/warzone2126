@@ -40,6 +40,7 @@
 
 #include "action.h"
 #include "display.h"
+#include "jumpjets2126.h"
 #include "terrain_deform.h"
 #include "tunnels.h"
 #include "ordersource.h"
@@ -1041,6 +1042,15 @@ void processMouseClickInput()
 		return;
 	}
 
+	// Warzone 2126 jump jets: after J, the next click on the map (either button) is where to land
+	if (jumpjets2126::targeting() && (mouseReleased(MOUSE_LMB) || mouseReleased(MOUSE_RMB)) && !OverRadar && !mouseOverConsole)
+	{
+		OrderSourceScope orderScope(pointerOrderSource());
+		dragBox3D.status = DRAG_INACTIVE;
+		jumpjets2126::orderSelected(selectedPlayer, mousePos.x, mousePos.y);
+		return;
+	}
+
 	if (mouseReleased(MOUSE_LMB) && !OverRadar && dragBox3D.status != DRAG_RELEASED && !ignoreOrder && !mouseOverConsole && !bDisplayMultiJoiningStatus)
 	{
 		OrderSourceScope orderScope(pointerOrderSource());
@@ -1289,7 +1299,12 @@ void processMouseClickInput()
 				item = MT_BLOCKING;
 			}
 
-			if (specialOrderKeyDown() && (selection == SC_DROID_TRANSPORTER || selection == SC_DROID_SUPERTRANSPORTER) &&
+			if (jumpjets2126::targeting())
+			{
+				// Warzone 2126: picking where the walkers jump to
+				wzSetCursor(CURSOR_DEST);
+			}
+			else if (specialOrderKeyDown() && (selection == SC_DROID_TRANSPORTER || selection == SC_DROID_SUPERTRANSPORTER) &&
 			    arnMPointers[item][selection] == CURSOR_MOVE && bMultiPlayer)
 			{
 				// Alt+move = disembark transporter

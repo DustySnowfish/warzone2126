@@ -169,5 +169,52 @@
 		"speed": 175,
 		"type": "Wheeled",
 		"weight": 300
+	},
+	"WalkerBiped": {
+		"buildPoints": 140,
+		"buildPower": 140,
+		"designable": 1,
+		"hitpointPctOfBody": 330,
+		"id": "WalkerBiped",
+		"jumpCooldown": 25000,
+		"jumpRange": 7,
+		"model": "prlwalk2.pie",
+		"name": "Biped Walker",
+		"slopeTolerance": 50,
+		"speed": 115,
+		"spinAngle": 90,
+		"type": "Legged",
+		"walkerLegs": 2,
+		"weight": 600
+	},
+	"WalkerQuad": {
+		"buildPoints": 175,
+		"buildPower": 175,
+		"designable": 1,
+		"hitpointPctOfBody": 400,
+		"id": "WalkerQuad",
+		"model": "prlwalk4.pie",
+		"name": "Quad Walker",
+		"slopeTolerance": 40,
+		"speed": 100,
+		"spinAngle": 90,
+		"type": "Legged",
+		"walkerLegs": 4,
+		"weight": 900
+	},
+	"WalkerHex": {
+		"buildPoints": 240,
+		"buildPower": 240,
+		"designable": 1,
+		"hitpointPctOfBody": 500,
+		"id": "WalkerHex",
+		"model": "prlwalk6.pie",
+		"name": "Hex Walker",
+		"slopeTolerance": 30,
+		"speed": 80,
+		"spinAngle": 90,
+		"type": "Legged",
+		"walkerLegs": 6,
+		"weight": 1300
 	}
 }

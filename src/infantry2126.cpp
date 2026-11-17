@@ -35,6 +35,7 @@
 #include "particles.h"
 #include "stats.h"
 #include "terrain.h"
+#include "jumpjets2126.h"
 #include "warzoneconfig.h"
 #include "wreck_physics.h"
 
@@ -124,6 +125,15 @@ struct Rig
 	Pose aim;                // the arms holding the weapon forward
 	std::vector<bool> aimed; // joints the aim pose sets
 	Clip idle, walk, run, fire;
+	// Walkers (walkers.json): legs carrying a vehicle body
+	bool walker = false;
+	float bodyHeight = 0.f;  // the body rides this high (medium body; scaled with the body size)
+	struct Leg
+	{
+		int foot = -1;
+		float plant = 0.f;   // walk cycle phase when this foot lands
+	};
+	std::vector<Leg> legs;
 };
 
 bool loaded = false;
@@ -206,14 +216,23 @@ Clip parseClip(const Rig& rig, const nlohmann::json& j)
 	return clip;
 }
 
+void loadFile(const char* path);
+
 void load()
 {
 	loaded = true;
 	rigs.clear();
+	loadFile("infantry2126/rigs.json");
+	loadFile("infantry2126/walkers.json");
+	debug(LOG_INFO, "Infantry: %u rigs loaded", static_cast<unsigned>(rigs.size()));
+}
+
+void loadFile(const char* path)
+{
 	nlohmann::json doc;
-	if (!readJson("infantry2126/rigs.json", doc))
+	if (!readJson(path, doc))
 	{
-		debug(LOG_ERROR, "Infantry: cannot read infantry2126/rigs.json");
+		debug(LOG_ERROR, "Infantry: cannot read %s", path);
 		return;
 	}
 	auto all = doc.find("rigs");
@@ -310,9 +329,20 @@ void load()
 			rig.run = parseClip(rig, clips->value("run", nlohmann::json()));
 			rig.fire = parseClip(rig, clips->value("fire", nlohmann::json()));
 		}
+		rig.walker = r.value("walker", false);
+		rig.bodyHeight = r.value("bodyHeight", 0.f);
+		for (const auto& leg : r.value("legs", nlohmann::json::array()))
+		{
+			Rig::Leg l;
+			l.foot = jointIndex(rig, leg.value("foot", ""));
+			l.plant = leg.value("plant", 0.f);
+			if (l.foot >= 0)
+			{
+				rig.legs.push_back(l);
+			}
+		}
 		rigs[it.key()] = std::move(rig);
 	}
-	debug(LOG_INFO, "Infantry: %u rigs loaded", static_cast<unsigned>(rigs.size()));
 }
 
 const Rig* rigFor(const DROID* psDroid)
@@ -541,6 +571,25 @@ bool dustyGround(unsigned char type)
 }
 
 /// A foot comes down: a footprint on soft ground, a puff of dust on dry ground when running
+void footfallAt(float yaw, const glm::vec3& footPos, float running, float scale)
+{
+	const int mx = static_cast<int>(footPos.x), my = static_cast<int>(-footPos.z);
+	if (mx < 0 || my < 0 || mx >= world_coord(gameWorld.map.width) || my >= world_coord(gameWorld.map.height))
+	{
+		return;
+	}
+	const unsigned char type = terrainType(worldTile(gameWorld.map, mx, my));
+	const Vector3f at(footPos.x, -footPos.z, groundHeight(footPos) + 8.f);
+	if (softGround(type))
+	{
+		particles::spawn("marks_foot", at, Vector3f(std::sin(yaw), -std::cos(yaw), 0.f), scale);
+	}
+	if ((running > 0.3f || scale > 1.6f) && dustyGround(type))
+	{
+		particles::spawn("foot_dust", at, Vector3f(0.f, 0.f, 1.f), 0.5f * scale);
+	}
+}
+
 void footfall(const Figure& fig, const glm::vec3& footPos, float running)
 {
 	const int mx = static_cast<int>(footPos.x), my = static_cast<int>(-footPos.z);
@@ -815,9 +864,12 @@ void droidDestroyed(const DROID* psDroid)
 	teams.erase(it);
 }
 
+void walkerClear();
+
 void clear()
 {
 	teams.clear();
+	walkerClear();
 }
 
 void reload()
@@ -825,5 +877,193 @@ void reload()
 	loaded = false;
 	rigs.clear();
 }
+
+// ---------------------------------------------------------------------------------------
+// Walkers (design/walkers.md): legs under a vehicle body
+
+namespace
+{
+
+struct WalkerState
+{
+	glm::vec3 lastPos { 0.f };
+	float lastYaw = 0.f;
+	float phase = 0.f;
+	float speed = 0.f;
+	uint32_t lastTime = 0;
+	uint32_t lastJump = 0;  // the jump already shown taking off
+	bool airborne = false;
+	bool init = false;
+};
+
+std::unordered_map<uint32_t, WalkerState> walkers;
+
+const Rig* walkerRig(const DROID* psDroid)
+{
+	const PROPULSION_STATS* prop = psDroid ? psDroid->getPropulsionStats() : nullptr;
+	if (prop == nullptr || prop->walkerLegs2126 <= 0)
+	{
+		return nullptr;
+	}
+	if (!loaded)
+	{
+		load();
+	}
+	auto it = rigs.find("walker" + std::to_string(prop->walkerLegs2126));
+	return (it == rigs.end() || !it->second.walker) ? nullptr : &it->second;
+}
+
+float walkerScale(const DROID* psDroid)
+{
+	const BODY_STATS* body = psDroid->getBodyStats();
+	switch (body ? body->size : SIZE_MEDIUM)
+	{
+	case SIZE_LIGHT: return 0.8f;
+	case SIZE_HEAVY: return 1.2f;
+	case SIZE_SUPER_HEAVY: return 1.4f;
+	default: return 1.f;
+	}
+}
+
+} // namespace
+
+bool isWalker(const DROID* psDroid)
+{
+	return walkerRig(psDroid) != nullptr;
+}
+
+glm::mat4 drawWalkerLegs(const DROID* psDroid, const glm::mat4& droidMatrix, const glm::mat4& viewMatrix, uint32_t colour, PIELIGHT brightness, int pieFlag, int pieFlagData, bool button)
+{
+	const Rig* rigPtr = walkerRig(psDroid);
+	if (rigPtr == nullptr)
+	{
+		return glm::mat4(1.f);
+	}
+	const Rig& rig = *rigPtr;
+	const float scale = walkerScale(psDroid);
+	const glm::vec3 pos(droidMatrix[3]);
+	const float yaw = std::atan2(droidMatrix[2][0], droidMatrix[2][2]);
+
+	float moving = 0.f;
+	float phase = 0.f;
+	bool airborne = false;
+	if (!button)
+	{
+		WalkerState& w = walkers[psDroid->id];
+		const float dt = w.init ? std::max(0.f, std::min(0.25f, static_cast<float>(graphicsTime - w.lastTime) / 1000.f)) : 0.f;
+		const float stride = std::max(1.f, rig.walk.stride * scale);
+		airborne = jumpjets2126::jumping(psDroid);
+		if (!w.init)
+		{
+			w = WalkerState();
+			w.init = true;
+			w.lastPos = pos;
+			w.lastYaw = yaw;
+		}
+		const float moved = airborne ? 0.f : glm::length(glm::vec2(pos.x - w.lastPos.x, pos.z - w.lastPos.z));
+		// Turning on the spot steps round too: the feet travel with the turn
+		const float turned = std::abs(std::remainder(yaw - w.lastYaw, glm::two_pi<float>())) * 30.f * scale;
+		const float travel = moved + turned;
+		const float inst = dt > 0.f ? travel / dt : 0.f;
+		w.speed += (inst - w.speed) * std::min(1.f, dt * 6.f);
+		const float before = w.phase;
+		w.phase = std::fmod(w.phase + travel / stride, 1.f);
+		moving = std::min(1.f, w.speed / 30.f);
+		// Footfalls: prints and dust, bigger for bigger walkers
+		if (travel > 0.f && dt > 0.f)
+		{
+			std::vector<glm::mat4> mats;
+			Pose pose(rig.joints.size(), glm::vec4(0.f));
+			addClip(pose, rig.walk, w.phase * rig.walk.length, 1.f, true);
+			const glm::mat4 base = glm::translate(pos) * glm::rotate(yaw, glm::vec3(0.f, 1.f, 0.f)) * glm::scale(glm::vec3(scale));
+			jointMatrices(rig, pose, base, mats);
+			for (const Rig::Leg& leg : rig.legs)
+			{
+				if (crossed(before, w.phase, leg.plant))
+				{
+					footfallAt(yaw, glm::vec3(mats[leg.foot][3]), 0.f, 1.3f * scale + 0.25f * static_cast<float>(rig.legs.size()) / 2.f);
+				}
+			}
+		}
+		// Jump jets: a blast of dust on take-off, flames under the feet in the air, a ring of dust on landing
+		if (airborne && psDroid->jumpStart2126 != w.lastJump)
+		{
+			w.lastJump = psDroid->jumpStart2126;
+			particles::spawn("collapse_dust", Vector3f(pos.x, -pos.z, groundHeight(pos)), Vector3f(0.f, 0.f, 1.f), 0.6f * scale);
+		}
+		if (w.airborne && !airborne)
+		{
+			particles::spawn("collapse_dust", Vector3f(pos.x, -pos.z, groundHeight(pos)), Vector3f(0.f, 0.f, 1.f), 0.8f * scale);
+		}
+		w.airborne = airborne;
+		phase = w.phase;
+		w.lastPos = pos;
+		w.lastYaw = yaw;
+		w.lastTime = graphicsTime;
+	}
+
+	Pose pose(rig.joints.size(), glm::vec4(0.f));
+	addClip(pose, rig.idle, static_cast<float>(graphicsTime) / 1000.f, airborne ? 1.f : 1.f - moving, true);
+	if (!airborne)
+	{
+		addClip(pose, rig.walk, phase * rig.walk.length, moving, true);
+	}
+	const glm::mat4 base = droidMatrix * glm::scale(glm::vec3(scale));
+	std::vector<glm::mat4> mats;
+	jointMatrices(rig, pose, base, mats);
+	for (size_t j = 0; j < rig.joints.size(); ++j)
+	{
+		if (rig.joints[j].shape)
+		{
+			pie_Draw3DShape(rig.joints[j].shape, 0, colour, brightness, pieFlag, pieFlagData, mats[j], viewMatrix);
+		}
+	}
+	if (airborne && !button)
+	{
+		for (const Rig::Leg& leg : rig.legs)
+		{
+			const glm::vec3 foot(mats[leg.foot][3]);
+			particles::spawn("rocket_trail", Vector3f(foot.x, -foot.z, foot.y + 4.f), Vector3f(0.f, 0.f, -1.f), 0.7f * scale);
+		}
+	}
+	// The body rides on the hips, bobbing with the pelvis
+	const float bob = rig.pelvis >= 0 ? pose[rig.pelvis].w : 0.f;
+	return glm::translate(glm::vec3(0.f, (rig.bodyHeight + bob) * scale, 0.f));
+}
+
+void walkerClear()
+{
+	walkers.clear();
+}
+
+void walkerDestroyed(const DROID* psDroid)
+{
+	auto it = walkers.find(psDroid->id);
+	const Rig* rig = walkerRig(psDroid);
+	if (it != walkers.end() && rig != nullptr && wreck_physics::enabled())
+	{
+		// The legs break off and fall
+		const float scale = walkerScale(psDroid);
+		Pose pose(rig->joints.size(), glm::vec4(0.f));
+		addClip(pose, rig->walk, it->second.phase * rig->walk.length, 1.f, true);
+		std::vector<glm::mat4> mats;
+		const glm::mat4 base = glm::translate(it->second.lastPos) * glm::rotate(it->second.lastYaw, glm::vec3(0.f, 1.f, 0.f)) * glm::scale(glm::vec3(scale));
+		jointMatrices(*rig, pose, base, mats);
+		const int team = static_cast<int>(getPlayerColour(psDroid->player));
+		for (size_t j = 0; j < rig->joints.size(); ++j)
+		{
+			if (rig->joints[j].shape == nullptr)
+			{
+				continue;
+			}
+			const glm::vec3 out = glm::vec3(mats[j][3]) - it->second.lastPos;
+			const glm::vec3 vel = glm::vec3(out.x * 2.f, 60.f + rand01() * 120.f, out.z * 2.f) + glm::vec3(rand01() * 60.f - 30.f, 0.f, rand01() * 60.f - 30.f);
+			const glm::vec3 spin(rand01() * 6.f - 3.f, rand01() * 6.f - 3.f, rand01() * 6.f - 3.f);
+			wreck_physics::addLoosePart(rig->joints[j].shape, team, mats[j], vel, spin);
+		}
+	}
+	walkers.erase(psDroid->id);
+}
+
 
 } // namespace infantry2126

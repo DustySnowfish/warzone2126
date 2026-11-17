@@ -650,6 +650,13 @@ static bool displayCompObj(const DROID *psDroid, bool bButton, const glm::mat4& 
 		}
 	}
 
+	// Warzone 2126 walkers: legs under the body, and the body (with its turrets) lifted onto the hips
+	if (infantry2126::isWalker(psDroid))
+	{
+		modifiedModelMatrix = modifiedModelMatrix * infantry2126::drawWalkerLegs(psDroid, modifiedModelMatrix, viewMatrix, colour, brightness, pieFlag, iPieData, bButton);
+		didDrawSomething = true;
+	}
+
 	/* set default components transparent */
 	if (psDroid->asBits[COMP_BODY] == 0)
 	{
@@ -1300,6 +1307,11 @@ void displayComponentObject(DROID *psDroid, const glm::mat4 &viewMatrix, const g
 
 void destroyFXDroid(DROID *psDroid, unsigned impactTime, Vector3f &velocity)
 {
+	// Warzone 2126: a walker's legs break off
+	if (infantry2126::isWalker(psDroid))
+	{
+		infantry2126::walkerDestroyed(psDroid);
+	}
 	// Warzone 2126: the figures of a cyborg fireteam break apart
 	if (infantry2126::handles(psDroid) && wreck_physics::enabled())
 	{
