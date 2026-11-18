@@ -1,0 +1,23 @@
+{
+  "schema": "spriteforge-project/0.4",
+  "description": "Example 8-frame tank hull guide with separate turret asset workflow",
+  "configuration": {
+    "asset": "tank",
+    "w": 2.4,
+    "l": 3.6,
+    "h": 1.1,
+    "scale": 24,
+    "facings": 8,
+    "start": 0,
+    "order": "cw",
+    "fw": 256,
+    "fh": 256,
+    "turretOn": false,
+    "cannonOn": false,
+    "grid": true,
+    "wire": true,
+    "projection": "2to1",
+    "anchorY": 76,
+    "centre": true
+  }
+}

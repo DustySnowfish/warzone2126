@@ -1,0 +1,6 @@
+__pycache__/
+.venv/
+exports/
+spriteforge_output/
+*.glb
+*.obj

@@ -1,0 +1,22 @@
+{
+  "schema": "spriteforge-project/0.4",
+  "description": "Separate turret and gun sprite guide, 16 directions",
+  "configuration": {
+    "asset": "turret",
+    "w": 2,
+    "l": 2,
+    "h": 0.7,
+    "scale": 24,
+    "facings": 16,
+    "start": 0,
+    "order": "cw",
+    "fw": 256,
+    "fh": 256,
+    "turretOn": true,
+    "cannonOn": true,
+    "grid": true,
+    "wire": true,
+    "projection": "2to1",
+    "anchorY": 76
+  }
+}
